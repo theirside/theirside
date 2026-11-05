@@ -9,6 +9,7 @@ import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { hashToken, newToken, type SessionManager } from './session.js';
 import type { LoginThrottle } from './throttle.js';
+import type { ProxyIdentity } from './proxy-auth.js';
 import type { TwoFactor } from './two-factor.js';
 
 export const INVITE_TTL_MS = 7 * 24 * 3600_000;
@@ -280,6 +281,69 @@ export class Accounts {
     await this.storage.auth.markLogin(userId, this.clock.now());
     await this.sessions.purge();
     await this.storage.auth.purgeTokens(this.clock.now());
+  }
+
+  // ---------------------------------------------------------------- proxy sign-in
+
+  /**
+   * The account for an identity a trusted proxy vouched for. Unknown emails get an
+   * account when they have a pending invite, or with auto-create on; otherwise 403.
+   */
+  async proxyUser(id: ProxyIdentity, autoCreate: boolean): Promise<UserRecord> {
+    const now = this.clock.now();
+    const existing = await this.storage.auth.findUserByEmail(id.email);
+    if (existing) {
+      if (existing.authSource === 'system')
+        throw new HttpProblem(403, 'no_account', 'This identity cannot sign in.');
+      if (!existing.lastLoginAt || now.getTime() - existing.lastLoginAt.getTime() > 3600_000)
+        await this.storage.auth.markLogin(existing.id, now);
+      return existing;
+    }
+    const invite = await this.storage.auth.findInviteByEmail(id.email, now);
+    if (!invite && !autoCreate)
+      throw new HttpProblem(
+        403,
+        'no_account',
+        `${id.email} has no Theirside account. Ask a Theirside user to invite you.`,
+      );
+    try {
+      await this.storage.transaction(async (tx) => {
+        let orgId = invite && (await tx.auth.useToken(invite.id, now)) ? invite.orgId : undefined;
+        if (!orgId && !autoCreate)
+          throw new HttpProblem(409, 'link_used', 'The invite was just used. Reload the page.');
+        orgId ??= (await tx.config.listOrgs())[0]?.id ?? (await this.createOrg(tx));
+        const first = (await tx.auth.countSignInUsers()) === 0;
+        const userId = newId('usr');
+        await tx.auth.createUser({
+          id: userId,
+          email: id.email,
+          name: id.name?.slice(0, 100) || id.email.split('@')[0]!,
+          authSource: 'proxy',
+          passwordHash: null,
+        });
+        await tx.config.addMembership({ orgId, userId, role: first ? 'owner' : 'admin' });
+        await tx.auth.markLogin(userId, now);
+        if (first) await tx.config.deleteMetaPrefix(SETUP_CODE_META);
+      });
+    } catch (err) {
+      // two first requests at once: the other one created the user
+      if ((err as { code?: string }).code !== '23505') throw err;
+    }
+    return (await this.storage.auth.findUserByEmail(id.email))!;
+  }
+
+  /** The default org for an install without bootstrap; concurrent callers create one. */
+  private async createOrg(tx: Storage): Promise<string> {
+    const marker = newId('org');
+    if ((await tx.config.setMetaIfAbsent('default_org_pending', marker)) !== marker)
+      throw new HttpProblem(503, 'retry', 'The account is being created. Reload the page.');
+    return (
+      await createDefaultOrg(tx, {
+        orgName: this.config.bootstrapOrgName,
+        projectName: this.config.bootstrapProjectName,
+        entitlements: this.entitlements,
+      })
+    ).orgId;
   }
 
   // ---------------------------------------------------------------- one-time links

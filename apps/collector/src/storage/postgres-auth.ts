@@ -225,6 +225,15 @@ export class PgAuthStore implements AuthStore {
     );
     return rows.map(toToken);
   }
+  async findInviteByEmail(email: string, now: Date) {
+    const { rows } = await this.db.query(
+      `SELECT * FROM auth_tokens
+        WHERE kind = 'invite' AND lower(email) = lower($1) AND used_at IS NULL AND expires_at > $2
+        ORDER BY created_at DESC LIMIT 1`,
+      [email, now],
+    );
+    return rows[0] ? toToken(rows[0]) : null;
+  }
   async deleteInvite(orgId: string, id: string) {
     const r = await this.db.query(
       `DELETE FROM auth_tokens WHERE kind = 'invite' AND org_id = $1 AND id = $2`,

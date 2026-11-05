@@ -507,6 +507,8 @@ export interface AuthStore {
   revokeUserTokens(kind: AuthTokenKind, userId: string): Promise<void>;
   revokeInvitesForEmail(orgId: string, email: string): Promise<void>;
   listInvites(orgId: string, now: Date): Promise<AuthTokenRecord[]>;
+  /** A pending (unused, unexpired) invite for this email in any org. */
+  findInviteByEmail(email: string, now: Date): Promise<AuthTokenRecord | null>;
   deleteInvite(orgId: string, id: string): Promise<boolean>;
   purgeTokens(now: Date): Promise<void>;
 

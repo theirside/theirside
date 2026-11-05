@@ -11,6 +11,7 @@ import { AlertDispatcher } from './modules/alerts/dispatcher.js';
 import { ApiKeyAuthenticator } from './modules/auth/api-keys.js';
 import { Accounts } from './modules/auth/accounts.js';
 import { SessionManager } from './modules/auth/session.js';
+import { ProxyAuth, type AlbKeyFetcher } from './modules/auth/proxy-auth.js';
 import { SecretBox } from './modules/auth/secret-box.js';
 import { LoginThrottle } from './modules/auth/throttle.js';
 import { TwoFactor } from './modules/auth/two-factor.js';
@@ -33,6 +34,8 @@ export interface AppContext {
   sessions: SessionManager;
   /** User accounts: setup, sign-in, invites, password resets. */
   accounts: Accounts;
+  /** Sign-in by a trusted reverse proxy (THEIRSIDE_AUTH_PROXY); undefined when off. */
+  proxyAuth: ProxyAuth | undefined;
   limiter: UsageLimiter;
   adapters: AdapterMap;
   alerts: AlertDispatcher;
@@ -51,6 +54,8 @@ export interface ContextOverrides {
   directoryLimits?: DirectoryLimits;
   /** Account emails (invites, resets); tests capture them. */
   mailer?: Mailer;
+  /** Where ALB public keys come from (tests sign their own tokens). */
+  albKeyFetcher?: AlbKeyFetcher;
 }
 
 function loadCatalog(path: string | undefined): Catalog {
@@ -97,6 +102,9 @@ export function createContext(
     apiKeys: new ApiKeyAuthenticator(storage.config, clock),
     sessions,
     accounts,
+    proxyAuth: config.authProxy
+      ? new ProxyAuth(config.authProxy, clock, o.albKeyFetcher)
+      : undefined,
     limiter: new UsageLimiter(storage.usage, entitlements, clock),
     adapters,
     alerts: new AlertDispatcher(storage, adapters, clock, o.log),

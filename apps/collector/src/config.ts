@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { SECRET_KEY_MIN_LENGTH } from './modules/auth/secret-box.js';
 
 /**
@@ -75,6 +76,65 @@ export interface CollectorConfig {
   secretKey: string | undefined;
   /** Older keys, comma-separated: still decrypt, and secrets are re-encrypted at start. */
   secretKeyPrevious: string[];
+  /** Sign-in by a trusted proxy in front of the collector (off unless THEIRSIDE_AUTH_PROXY is set). */
+  authProxy: AuthProxyConfig | undefined;
+}
+
+export interface AuthProxyConfig {
+  /** header: an email in `header`; alb: AWS ALB's signed x-amzn-oidc-data JWT. */
+  mode: 'header' | 'alb';
+  /** Addresses/CIDRs of the proxies; the header is ignored from any other peer. */
+  trustedIps: string[];
+  /** header mode: lower-case header name. */
+  header: string;
+  /** alb mode: the load balancer's ARN (the JWT's `signer`); region and partition come from it. */
+  albArn: string | undefined;
+  /** Create an account on a first sign-in instead of requiring an invite. */
+  autoCreate: boolean;
+}
+
+const ALB_ARN_RE =
+  /^arn:(aws|aws-cn|aws-us-gov):elasticloadbalancing:([a-z0-9-]+):\d{12}:loadbalancer\/app\/[^/]+\/[0-9a-f]+$/;
+
+function cidrEntry(raw: string): string {
+  const [addr, prefix, extra] = raw.split('/');
+  const family = addr ? isIP(addr) : 0;
+  const max = family === 4 ? 32 : 128;
+  if (
+    !family ||
+    extra !== undefined ||
+    (prefix !== undefined && (!/^\d+$/.test(prefix) || Number(prefix) > max))
+  )
+    throw new Error(`THEIRSIDE_AUTH_PROXY_TRUSTED_IPS: '${raw}' is not an IP address or CIDR`);
+  return raw;
+}
+
+function authProxyConfig(env: NodeJS.ProcessEnv): AuthProxyConfig | undefined {
+  const mode = (env.THEIRSIDE_AUTH_PROXY || 'off').toLowerCase();
+  if (mode === 'off' || mode === 'false') return undefined;
+  if (mode !== 'header' && mode !== 'alb')
+    throw new Error('THEIRSIDE_AUTH_PROXY must be off, header or alb');
+  const trustedIps = (env.THEIRSIDE_AUTH_PROXY_TRUSTED_IPS ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map(cidrEntry);
+  if (trustedIps.length === 0)
+    throw new Error(
+      'THEIRSIDE_AUTH_PROXY_TRUSTED_IPS is required with THEIRSIDE_AUTH_PROXY: the addresses of the proxy (e.g. the ALB subnets)',
+    );
+  const albArn = env.THEIRSIDE_AUTH_PROXY_ALB_ARN || undefined;
+  if (mode === 'alb' && (!albArn || !ALB_ARN_RE.test(albArn)))
+    throw new Error(
+      'THEIRSIDE_AUTH_PROXY_ALB_ARN must be the ALB ARN (arn:aws:elasticloadbalancing:<region>:<account>:loadbalancer/app/<name>/<id>)',
+    );
+  return {
+    mode,
+    trustedIps,
+    header: (env.THEIRSIDE_AUTH_PROXY_HEADER || 'x-forwarded-email').toLowerCase(),
+    albArn,
+    autoCreate: bool(env, 'THEIRSIDE_AUTH_PROXY_AUTO_CREATE', false),
+  };
 }
 
 function secretKey(raw: string | undefined, name: string): string | undefined {
@@ -175,5 +235,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
       .map((k) => k.trim())
       .filter(Boolean)
       .map((k) => secretKey(k, 'THEIRSIDE_SECRET_KEY_PREVIOUS')!),
+    authProxy: authProxyConfig(env),
   };
 }

@@ -85,7 +85,8 @@ async function principalFor(
 
 /**
  * Who is calling: `Authorization: Bearer <THEIRSIDE_ADMIN_TOKEN>` (break-glass and
- * scripts) or the session cookie. Wrong admin tokens count against the address.
+ * scripts), a trusted proxy's identity header, or the session cookie. Wrong admin
+ * tokens count against the address.
  */
 export async function authenticate(
   ctx: AppContext,
@@ -100,6 +101,14 @@ export async function authenticate(
     }
     const userId = await ctx.accounts.adminTokenUser();
     return userId ? principalFor(ctx, userId, 'admin-token') : null;
+  }
+  // a trusted proxy's identity header; ignored (null) from any other peer
+  const identity = ctx.proxyAuth ? await ctx.proxyAuth.identify(req) : null;
+  if (identity) {
+    const user = await ctx.accounts.proxyUser(identity, ctx.proxyAuth!.cfg.autoCreate);
+    return principalFor(ctx, user.id, 'proxy', {
+      csrfToken: await ctx.sessions.csrfFor(`proxy:${user.id}`),
+    });
   }
   const session = await ctx.sessions.resolve(readCookie(req, SESSION_COOKIE));
   if (!session) return null;
@@ -175,6 +184,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
     setupRequired: await ctx.accounts.setupRequired(),
     emailEnabled: ctx.accounts.emailEnabled,
     adminTokenEnabled: !!ctx.config.adminToken,
+    proxy: ctx.config.authProxy?.mode ?? null,
   }));
 
   app.post('/v1/auth/setup', async (req, reply) => {

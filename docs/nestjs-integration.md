@@ -9,7 +9,7 @@ What the SDK records and what it never records: [privacy.md](privacy.md). Share 
 Tick every line before the SDK goes into a production service.
 
 - [ ] **Client OK obtained in writing** from the service owner, with [privacy.md](privacy.md) shared and reviewed (what is and isn't collected).
-- [ ] **Collector and Postgres run in the client's own account** (§8). No data leaves it; the collector's only outbound calls are the alert channels you configure.
+- [ ] **Collector and Postgres run in the client's own account** (§8). No data leaves it; the collector's only outbound calls are the alert channels and SMTP server you configure (and AWS's ALB key endpoint if you use ALB sign-in).
 - [ ] **Dashboard private** (§8, "Network exposure"): reachable only from the client's network/VPN. Only `/status/*` and `/embed.js` may be public, ideally through a separate public-paths-only instance.
 - [ ] **Real Slack and/or email test alert received**: Settings → Alert channels → **Send test alert** shows "Sent" and the message arrived where on-call will see it.
 - [ ] **SDK `debug` off** (`debug: false` or unset) in production.

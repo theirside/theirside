@@ -6,7 +6,7 @@ This is the customer-facing statement of exactly what Theirside collects. It mus
 
 - The SDK records **metadata about outgoing calls to third-party APIs**: by default every external host the app calls (auto-discovery), never loopback, private networks, cloud metadata, internal names, telemetry endpoints or hosts you mark internal; with `autoDiscover: false`, only the providers you list. No request or response bodies, no query strings, no headers, no raw paths.
 - Paths are stored only as **templates** with identifiers removed (`/v2/cards/:id/activate`). Anything that could be a card number (12+ digits in one path segment) is always removed.
-- The self-hosted collector runs in your infrastructure and stores data in your own Postgres. It makes no outbound calls except to the alert channels you configure.
+- The self-hosted collector runs in your infrastructure and stores data in your own Postgres. It makes no outbound calls except to the alert channels and the SMTP server you configure (alerts, invites, password-reset emails), and, only with `THEIRSIDE_AUTH_PROXY=alb`, to AWS's public-key endpoint for ALB sign-in tokens.
 
 ## What the SDK sends, per call
 
