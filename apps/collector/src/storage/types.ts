@@ -515,14 +515,16 @@ export interface AuthStore {
   getThrottle(keys: string[]): Promise<Map<string, ThrottleState>>;
   /**
    * Count a failure for `key` in a window of `windowMs`; at `limit` failures the key
-   * is locked for `lockMs`. Atomic across replicas. Returns the new state.
+   * is locked for `lockMs`, doubled for each failure after that up to `maxLockMs`
+   * (default `lockMs`). Atomic across replicas. Returns the new state.
    */
   recordFailure(
     key: string,
     now: Date,
-    opts: { windowMs: number; limit: number; lockMs: number },
+    opts: { windowMs: number; limit: number; lockMs: number; maxLockMs?: number },
   ): Promise<ThrottleState>;
   clearThrottle(key: string): Promise<void>;
+  clearThrottlePrefix(prefix: string): Promise<void>;
   /** Drop counts whose window ended before `before` and that aren't locked any more. */
   purgeThrottle(now: Date, before: Date): Promise<void>;
 

@@ -312,21 +312,51 @@ describe('brute-force limits', () => {
   });
   afterAll(async () => t.close());
 
-  it('locks an account for 15 minutes after 5 failures, even for the right password', async () => {
+  /** Status and Retry-After of a sign-in. */
+  const attempt = async (b: Browser, email: string, password: string) => {
+    const res = await b.login(email, password);
+    return { status: res.statusCode, retryAfter: Number(res.headers['retry-after'] ?? 0) };
+  };
+
+  it('delays an email at one address progressively after 5 failures, even for the right password', async () => {
     const b = new Browser(t, '198.51.100.1');
-    for (let i = 0; i < 5; i++)
-      expect((await b.login('ada@example.com', `wrong password ${i}`)).statusCode).toBe(401);
-    const locked = await b.login('ada@example.com');
-    expect(locked.statusCode).toBe(429);
-    expect(Number(locked.headers['retry-after'])).toBeGreaterThan(14 * 60);
-    expect(locked.json().error).toBe('too_many_attempts');
-    // from another address too: the lock is on the account
-    expect((await new Browser(t, '198.51.100.2').login('ada@example.com')).statusCode).toBe(429);
-    t.clock.advance(15 * 60_000 + 1000);
+    for (let i = 0; i < 4; i++)
+      expect((await attempt(b, 'ada@example.com', `wrong password ${i}`)).status).toBe(401);
+    // 5th failure: 1 s, then 2 s, 4 s… before the next attempt counts
+    const waits: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      expect((await attempt(b, 'ada@example.com', 'wrong password')).status).toBe(401);
+      const held = await attempt(b, 'ada@example.com', PASSWORD);
+      expect(held.status).toBe(429);
+      waits.push(held.retryAfter);
+      t.clock.advance(held.retryAfter * 1000);
+    }
+    expect(waits).toEqual([1, 2, 4, 8, 16, 32]);
+    const res = await b.login('ada@example.com');
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('caps the delay at 15 minutes', async () => {
+    const b = new Browser(t, '198.51.100.11');
+    let last = 0;
+    for (let i = 0; i < 20; i++) {
+      await attempt(b, 'ada@example.com', 'wrong password');
+      last = (await attempt(b, 'ada@example.com', 'wrong password')).retryAfter || last;
+      t.clock.advance(last * 1000);
+    }
+    expect(last).toBe(15 * 60);
+    t.clock.advance(1000);
     expect((await b.login('ada@example.com')).statusCode).toBe(200);
   });
 
-  it('a success clears the account count', async () => {
+  it("failures from an attacker's address never delay the user at theirs", async () => {
+    const attacker = new Browser(t, '198.51.100.2');
+    for (let i = 0; i < 29; i++) await attacker.login('ada@example.com', `guess ${i}`);
+    expect((await attempt(attacker, 'ada@example.com', PASSWORD)).status).toBe(429);
+    expect((await new Browser(t, '198.51.100.3').login('ada@example.com')).statusCode).toBe(200);
+  });
+
+  it('a success clears the count for that address', async () => {
     const b = new Browser(t, '198.51.100.3');
     for (let i = 0; i < 4; i++) await b.login('ada@example.com', `wrong password ${i}`);
     expect((await b.login('ada@example.com')).statusCode).toBe(200);
@@ -334,10 +364,20 @@ describe('brute-force limits', () => {
     expect((await b.login('ada@example.com')).statusCode).toBe(200);
   });
 
-  it('locks unknown emails the same way (no account enumeration)', async () => {
-    const b = new Browser(t, '198.51.100.4');
-    for (let i = 0; i < 5; i++) await b.login('ghost@example.com', 'whatever whatever');
-    expect((await b.login('ghost@example.com', 'whatever whatever')).statusCode).toBe(429);
+  it('answers the same for unknown emails (no account enumeration)', async () => {
+    const run = async (ip: string, email: string) => {
+      const b = new Browser(t, ip);
+      const seen = [];
+      for (let i = 0; i < 7; i++) {
+        const res = await b.login(email, 'whatever whatever');
+        seen.push([res.statusCode, res.headers['retry-after'] ?? null, res.json().error]);
+      }
+      return seen;
+    };
+    const known = await run('198.51.100.4', 'ada@example.com');
+    const unknown = await run('198.51.100.14', 'ghost@example.com');
+    expect(unknown).toEqual(known);
+    expect(known.map(([s]) => s)).toEqual([401, 401, 401, 401, 401, 429, 429]);
   });
 
   it('blocks an address after 30 failures across accounts (password spraying)', async () => {
@@ -529,12 +569,12 @@ describe('password reset', () => {
   });
   afterAll(async () => t.close());
 
-  it('admin-generated link: one use, signs the user out everywhere, lifts a lockout', async () => {
+  it('admin-generated link: one use, signs the user out everywhere, lifts sign-in delays', async () => {
     const bob = new Browser(t);
     await bob.login('bob@example.com');
-    for (let i = 0; i < 5; i++)
-      await new Browser(t, '192.0.2.9').login('bob@example.com', 'nope nope nope');
-    expect((await new Browser(t).login('bob@example.com')).statusCode).toBe(429);
+    const home = new Browser(t, '192.0.2.9');
+    for (let i = 0; i < 5; i++) await home.login('bob@example.com', 'nope nope nope');
+    expect((await home.login('bob@example.com')).statusCode).toBe(429);
 
     const link = await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, {
       sendEmail: false,
@@ -560,9 +600,7 @@ describe('password reset', () => {
     expect(res.statusCode).toBe(200);
     expect((await bob.me()).statusCode).toBe(401);
     expect((await new Browser(t).login('bob@example.com')).statusCode).toBe(401);
-    expect(
-      (await new Browser(t).login('bob@example.com', 'a brand new passphrase')).statusCode,
-    ).toBe(200);
+    expect((await home.login('bob@example.com', 'a brand new passphrase')).statusCode).toBe(200);
     const reuse = await new Browser(t).req('POST', '/v1/auth/password-reset', {
       token,
       password: PASSWORD,

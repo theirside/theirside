@@ -260,35 +260,32 @@ export class PgAuthStore implements AuthStore {
   async recordFailure(
     key: string,
     now: Date,
-    opts: { windowMs: number; limit: number; lockMs: number },
+    opts: { windowMs: number; limit: number; lockMs: number; maxLockMs?: number },
   ) {
-    // A window older than windowMs starts over; reaching the limit locks the key.
+    // A window older than windowMs starts over; at the limit the key is locked for
+    // lockMs, doubling with each further failure up to maxLockMs (default: lockMs).
     // ON CONFLICT DO UPDATE locks the row, so concurrent failures all count.
+    const lock = (n: string) =>
+      `$2::timestamptz + make_interval(secs => least($5::float8 * power(2, least(${n} - $4, 30)), $6::float8) / 1000)`;
+    const fresh = `t.window_start <= $2::timestamptz - make_interval(secs => $3::float8 / 1000)`;
+    const n = `(CASE WHEN ${fresh} THEN 1 ELSE t.failures + 1 END)`;
     const { rows } = await this.db.query(
-      `WITH p AS (
-         SELECT $2::timestamptz AS now,
-                make_interval(secs => $3::float8 / 1000) AS win,
-                make_interval(secs => $5::float8 / 1000) AS lock
-       )
-       INSERT INTO auth_throttle AS t (key, failures, window_start, locked_until)
-       SELECT $1, 1, p.now, CASE WHEN 1 >= $4 THEN p.now + p.lock END FROM p
+      `INSERT INTO auth_throttle AS t (key, failures, window_start, locked_until)
+       VALUES ($1, 1, $2::timestamptz, CASE WHEN 1 >= $4 THEN ${lock('1')} END)
        ON CONFLICT (key) DO UPDATE SET
-         failures = CASE WHEN t.window_start <= $2::timestamptz - make_interval(secs => $3::float8 / 1000)
-                         THEN 1 ELSE t.failures + 1 END,
-         window_start = CASE WHEN t.window_start <= $2::timestamptz - make_interval(secs => $3::float8 / 1000)
-                             THEN $2::timestamptz ELSE t.window_start END,
-         locked_until = CASE
-           WHEN (CASE WHEN t.window_start <= $2::timestamptz - make_interval(secs => $3::float8 / 1000)
-                      THEN 1 ELSE t.failures + 1 END) >= $4
-           THEN $2::timestamptz + make_interval(secs => $5::float8 / 1000)
-           ELSE t.locked_until END
+         failures = ${n},
+         window_start = CASE WHEN ${fresh} THEN $2::timestamptz ELSE t.window_start END,
+         locked_until = CASE WHEN ${n} >= $4 THEN ${lock(n)} ELSE t.locked_until END
        RETURNING failures, window_start, locked_until`,
-      [key, now, opts.windowMs, opts.limit, opts.lockMs],
+      [key, now, opts.windowMs, opts.limit, opts.lockMs, opts.maxLockMs ?? opts.lockMs],
     );
     return toThrottle(rows[0]);
   }
   async clearThrottle(key: string) {
     await this.db.query(`DELETE FROM auth_throttle WHERE key = $1`, [key]);
+  }
+  async clearThrottlePrefix(prefix: string) {
+    await this.db.query(`DELETE FROM auth_throttle WHERE starts_with(key, $1)`, [prefix]);
   }
   async purgeThrottle(now: Date, before: Date) {
     await this.db.query(

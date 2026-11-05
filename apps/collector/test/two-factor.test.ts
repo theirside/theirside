@@ -173,19 +173,21 @@ describe('two-factor sign-in', () => {
     expect(late.json().error).toBe('link_expired');
   });
 
-  it('locks the account after 5 wrong codes, even for the right one', async () => {
+  it('wrong codes delay that address like wrong passwords, even for the right code', async () => {
     const b = new Browser(t, '198.51.100.40');
     const { mfaToken } = (await b.login('ada@example.com')).json();
     for (let i = 0; i < 5; i++) {
       const res = await b.req('POST', '/v1/auth/login/2fa', { mfaToken, code: '000000' });
-      expect([401, 429]).toContain(res.statusCode);
+      expect(res.statusCode).toBe(401);
     }
-    const locked = await b.req('POST', '/v1/auth/login/2fa', { mfaToken, code: codeAt(t, secret) });
-    expect(locked.statusCode).toBe(429);
-    // the password step is locked too
-    expect((await new Browser(t).login('ada@example.com')).statusCode).toBe(429);
-    t.clock.advance(15 * 60_000 + 1000);
-    expect((await login2fa(t, 'ada@example.com', codeAt(t, secret))).res.statusCode).toBe(200);
+    const held = await b.req('POST', '/v1/auth/login/2fa', { mfaToken, code: codeAt(t, secret) });
+    expect(held.statusCode).toBe(429);
+    // the password step at that address waits too; another address doesn't
+    expect((await new Browser(t, '198.51.100.40').login('ada@example.com')).statusCode).toBe(429);
+    expect((await new Browser(t, '198.51.100.41').login('ada@example.com')).statusCode).toBe(200);
+    t.clock.advance(Number(held.headers['retry-after']) * 1000);
+    const ok = await b.req('POST', '/v1/auth/login/2fa', { mfaToken, code: codeAt(t, secret) });
+    expect(ok.statusCode).toBe(200);
   });
 
   it('turning 2FA off and new recovery codes need the password', async () => {

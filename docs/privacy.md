@@ -117,7 +117,7 @@ About the people who use the dashboard (not about your app's users or traffic), 
 - **Sessions** (`sessions`): a SHA-256 hash of the session cookie (never the cookie), the IP address and browser user agent at sign-in, created/last-used/expiry times. Deleted when they expire, at sign-out and with "sign out everywhere".
 - **Two-factor sign-in**: the authenticator secret, encrypted with `THEIRSIDE_SECRET_KEY` (AES-256-GCM; the key is not in the database), the last accepted 30-second step, and recovery codes as SHA-256 hashes.
 - **Invites and reset links** (`auth_tokens`): a SHA-256 hash of the link's token, the invited email, who created it, expiry; deleted a day after they expire or are used.
-- **Failed sign-ins** (`auth_throttle`): counts per email and per IP address for the lockout rules; deleted after a day (longer only while a lock is active).
+- **Failed sign-ins** (`auth_throttle`): counts per email and IP address, and per IP address, for the sign-in delays; deleted after a day (longer only while a lock is active).
 - With SMTP configured, invite and reset emails go to the address entered, through your SMTP server.
 - With proxy sign-in, the email (and name, from AWS ALB) the proxy sends, nothing else from its token or headers.
 

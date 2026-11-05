@@ -8,7 +8,7 @@ import type { EntitlementsResolver } from '../entitlements/types.js';
 import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { hashToken, newToken, type SessionManager } from './session.js';
-import type { LoginThrottle } from './throttle.js';
+import { loginKey, type LoginThrottle } from './throttle.js';
 import type { ProxyIdentity } from './proxy-auth.js';
 import { newRecoveryCode } from './totp.js';
 import type { TwoFactor } from './two-factor.js';
@@ -206,19 +206,23 @@ export class Accounts {
     await this.throttle.fail('ip', ip);
   }
 
-  /** Email + password. Lockout applies even to the right password. */
+  /**
+   * Email + password. A delay on this email at this address (or a block on the
+   * address) applies even to the right password; unknown emails behave the same.
+   */
   async passwordLogin(rawEmail: unknown, password: unknown, ip: string): Promise<UserRecord> {
     const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase().slice(0, 254) : '';
-    await this.refuseIfLocked([`account:${email}`, `ip:${ip}`]);
+    const login = loginKey(email, ip);
+    await this.refuseIfLocked([`login:${login}`, `ip:${ip}`]);
     const user = email ? await this.storage.auth.findUserByEmail(email) : null;
     const hash = user?.authSource === 'password' ? user.passwordHash : null;
     const ok = (await verifyPassword(hash, typeof password === 'string' ? password : '')) && !!user;
     if (!ok) {
-      await this.throttle.fail('account', email);
+      await this.throttle.fail('login', login);
       await this.throttle.fail('ip', ip);
       throw new HttpProblem(401, 'invalid_credentials', 'That email and password do not match.');
     }
-    await this.throttle.clear('account', email);
+    await this.throttle.clear('login', login);
     return user;
   }
 
@@ -259,27 +263,28 @@ export class Accounts {
     const rec = await this.liveToken('mfa', mfaToken);
     const user = rec.userId ? await this.storage.auth.getUser(rec.userId) : null;
     if (!user) throw new HttpProblem(404, 'invalid_link', 'Sign in again.');
-    const key = user.email ?? user.id;
-    await this.refuseIfLocked([`account:${key}`, `ip:${ip}`]);
+    const login = loginKey(user.email ?? user.id, ip);
+    await this.refuseIfLocked([`login:${login}`, `ip:${ip}`]);
     if (!(await this.twoFactor.verify(user, code))) {
-      await this.throttle.fail('account', key);
+      await this.throttle.fail('login', login);
       await this.throttle.fail('ip', ip);
       throw new HttpProblem(401, 'invalid_code', 'That code is not correct.');
     }
     await this.useOnce(rec);
-    await this.throttle.clear('account', key);
+    await this.throttle.clear('login', login);
     return user;
   }
 
   /** Re-check the password before sensitive account changes (throttled like sign-in). */
-  async confirmPassword(userId: string, password: unknown): Promise<UserRecord> {
+  async confirmPassword(userId: string, password: unknown, ip: string): Promise<UserRecord> {
     const user = await this.storage.auth.getUser(userId);
     if (!user || user.authSource !== 'password')
       throw new HttpProblem(400, 'no_password', 'This account has no password.');
-    const key = user.email ?? user.id;
-    await this.refuseIfLocked([`account:${key}`]);
+    const login = loginKey(user.email ?? user.id, ip);
+    await this.refuseIfLocked([`login:${login}`, `ip:${ip}`]);
     if (!(await verifyPassword(user.passwordHash, typeof password === 'string' ? password : ''))) {
-      await this.throttle.fail('account', key);
+      await this.throttle.fail('login', login);
+      await this.throttle.fail('ip', ip);
       throw new HttpProblem(401, 'invalid_credentials', 'The current password is not correct.');
     }
     return user;
@@ -540,7 +545,7 @@ export class Accounts {
     return { email: rec.email, expiresAt: rec.expiresAt.toISOString() };
   }
 
-  /** Sets the password, signs the user out everywhere and lifts a lockout. */
+  /** Sets the password, signs the user out everywhere and lifts sign-in delays. */
   async resetPassword(token: unknown, password: unknown): Promise<void> {
     const rec = await this.liveToken('reset', token);
     const user = rec.userId ? await this.storage.auth.getUser(rec.userId) : null;
@@ -550,7 +555,7 @@ export class Accounts {
     await this.storage.auth.setPassword(user.id, hash, this.clock.now());
     await this.storage.auth.deleteUserSessions(user.id);
     await this.storage.auth.revokeUserTokens('reset', user.id);
-    if (user.email) await this.throttle.clear('account', user.email);
+    await this.throttle.clearLogins(user.email ?? user.id);
   }
 
   /** Change your own password; other sessions end, this one stays. */
@@ -558,9 +563,10 @@ export class Accounts {
     userId: string;
     current: unknown;
     next: unknown;
+    ip: string;
     keepSessionIdHash?: string;
   }): Promise<void> {
-    const user = await this.confirmPassword(input.userId, input.current);
+    const user = await this.confirmPassword(input.userId, input.current, input.ip);
     const hash = await hashPassword(checkPassword(input.next, user.email));
     await this.storage.auth.setPassword(user.id, hash, this.clock.now());
     await this.storage.auth.deleteUserSessions(user.id, input.keepSessionIdHash);

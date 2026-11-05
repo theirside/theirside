@@ -130,6 +130,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
       userId: p.userId,
       current: b.currentPassword,
       next: b.newPassword,
+      ip: req.ip,
       ...(p.sessionIdHash ? { keepSessionIdHash: p.sessionIdHash } : {}),
     });
     return { ok: true };
@@ -179,7 +180,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
         '2fa_required',
         'Two-factor sign-in is required here, so it cannot be turned off.',
       );
-    await ctx.accounts.confirmPassword(user.id, body(req).password);
+    await ctx.accounts.confirmPassword(user.id, body(req).password, req.ip);
     await ctx.accounts.twoFactor.disable(user.id);
     return { ok: true };
   });
@@ -188,7 +189,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     const { user } = await passwordUser(req);
     if (!user.totpEnabled)
       throw new HttpProblem(400, 'not_enabled', 'Two-factor sign-in is not on.');
-    await ctx.accounts.confirmPassword(user.id, body(req).password);
+    await ctx.accounts.confirmPassword(user.id, body(req).password, req.ip);
     return { recoveryCodes: await ctx.accounts.twoFactor.newRecoveryCodes(user.id) };
   });
 }

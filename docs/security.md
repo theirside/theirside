@@ -18,16 +18,17 @@ Then name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup p
 
 - **Passwords**: at least 12 characters, no other rules (a passphrase is fine). Stored as argon2id hashes.
 - **Invites** (Settings → Users): a link that works once and expires after 7 days. The dashboard always shows it to copy; with SMTP configured (`THEIRSIDE_SMTP_*`, the same settings as email alerts) it is also emailed.
-- **Password reset**: any user can make a reset link for someone else (Settings → Users → Reset link; works once, 1 hour). With SMTP, "Forgot password?" on the sign-in page emails one. A reset signs the user out everywhere and lifts a lockout; it doesn't turn off their 2FA.
+- **Password reset**: any user can make a reset link for someone else (Settings → Users → Reset link; works once, 1 hour). With SMTP, "Forgot password?" on the sign-in page emails one. A reset signs the user out everywhere and lifts their sign-in delays; it doesn't turn off their 2FA.
 - **Sessions**: an `HttpOnly`, `SameSite=Strict` cookie, `Secure` when the dashboard is served over https. A session ends after 7 days (`THEIRSIDE_SESSION_MAX_AGE_HOURS`) or 24 hours without use (`THEIRSIDE_SESSION_IDLE_HOURS`). **Sign out everywhere** (your account page) ends all of yours; Settings → Users → Sign out ends someone else's; changing your password ends your other sessions.
 - **Removing a user** takes effect at once. Nobody can remove themselves or the last user who can sign in.
 
 ## Brute-force protection
 
-- 5 failed sign-ins (password or 2FA code) for one email within 15 minutes lock that email for 15 minutes, even with the right password. This also happens for emails without an account, so the answer never reveals who has one. The other side: anyone who can reach the sign-in page can lock a known email for 15 minutes; proxy sign-in and the admin token are not affected.
-- 30 failures from one address within 15 minutes block that address for 15 minutes (passwords, admin token, setup code, unknown links).
-- 3 reset emails per address per hour.
+- **Per email and address**: 4 wrong passwords or 2FA codes for one email from one address are free; after that, each failure makes that email wait at that address 1 second, then 2, 4, 8… up to 15 minutes, even for the right password. A success, or a day, starts the count over. Because the address is part of the key, someone guessing from their own address never slows the real user down at theirs, and nobody can lock an account. Emails without an account are delayed exactly the same way, so the answers never reveal who has one. Confirming your password for a sensitive change counts the same way.
+- **Per address**: 30 failures from one address within 15 minutes block that address for 15 minutes, whatever the email (passwords, 2FA codes, admin token, setup code, unknown links). This is the hard limit on guessing many accounts, or one account, from one place; it never affects other addresses.
+- 3 reset emails per email address per hour.
 - Counts are kept in Postgres, so they hold across replicas, and are forgotten after a day.
+- Someone guessing from many addresses gets 4 free tries and then slowly growing delays at each, besides the per-address limit; long passwords (12+ characters, hashed with argon2id) and 2FA are what make that hopeless.
 
 The address is the client IP as the collector sees it. **`THEIRSIDE_TRUST_PROXY`** decides whose `X-Forwarded-For` to believe:
 
