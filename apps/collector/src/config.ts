@@ -1,3 +1,5 @@
+import { SECRET_KEY_MIN_LENGTH } from './modules/auth/secret-box.js';
+
 /**
  * Collector configuration, from environment variables only (architecture §3.3).
  * THEIRSIDE_DEPLOYMENT_MODE changes defaults, never feature checks (those go through entitlements).
@@ -66,6 +68,22 @@ export interface CollectorConfig {
    * a hop count, or comma-separated addresses/CIDRs of the load balancers.
    */
   trustProxy: boolean | number | string[];
+  /**
+   * Encrypts TOTP secrets at rest (required for 2FA). At least 32 characters, e.g.
+   * `openssl rand -base64 32`. Keep a backup: without it, 2FA codes can't be checked.
+   */
+  secretKey: string | undefined;
+  /** Older keys, comma-separated: still decrypt, and secrets are re-encrypted at start. */
+  secretKeyPrevious: string[];
+}
+
+function secretKey(raw: string | undefined, name: string): string | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (raw.length < SECRET_KEY_MIN_LENGTH)
+    throw new Error(
+      `${name} must be at least ${SECRET_KEY_MIN_LENGTH} characters (e.g. openssl rand -base64 32)`,
+    );
+  return raw;
 }
 
 function trustProxySetting(raw: string | undefined): boolean | number | string[] {
@@ -151,5 +169,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     sessionMaxAgeHours: int(env, 'THEIRSIDE_SESSION_MAX_AGE_HOURS', 168, 1),
     sessionIdleHours: int(env, 'THEIRSIDE_SESSION_IDLE_HOURS', 24, 1),
     trustProxy: trustProxySetting(env.THEIRSIDE_TRUST_PROXY),
+    secretKey: secretKey(env.THEIRSIDE_SECRET_KEY, 'THEIRSIDE_SECRET_KEY'),
+    secretKeyPrevious: (env.THEIRSIDE_SECRET_KEY_PREVIOUS ?? '')
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .map((k) => secretKey(k, 'THEIRSIDE_SECRET_KEY_PREVIOUS')!),
   };
 }

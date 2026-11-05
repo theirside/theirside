@@ -76,6 +76,50 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return reply.code(204).send();
   });
 
+  app.post<{ Params: { id: string } }>('/v1/admin/users/:id/disable-2fa', pre, async (req) => {
+    // a lost phone: another user (or the admin token) turns 2FA off; recovery codes go too
+    const p = writer(req);
+    await ctx.accounts.memberOf(p.orgId, req.params.id);
+    await ctx.accounts.twoFactor.disable(req.params.id);
+    return { ok: true };
+  });
+
+  app.get('/v1/admin/settings/security', pre, async (req) => {
+    const p = req.principal!;
+    const users = await ctx.storage.auth.listUsers(p.orgId);
+    return {
+      require2fa: await ctx.storage.auth.getRequire2fa(p.orgId),
+      secretKeyConfigured: ctx.accounts.twoFactor.box.configured,
+      passwordUsersWithout2fa: users.filter((u) => u.authSource === 'password' && !u.totpEnabled)
+        .length,
+    };
+  });
+
+  app.put('/v1/admin/settings/security', pre, async (req) => {
+    const p = writer(req);
+    const require2fa = body(req).require2fa;
+    if (typeof require2fa !== 'boolean')
+      throw new HttpProblem(400, 'invalid', 'require2fa must be true or false');
+    if (require2fa) {
+      if (!ctx.accounts.twoFactor.box.configured)
+        throw new HttpProblem(
+          400,
+          'secret_key_missing',
+          'Requiring two-factor sign-in needs THEIRSIDE_SECRET_KEY on the collector.',
+        );
+      // don't let anyone lock themselves into the enrolment screen by accident
+      const me = await ctx.storage.auth.getUser(p.userId);
+      if (p.via !== 'admin-token' && me?.authSource === 'password' && !me.totpEnabled)
+        throw new HttpProblem(
+          400,
+          'enable_2fa_first',
+          'Turn on two-factor sign-in for your own account first.',
+        );
+    }
+    await ctx.storage.auth.setRequire2fa(p.orgId, require2fa);
+    return { require2fa };
+  });
+
   // ---------------------------------------------------------------- own account
 
   app.post('/v1/account/password', pre, async (req) => {
@@ -95,5 +139,55 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     const n = await ctx.storage.auth.deleteUserSessions(p.userId);
     endSessionCookie(ctx, req, reply);
     return { signedOut: n };
+  });
+
+  // ---------------------------------------------------------------- own 2FA
+
+  const passwordUser = async (req: FastifyRequest) => {
+    const p = account(req);
+    const user = await ctx.storage.auth.getUser(p.userId);
+    if (!user || user.authSource !== 'password')
+      throw new HttpProblem(
+        400,
+        'not_available',
+        'Two-factor sign-in is for password accounts; proxy sign-ins use your identity provider.',
+      );
+    return { p, user };
+  };
+
+  app.get('/v1/account/2fa', pre, async (req) => {
+    const { p, user } = await passwordUser(req);
+    return ctx.accounts.twoFactor.status(user, p.orgId);
+  });
+
+  app.post('/v1/account/2fa/setup', pre, async (req) => {
+    const { user } = await passwordUser(req);
+    return ctx.accounts.twoFactor.begin(user);
+  });
+
+  app.post('/v1/account/2fa/enable', pre, async (req) => {
+    const { user } = await passwordUser(req);
+    return { recoveryCodes: await ctx.accounts.twoFactor.confirm(user, body(req).code) };
+  });
+
+  app.post('/v1/account/2fa/disable', pre, async (req) => {
+    const { p, user } = await passwordUser(req);
+    if (await ctx.storage.auth.getRequire2fa(p.orgId))
+      throw new HttpProblem(
+        403,
+        '2fa_required',
+        'Two-factor sign-in is required here, so it cannot be turned off.',
+      );
+    await ctx.accounts.confirmPassword(user.id, body(req).password);
+    await ctx.accounts.twoFactor.disable(user.id);
+    return { ok: true };
+  });
+
+  app.post('/v1/account/2fa/recovery-codes', pre, async (req) => {
+    const { user } = await passwordUser(req);
+    if (!user.totpEnabled)
+      throw new HttpProblem(400, 'not_enabled', 'Two-factor sign-in is not on.');
+    await ctx.accounts.confirmPassword(user.id, body(req).password);
+    return { recoveryCodes: await ctx.accounts.twoFactor.newRecoveryCodes(user.id) };
   });
 }

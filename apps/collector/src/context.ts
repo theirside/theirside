@@ -11,7 +11,9 @@ import { AlertDispatcher } from './modules/alerts/dispatcher.js';
 import { ApiKeyAuthenticator } from './modules/auth/api-keys.js';
 import { Accounts } from './modules/auth/accounts.js';
 import { SessionManager } from './modules/auth/session.js';
+import { SecretBox } from './modules/auth/secret-box.js';
 import { LoginThrottle } from './modules/auth/throttle.js';
+import { TwoFactor } from './modules/auth/two-factor.js';
 import { LicenseEntitlementsResolver } from './modules/entitlements/license.js';
 import type { EntitlementsResolver } from './modules/entitlements/types.js';
 import { smtpMailer, type Mailer } from './modules/mail/mailer.js';
@@ -85,6 +87,7 @@ export function createContext(
     new LoginThrottle(storage.auth, clock),
     o.mailer ?? smtpMailer(config.smtp),
     entitlements,
+    new TwoFactor(storage, clock, new SecretBox(config.secretKey, config.secretKeyPrevious)),
   );
   return {
     config,

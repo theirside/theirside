@@ -22,6 +22,8 @@ export interface Principal {
   sessionIdHash?: string;
   /** Expected CSRF header value; undefined for Bearer requests (no ambient credential). */
   csrfToken?: string;
+  /** The org requires 2FA and this password user has none: only enrolment is allowed. */
+  mustEnroll2fa?: boolean;
 }
 
 /** A fresh 256-bit token for cookies and one-time links (base64url). */

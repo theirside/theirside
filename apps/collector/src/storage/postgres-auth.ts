@@ -6,13 +6,14 @@ import type {
   AuthTokenRecord,
   SessionRecord,
   ThrottleState,
+  TotpState,
   UserRecord,
 } from './types.js';
 
 type Queryable = pg.Pool | pg.PoolClient;
 type Row = Record<string, unknown>;
 
-const USER_COLUMNS = `u.id, u.email, u.name, u.auth_source, u.password_hash, u.created_at, u.last_login_at`;
+const USER_COLUMNS = `u.id, u.email, u.name, u.auth_source, u.password_hash, u.created_at, u.last_login_at, u.totp_enabled_at`;
 
 function toUser(r: Row): UserRecord {
   return {
@@ -23,6 +24,7 @@ function toUser(r: Row): UserRecord {
     passwordHash: (r.password_hash as string | null) ?? null,
     createdAt: r.created_at as Date,
     lastLoginAt: (r.last_login_at as Date | null) ?? null,
+    totpEnabled: r.totp_enabled_at != null,
   };
 }
 
@@ -278,5 +280,94 @@ export class PgAuthStore implements AuthStore {
   }
   async clearThrottle(key: string) {
     await this.db.query(`DELETE FROM auth_throttle WHERE key = $1`, [key]);
+  }
+
+  async getTotp(userId: string): Promise<TotpState | null> {
+    const { rows } = await this.db.query(
+      `SELECT totp_secret_enc, totp_pending_enc, totp_last_step FROM users WHERE id = $1`,
+      [userId],
+    );
+    if (!rows[0]) return null;
+    return {
+      secretEnc: rows[0].totp_secret_enc ?? null,
+      pendingEnc: rows[0].totp_pending_enc ?? null,
+      lastStep: rows[0].totp_last_step ?? null,
+    };
+  }
+  async setTotpPending(userId: string, pendingEnc: string | null) {
+    await this.db.query(`UPDATE users SET totp_pending_enc = $2 WHERE id = $1`, [
+      userId,
+      pendingEnc,
+    ]);
+  }
+  async enableTotp(userId: string, secretEnc: string, step: number, at: Date) {
+    await this.db.query(
+      `UPDATE users SET totp_secret_enc = $2, totp_pending_enc = NULL, totp_enabled_at = $4,
+              totp_last_step = $3 WHERE id = $1`,
+      [userId, secretEnc, step, at],
+    );
+  }
+  async disableTotp(userId: string) {
+    await this.db.query(
+      `UPDATE users SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL,
+              totp_last_step = NULL WHERE id = $1`,
+      [userId],
+    );
+    await this.db.query(`DELETE FROM user_recovery_codes WHERE user_id = $1`, [userId]);
+  }
+  async advanceTotpStep(userId: string, step: number) {
+    const r = await this.db.query(
+      `UPDATE users SET totp_last_step = $2
+        WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2)`,
+      [userId, step],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+  async listTotpSecrets() {
+    const { rows } = await this.db.query(
+      `SELECT id, totp_secret_enc, totp_pending_enc FROM users
+        WHERE totp_secret_enc IS NOT NULL OR totp_pending_enc IS NOT NULL`,
+    );
+    return rows.map((r: Row) => ({
+      userId: r.id as string,
+      secretEnc: (r.totp_secret_enc as string | null) ?? null,
+      pendingEnc: (r.totp_pending_enc as string | null) ?? null,
+    }));
+  }
+  async updateTotpSecrets(userId: string, secretEnc: string | null, pendingEnc: string | null) {
+    await this.db.query(
+      `UPDATE users SET totp_secret_enc = $2, totp_pending_enc = $3 WHERE id = $1`,
+      [userId, secretEnc, pendingEnc],
+    );
+  }
+  async replaceRecoveryCodes(userId: string, hashes: string[], at: Date) {
+    await this.db.query(`DELETE FROM user_recovery_codes WHERE user_id = $1`, [userId]);
+    await this.db.query(
+      `INSERT INTO user_recovery_codes (user_id, code_hash, created_at)
+       SELECT $1, h, $3 FROM unnest($2::text[]) AS h`,
+      [userId, hashes, at],
+    );
+  }
+  async useRecoveryCode(userId: string, hash: string, at: Date) {
+    const r = await this.db.query(
+      `UPDATE user_recovery_codes SET used_at = $3
+        WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL`,
+      [userId, hash, at],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+  async countRecoveryCodes(userId: string) {
+    const { rows } = await this.db.query(
+      `SELECT count(*)::int AS n FROM user_recovery_codes WHERE user_id = $1 AND used_at IS NULL`,
+      [userId],
+    );
+    return rows[0].n as number;
+  }
+  async getRequire2fa(orgId: string) {
+    const { rows } = await this.db.query(`SELECT require_2fa FROM orgs WHERE id = $1`, [orgId]);
+    return rows[0]?.require_2fa === true;
+  }
+  async setRequire2fa(orgId: string, required: boolean) {
+    await this.db.query(`UPDATE orgs SET require_2fa = $2 WHERE id = $1`, [orgId, required]);
   }
 }

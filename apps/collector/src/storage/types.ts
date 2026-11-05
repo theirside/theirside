@@ -424,6 +424,15 @@ export interface UserRecord {
   passwordHash: string | null;
   createdAt: Date;
   lastLoginAt: Date | null;
+  /** TOTP 2FA is on. */
+  totpEnabled: boolean;
+}
+
+export interface TotpState {
+  /** Encrypted secret (SecretBox) once enabled; pending = enrolment not confirmed yet. */
+  secretEnc: string | null;
+  pendingEnc: string | null;
+  lastStep: number | null;
 }
 
 export interface SessionRecord {
@@ -512,6 +521,30 @@ export interface AuthStore {
     opts: { windowMs: number; limit: number; lockMs: number },
   ): Promise<ThrottleState>;
   clearThrottle(key: string): Promise<void>;
+
+  getTotp(userId: string): Promise<TotpState | null>;
+  setTotpPending(userId: string, pendingEnc: string | null): Promise<void>;
+  /** Pending secret becomes the secret; `step` was just used, so it can't be replayed. */
+  enableTotp(userId: string, secretEnc: string, step: number, at: Date): Promise<void>;
+  /** 2FA off: secret, pending secret and recovery codes removed. */
+  disableTotp(userId: string): Promise<void>;
+  /** Accept a code's step only if it is after the last accepted one (atomic). */
+  advanceTotpStep(userId: string, step: number): Promise<boolean>;
+  /** All encrypted TOTP secrets, for key rotation. */
+  listTotpSecrets(): Promise<
+    { userId: string; secretEnc: string | null; pendingEnc: string | null }[]
+  >;
+  updateTotpSecrets(
+    userId: string,
+    secretEnc: string | null,
+    pendingEnc: string | null,
+  ): Promise<void>;
+  replaceRecoveryCodes(userId: string, hashes: string[], at: Date): Promise<void>;
+  /** Marks an unused code used; false if unknown or already used. */
+  useRecoveryCode(userId: string, hash: string, at: Date): Promise<boolean>;
+  countRecoveryCodes(userId: string): Promise<number>;
+  getRequire2fa(orgId: string): Promise<boolean>;
+  setRequire2fa(orgId: string, required: boolean): Promise<void>;
 }
 
 export interface UsageStore {

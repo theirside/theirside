@@ -9,9 +9,12 @@ import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { hashToken, newToken, type SessionManager } from './session.js';
 import type { LoginThrottle } from './throttle.js';
+import type { TwoFactor } from './two-factor.js';
 
 export const INVITE_TTL_MS = 7 * 24 * 3600_000;
 export const RESET_TTL_MS = 3600_000;
+/** Between the password and the 2FA code. */
+export const MFA_TTL_MS = 5 * 60_000;
 const SETUP_CODE_TTL_MS = 24 * 3600_000;
 const SETUP_CODE_META = 'setup_code:';
 /** The THEIRSIDE_ADMIN_TOKEN break-glass principal: a system user, never listed or signed in otherwise. */
@@ -76,6 +79,7 @@ export class Accounts {
     private readonly throttle: LoginThrottle,
     private readonly mailer: Mailer,
     private readonly entitlements: EntitlementsResolver,
+    readonly twoFactor: TwoFactor,
   ) {}
 
   get emailEnabled(): boolean {
@@ -223,6 +227,53 @@ export class Accounts {
       });
     }
     return ADMIN_TOKEN_USER_ID;
+  }
+
+  /**
+   * After the right password: with 2FA on, a 5-minute one-time token for the second
+   * step instead of a session; null when the user has no 2FA.
+   */
+  async beginMfa(user: UserRecord): Promise<string | null> {
+    if (!user.totpEnabled) return null;
+    const orgId = (await this.storage.config.membershipsForUser(user.id))[0]?.orgId;
+    if (!orgId) return null;
+    const { token } = await this.issueToken(
+      'mfa',
+      { orgId, userId: user.id, email: user.email, createdBy: null },
+      MFA_TTL_MS,
+    );
+    return token;
+  }
+
+  /** Second step: a code from the app or a recovery code. Wrong codes count like wrong passwords. */
+  async completeMfa(mfaToken: unknown, code: unknown, ip: string): Promise<UserRecord> {
+    const rec = await this.liveToken('mfa', mfaToken);
+    const user = rec.userId ? await this.storage.auth.getUser(rec.userId) : null;
+    if (!user) throw new HttpProblem(404, 'invalid_link', 'Sign in again.');
+    const key = user.email ?? user.id;
+    await this.refuseIfLocked([`account:${key}`, `ip:${ip}`]);
+    if (!(await this.twoFactor.verify(user, code))) {
+      await this.throttle.fail('account', key);
+      await this.throttle.fail('ip', ip);
+      throw new HttpProblem(401, 'invalid_code', 'That code is not correct.');
+    }
+    await this.useOnce(rec);
+    await this.throttle.clear('account', key);
+    return user;
+  }
+
+  /** Re-check the password before sensitive account changes (throttled like sign-in). */
+  async confirmPassword(userId: string, password: unknown): Promise<UserRecord> {
+    const user = await this.storage.auth.getUser(userId);
+    if (!user || user.authSource !== 'password')
+      throw new HttpProblem(400, 'no_password', 'This account has no password.');
+    const key = user.email ?? user.id;
+    await this.refuseIfLocked([`account:${key}`]);
+    if (!(await verifyPassword(user.passwordHash, typeof password === 'string' ? password : ''))) {
+      await this.throttle.fail('account', key);
+      throw new HttpProblem(401, 'invalid_credentials', 'The current password is not correct.');
+    }
+    return user;
   }
 
   async signedIn(userId: string): Promise<void> {
@@ -433,20 +484,7 @@ export class Accounts {
     next: unknown;
     keepSessionIdHash?: string;
   }): Promise<void> {
-    const user = await this.storage.auth.getUser(input.userId);
-    if (!user || user.authSource !== 'password')
-      throw new HttpProblem(400, 'no_password', 'This account has no password.');
-    const key = user.email ?? user.id;
-    await this.refuseIfLocked([`account:${key}`]);
-    if (
-      !(await verifyPassword(
-        user.passwordHash,
-        typeof input.current === 'string' ? input.current : '',
-      ))
-    ) {
-      await this.throttle.fail('account', key);
-      throw new HttpProblem(401, 'invalid_credentials', 'The current password is not correct.');
-    }
+    const user = await this.confirmPassword(input.userId, input.current);
     const hash = await hashPassword(checkPassword(input.next, user.email));
     await this.storage.auth.setPassword(user.id, hash, this.clock.now());
     await this.storage.auth.deleteUserSessions(user.id, input.keepSessionIdHash);

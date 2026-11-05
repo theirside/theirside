@@ -22,6 +22,15 @@ declare module 'fastify' {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** What a user who must still set up 2FA may call (the dashboard's enrolment screen). */
+const ENROLMENT_ROUTES = new Set([
+  '/v1/me',
+  '/v1/account/2fa',
+  '/v1/account/2fa/setup',
+  '/v1/account/2fa/enable',
+  '/v1/account/sign-out-everywhere',
+]);
+
 export function readCookie(req: FastifyRequest, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
@@ -94,10 +103,15 @@ export async function authenticate(
   }
   const session = await ctx.sessions.resolve(readCookie(req, SESSION_COOKIE));
   if (!session) return null;
-  return principalFor(ctx, session.userId, 'session', {
+  const p = await principalFor(ctx, session.userId, 'session', {
     sessionIdHash: session.idHash,
     csrfToken: await ctx.sessions.csrfFor(session.idHash),
   });
+  if (!p) return null;
+  const user = await ctx.storage.auth.getUser(p.userId);
+  if (user?.authSource === 'password' && !user.totpEnabled)
+    p.mustEnroll2fa = await ctx.storage.auth.getRequire2fa(p.orgId);
+  return p;
 }
 
 /**
@@ -121,6 +135,12 @@ export function requireAdmin(ctx: AppContext) {
             );
         }
       }
+      if (p.mustEnroll2fa && !ENROLMENT_ROUTES.has(req.routeOptions.url ?? ''))
+        throw new HttpProblem(
+          403,
+          '2fa_required',
+          'Two-factor sign-in is required for everyone here. Set it up to continue.',
+        );
       req.principal = p;
     } catch (err) {
       if (isStorageUnavailable(err)) return reply.code(503).send({ error: 'storage unavailable' });
@@ -191,6 +211,19 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
       return startSession(ctx, req, reply, userId);
     }
     const user = await ctx.accounts.passwordLogin(b.email, b.password, req.ip);
+    const mfaToken = await ctx.accounts.beginMfa(user);
+    if (mfaToken) return { mfaRequired: true, mfaToken };
+    return startSession(ctx, req, reply, user.id);
+  });
+
+  // second step with 2FA on: a code from the authenticator app or a recovery code
+  app.post('/v1/auth/login/2fa', async (req, reply) => {
+    checkOrigin(ctx, req);
+    await ctx.accounts.checkIp(req.ip);
+    const b = body(req);
+    const user = await ctx.accounts
+      .completeMfa(b.mfaToken, b.code, req.ip)
+      .catch(failLink(ctx, req));
     return startSession(ctx, req, reply, user.id);
   });
 
@@ -246,6 +279,10 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
       role: p.role,
       via: p.via,
       user: user && { id: user.id, email: user.email, name: user.name },
+      twoFactor: {
+        enabled: !!user?.totpEnabled,
+        enrollmentRequired: !!p.mustEnroll2fa,
+      },
       csrfToken: p.csrfToken ?? null,
       projects,
       entitlements,

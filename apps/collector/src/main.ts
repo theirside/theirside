@@ -51,6 +51,17 @@ async function main() {
       );
     }
   }
+  // 2FA secrets: re-encrypt under a rotated THEIRSIDE_SECRET_KEY, and say when codes can't be checked
+  const totp = await ctx.accounts.twoFactor.rotate();
+  if (totp.rotated)
+    app.log.info(`re-encrypted ${totp.rotated} 2FA secret(s) with THEIRSIDE_SECRET_KEY`);
+  const withTotp = (await storage.auth.listTotpSecrets()).filter((r) => r.secretEnc).length;
+  if (withTotp && (!config.secretKey || totp.unreadable))
+    app.log.warn(
+      `${totp.unreadable || withTotp} user(s) have two-factor sign-in, but their secrets can't be decrypted: ` +
+        `THEIRSIDE_SECRET_KEY is ${config.secretKey ? 'not the key they were saved with (add the old key to THEIRSIDE_SECRET_KEY_PREVIOUS)' : 'not set'}. ` +
+        `They can only sign in with recovery codes until it is fixed.`,
+    );
   const info = (m: string) => app.log.info(m);
   const scheduler = new Scheduler(
     storage,

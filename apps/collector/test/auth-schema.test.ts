@@ -33,9 +33,10 @@ describe('schema', () => {
       'users',
       'install_meta',
       'schema_migrations',
-      // a user's sessions, and sign-in throttling keyed by email/address
+      // a user's sessions and recovery codes, and sign-in throttling keyed by email/address
       'sessions',
       'auth_throttle',
+      'user_recovery_codes',
     ]);
     const orgOnly = new Set(['memberships', 'projects', 'auth_tokens']);
     for (const r of rows) {
