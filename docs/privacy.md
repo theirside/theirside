@@ -103,14 +103,29 @@ Everything lives in the Postgres database you point `DATABASE_URL` at.
 - **SDK health** (`sdk_instances`): per service and environment: SDK name/version, first/last seen, cumulative dropped events, last flush error code.
 - **Providers** (`providers`): created automatically from traffic: configured names, or for discovered hosts the catalog name or registrable domain, with the hostnames seen (up to 50; many subdomains of one domain fold into `*.domain`), a category and when it was first seen. You add support contacts, display names, hide providers or mark them internal.
 - **API keys** (`api_keys`): only a SHA-256 hash and the first 13 characters (for display). The key itself is shown once and never stored.
-- **Admin login**: `THEIRSIDE_ADMIN_TOKEN` is compared in constant time and never stored; sessions are HMAC-signed cookies (`HttpOnly`, `SameSite=Lax`, `Secure` when `THEIRSIDE_PUBLIC_URL`, or the request without it, is https) with a per-install secret kept in `install_meta`.
+- **Dashboard users**: see [below](#dashboard-users).
+- **Admin token**: `THEIRSIDE_ADMIN_TOKEN` is compared in constant time and never stored.
 - **Licence**: `THEIRSIDE_LICENSE_KEY` is verified offline against an embedded public key. The collector never phones home.
 
-The collector's request log (stdout) contains method, path, status and timing per request; never bodies or headers. The ingest path is `/v1/ingest` with no identifiers in it.
+The collector's request log (stdout) contains method, path, status and timing per request; never bodies or headers. Invite and reset links carry their token after `#`, which browsers don't send, so it never reaches request logs.
+
+## Dashboard users
+
+About the people who use the dashboard (not about your app's users or traffic), the collector stores:
+
+- **Accounts** (`users`, `memberships`): email, name, when the account was created and last signed in, how it signs in (password or identity proxy). Passwords only as argon2id hashes.
+- **Sessions** (`sessions`): a SHA-256 hash of the session cookie (never the cookie), the IP address and browser user agent at sign-in, created/last-used/expiry times. Deleted when they expire, at sign-out and with "sign out everywhere".
+- **Two-factor sign-in**: the authenticator secret, encrypted with `THEIRSIDE_SECRET_KEY` (AES-256-GCM; the key is not in the database), the last accepted 30-second step, and recovery codes as SHA-256 hashes.
+- **Invites and reset links** (`auth_tokens`): a SHA-256 hash of the link's token, the invited email, who created it, expiry; deleted a day after they expire or are used.
+- **Failed sign-ins** (`auth_throttle`): counts per email and per IP address for the lockout rules; deleted after a day (longer only while a lock is active).
+- With SMTP configured, invite and reset emails go to the address entered, through your SMTP server.
+- With proxy sign-in, the email (and name, from AWS ALB) the proxy sends, nothing else from its token or headers.
+
+Details and settings: [security.md](security.md). The ingest path is `/v1/ingest` with no identifiers in it.
 
 ## Dashboard and health API
 
-The dashboard (served by the collector, behind the `THEIRSIDE_ADMIN_TOKEN` login) and the health API (project API key with the `read` scope) show the stored data above: per-endpoint rates, latencies, volumes, incidents with sample provider request IDs, SDK health. Nothing is loaded from third parties (no CDNs, fonts or analytics).
+The dashboard (served by the collector, behind user sign-in, [security.md](security.md)) and the health API (project API key with the `read` scope) show the stored data above: per-endpoint rates, latencies, volumes, incidents with sample provider request IDs, SDK health. Nothing is loaded from third parties (no CDNs, fonts or analytics).
 
 ## Status page
 

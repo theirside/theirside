@@ -15,7 +15,8 @@ Tick every line before the SDK goes into a production service.
 - [ ] **SDK `debug` off** (`debug: false` or unset) in production.
 - [ ] **Discovered providers reviewed in the first hour**: Providers lists every third-party host the service calls (auto-discovery is on by default). Hide anything internal or unwanted (pushed to the SDK within a minute), or set `autoDiscover: false` to record only listed providers.
 - [ ] Provider list reviewed: names, hosts, and explicit `routes` for any API that puts names, letters-only IDs or other personal values in its paths.
-- [ ] **One API key per service** (Settings → API keys, `ingest` scope), stored as a secret together with `THEIRSIDE_ADMIN_TOKEN` and the database password (not in the repo, not in plain task definitions).
+- [ ] **One API key per service** (Settings → API keys, `ingest` scope), stored as a secret together with `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` and the database password (not in the repo, not in plain task definitions).
+- [ ] **Dashboard accounts**: everyone who needs the dashboard has their own account (invites, or sign-in through the client's identity proxy), two-factor sign-in required for everyone (Settings → Users), and `THEIRSIDE_SECRET_KEY` backed up ([security.md](security.md)). The admin token is kept for break-glass only.
 - [ ] **Removal rehearsed**: the one commit that takes the SDK out is known (below) and `THEIRSIDE_ENABLED=false` works as an instant kill switch without a code change.
 
 ### Removing the SDK in one commit
@@ -196,7 +197,8 @@ On a small VM (1 vCPU / 2 GB is plenty; measured 25k events/s on 1 CPU, see `doc
 ```sh
 git clone <this repo> theirside && cd theirside
 cp .env.example .env    # then fill in: THEIRSIDE_VERSION (the release to pull), POSTGRES_PASSWORD,
-                        # THEIRSIDE_BOOTSTRAP_API_KEY, THEIRSIDE_ADMIN_TOKEN, THEIRSIDE_PUBLIC_URL, SMTP if email alerts
+                        # THEIRSIDE_BOOTSTRAP_API_KEY, THEIRSIDE_ADMIN_TOKEN, THEIRSIDE_SECRET_KEY,
+                        # THEIRSIDE_PUBLIC_URL, SMTP for email alerts, invites and resets
 chmod 600 .env
 docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
@@ -207,7 +209,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
 - **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.1.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
-- **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN` (and `THEIRSIDE_SMTP_PASS` if email alerts are used).
+- **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
 
@@ -237,7 +239,8 @@ Minimal task definition (placeholders in `<>`):
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:theirside/database-url" },
         { "name": "THEIRSIDE_BOOTSTRAP_API_KEY", "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:theirside/bootstrap-api-key" },
-        { "name": "THEIRSIDE_ADMIN_TOKEN", "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:theirside/admin-token" }
+        { "name": "THEIRSIDE_ADMIN_TOKEN", "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:theirside/admin-token" },
+        { "name": "THEIRSIDE_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:theirside/secret-key" }
       ],
       "healthCheck": {
         "command": ["CMD", "node", "-e", "fetch('http://127.0.0.1:4318/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"],
@@ -263,7 +266,7 @@ Use `/readyz` for the ALB target group health check (it returns 503 while the da
 
 ### Network exposure
 
-**The dashboard must only be reachable on a private network.** It shows every provider, endpoint, error and incident; the admin token is its only lock. Ingest (`/v1/ingest`), the health API (`/v1/health`, `/v1/incidents`), login (`/v1/auth/*`) and the admin API (`/v1/admin/*`) are private too. The only paths that may ever be public are **`/status/*`** and **`/embed.js`**, and only if you use the status page for the client's customers.
+**The dashboard must only be reachable on a private network.** It shows every provider, endpoint, error and incident; user sign-in (and the break-glass admin token) is its only lock. Ingest (`/v1/ingest`), the health API (`/v1/health`, `/v1/incidents`), login (`/v1/auth/*`) and the admin API (`/v1/admin/*`) are private too. The only paths that may ever be public are **`/status/*`** and **`/embed.js`**, and only if you use the status page for the client's customers.
 
 The simplest safe setup is two services from the same image and database:
 
@@ -287,8 +290,12 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `DATABASE_URL` | required | `postgres://user:pass@host:5432/db` |
 | `PORT` | `4318` | |
 | `THEIRSIDE_PUBLIC_URL` | – | Dashboard URL for "Open in dashboard" links in alerts (no link when unset) and the session cookie's `Secure` flag; status page and embed URLs fall back to the request origin. |
-| `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, admin and this key (`tsd_live_` + ≥ 16 chars). |
-| `THEIRSIDE_ADMIN_TOKEN` | – | Dashboard login. Without it the dashboard can't be used. |
+| `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, status page and this key (`tsd_live_` + ≥ 16 chars). The first user comes from the dashboard's setup page. |
+| `THEIRSIDE_ADMIN_TOKEN` | – | Completes the setup page (or use the setup code from the log) and is the break-glass sign-in (and `Bearer` for scripts). Unset to turn it off. |
+| `THEIRSIDE_SECRET_KEY` / `THEIRSIDE_SECRET_KEY_PREVIOUS` | – | Encrypts two-factor secrets (≥ 32 characters, `openssl rand -base64 32`); required for 2FA. Back it up; rotate by moving the old key to `_PREVIOUS` ([security.md](security.md)). |
+| `THEIRSIDE_TRUST_PROXY` | `true` | Which `X-Forwarded-*` to believe (client IP for sign-in lockouts, https detection): the load balancers' CIDRs, a hop count, or `false`. Set it behind an ALB. |
+| `THEIRSIDE_SESSION_MAX_AGE_HOURS` / `THEIRSIDE_SESSION_IDLE_HOURS` | `168` / `24` | Dashboard session lifetime and idle timeout. |
+| `THEIRSIDE_AUTH_PROXY` (`header`, `alb`), `THEIRSIDE_AUTH_PROXY_TRUSTED_IPS`, `THEIRSIDE_AUTH_PROXY_HEADER`, `THEIRSIDE_AUTH_PROXY_ALB_ARN`, `THEIRSIDE_AUTH_PROXY_AUTO_CREATE` | off | Sign-in through an identity proxy or an ALB with OIDC ([security.md](security.md#sign-in-through-an-identity-proxy)). |
 | `THEIRSIDE_RAW_RETENTION_DAYS` / `THEIRSIDE_ROLLUP_RETENTION_DAYS` | `30` / `90` | |
 | `THEIRSIDE_SMTP_URL` (or `THEIRSIDE_SMTP_HOST`, `_PORT`, `_SECURE`, `_REQUIRE_TLS`, `_USER`, `_PASS`), `THEIRSIDE_SMTP_FROM` | – | Needed for email alert channels. `smtp://user:pass@host:587` uses STARTTLS, `smtps://…:465` TLS; TLS is required when credentials are set. Gmail, SES and Postmark examples: `.env.example`. |
 | `THEIRSIDE_LICENSE_KEY` | – | Paid features; never needed for ingest or alerts. |
@@ -300,7 +307,7 @@ Full list: `docs/architecture.md` §3.3.
 
 ### After deploying
 
-1. Open the dashboard (`THEIRSIDE_PUBLIC_URL`), sign in with `THEIRSIDE_ADMIN_TOKEN`.
+1. Open the dashboard (`THEIRSIDE_PUBLIC_URL`). The setup page creates your account; it asks for `THEIRSIDE_ADMIN_TOKEN` or the setup code from the collector log. Turn on two-factor sign-in on your account page, invite the team (Settings → Users) and tick **Require two-factor sign-in for everyone**. With an ALB in front, you can instead let people sign in with the company account ([security.md](security.md#aws-application-load-balancer)).
 2. **Settings → Alert channels**: add Slack/email/webhook, press **Send test alert**; it must say "Sent" and arrive. A failure shows the exact reason (Slack's error, SMTP authentication, connection refused).
 3. **Settings → API keys**: create one key per service (`ingest`), store each as that service's `THEIRSIDE_API_KEY` secret. Revoke the bootstrap key once every service has its own, or keep it only for the health API.
 4. Deploy the service with the SDK; check **SDK health** and **Providers** as in step 7.

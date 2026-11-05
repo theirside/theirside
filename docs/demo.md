@@ -20,7 +20,7 @@ docker compose -f docker/docker-compose.yml --profile demo up --build
 
 First build takes a few minutes. When it settles:
 
-- Dashboard: <http://localhost:4318> (admin token: `change-me-admin-token`)
+- Dashboard: <http://localhost:4318>. The first visit shows the setup page: enter the admin token `change-me-admin-token`, then your name, email and a password (local only). Start the stack with `THEIRSIDE_SECRET_KEY=<32+ random characters>` to try two-factor sign-in.
 - Chaos provider admin: <http://localhost:4010/__chaos>, received alerts: <http://localhost:4010/__alerts>
 
 On the first start a one-shot `demo-seed` service backfills a week of history before live traffic starts (about 15 s), so the dashboard looks like an install that has been running for a while:

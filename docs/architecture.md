@@ -12,7 +12,7 @@ One codebase and one image: self-hosted for free, with paid features unlocked by
 
 Rule: **anything a single team needs to catch provider problems is free; what a manager, compliance team or larger company needs is paid. Never move a free feature to paid.** Paid code goes in `ee/` and is reached only through an entitlement check (§4).
 
-**Free (OSS, self-hosted):** SDK; collector; baselines and scoring; alerts to Slack, email and webhook with the provider-ready incident summary; dashboard; health API; one embeddable status page (with a small "Powered by Theirside" footer link); one org with unlimited projects and environments; admin-token login; retention set by the operator.
+**Free (OSS, self-hosted):** SDK; collector; baselines and scoring; alerts to Slack, email and webhook with the provider-ready incident summary; dashboard; health API; one embeddable status page (with a small "Powered by Theirside" footer link); one org with unlimited projects and environments; user accounts (all equal) with invites, password reset, optional or required TOTP 2FA and trusted-proxy sign-in (§4), the admin token as break-glass; retention set by the operator.
 
 **Paid (licence key or cloud plan):**
 
@@ -206,7 +206,7 @@ tools/chaos-provider  fake provider APIs with runtime failure rules (/__chaos) a
 tools/soak            SDK memory soak (built SDK, collector up/down/cycle, heap slope; 5-min CI gate)
 tools/loadgen         MODE=direct (SDK traffic to the chaos provider) | demo (calls the NestJS demo); demo setup via the admin API; e2e.ts = alerting acceptance run
 docker/               Dockerfile.collector, Dockerfile.node-app (tools/examples), docker-compose.yml (profiles: default, demo with the one-shot demo-seed, e2e), docker-compose.test.yml
-docs/                 architecture.md (this), scoring.md, privacy.md, benchmarks.md, nestjs-integration.md, demo.md
+docs/                 architecture.md (this), scoring.md, privacy.md, security.md, benchmarks.md, nestjs-integration.md, demo.md
 ```
 
 ## 10. Decision log
