@@ -1,0 +1,39 @@
+{
+  "name": "@theirside/collector",
+  "version": "0.1.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "description": "Theirside collector: ingest, rollups, scoring, alerts, API, dashboard and status page.",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "dev": "node --conditions=@theirside/source --import tsx src/main.ts",
+    "bench:ingest": "node --conditions=@theirside/source --import tsx bench/ingest-load.ts",
+    "licence": "node --conditions=@theirside/source --import tsx scripts/licence.ts",
+    "demo:seed": "node --conditions=@theirside/source --import tsx src/demo-seed.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.8",
+    "@theirside/shared": "workspace:*",
+    "fastify": "^5.12.8",
+    "nodemailer": "^10.3.1",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@theirside/sdk": "workspace:*",
+    "tsx": "^4.23.15"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "public",
+    "openapi.yaml",
+    "demo-catalog.json"
+  ]
+}

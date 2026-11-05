@@ -1,0 +1,19 @@
+{
+  "name": "@theirside/chaos-provider",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fake third-party provider whose endpoints can be told to fail, slow down, time out or reset at runtime.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "dev": "node --import tsx src/main.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

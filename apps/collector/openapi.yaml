@@ -1,0 +1,283 @@
+openapi: 3.1.0
+info:
+  title: Theirside collector API
+  version: 0.1.0
+  description: |
+    Public API of the Theirside collector: SDK ingest, the health API
+    and incidents. Authenticate with a project API key (`Authorization: Bearer tsd_live_…`);
+    ingest needs the `ingest` scope, the health API the `read` scope.
+    The status page (`GET /status/{token}`) and `GET /embed.js` need no auth.
+    Dashboard endpoints under `/v1/admin` are internal to the bundled dashboard and not covered here.
+servers:
+  - url: http://localhost:4318
+security:
+  - apiKey: []
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: Project API key, `tsd_live_` + 32 characters.
+  schemas:
+    Outcome:
+      type: string
+      enum:
+        [ok, http_4xx, http_5xx, timeout, conn_reset, conn_refused, dns, tls, aborted, other_error]
+    HealthStatus:
+      type: string
+      enum: [green, amber, red, unknown]
+    CallEvent:
+      type: object
+      required: [ts, provider, host, method, endpoint, status, durationMs, outcome]
+      properties:
+        ts: { type: integer, description: Call start, epoch milliseconds }
+        provider:
+          type: [string, 'null']
+          maxLength: 128
+          description: Configured provider name, or null for a host found by auto-discovery (the collector assigns it)
+        host: { type: string, maxLength: 255 }
+        method: { type: string, maxLength: 16 }
+        endpoint: { type: string, maxLength: 512, description: Path template, never a raw path }
+        status: { type: [integer, 'null'] }
+        durationMs: { type: number, minimum: 0 }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        errorCode: { type: string, maxLength: 64 }
+        correlationId: { type: string, maxLength: 128 }
+        providerRequestId: { type: string, maxLength: 128 }
+        service: { type: string }
+        environment: { type: string }
+        sdkVersion: { type: string }
+    IngestBatch:
+      type: object
+      required: [protocol, sdk, service, environment, events]
+      properties:
+        protocol: { type: integer, enum: [1] }
+        sdk:
+          type: object
+          required: [name, version]
+          properties: { name: { type: string }, version: { type: string } }
+        service: { type: string }
+        environment: { type: string }
+        dropped:
+          {
+            type: integer,
+            minimum: 0,
+            description: Events dropped by the SDK since its last accepted batch,
+          }
+        lastFlushError: { type: string }
+        sampleRate: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        events: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/CallEvent' } }
+    EndpointHealth:
+      type: object
+      properties:
+        environment: { type: string }
+        method: { type: string }
+        endpoint: { type: string }
+        status: { $ref: '#/components/schemas/HealthStatus' }
+        score: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        callsPerMin: { type: number }
+        errorRate: { type: number, description: Provider-error rate in the 5-minute window }
+        normalErrorRate: { type: number, description: Baseline provider-error rate }
+        rate4xx: { type: number }
+        rate429: { type: number }
+        p50Ms: { type: [number, 'null'] }
+        p95Ms: { type: [number, 'null'] }
+        normalP95Ms: { type: [number, 'null'] }
+        learning: { type: boolean }
+        inIncident: { type: boolean }
+        outcomes: { type: object, additionalProperties: { type: integer } }
+    ProviderHealth:
+      type: object
+      properties:
+        name: { type: string }
+        displayName: { type: [string, 'null'], description: Public display name (status page) }
+        label: { type: string, description: Dashboard name (rename, else name) }
+        isPublic: { type: boolean }
+        source: { type: string, enum: [configured, discovered, catalog] }
+        category:
+          { type: [string, 'null'], description: 'Catalog category, e.g. payments, infrastructure' }
+        firstSeenAt: { type: [string, 'null'], format: date-time }
+        alertsEnabled: { type: boolean }
+        status: { $ref: '#/components/schemas/HealthStatus' }
+        score: { type: [integer, 'null'] }
+        callsPerMin: { type: number }
+        errorRate: { type: number }
+        normalErrorRate: { type: number }
+        p95Ms: { type: [number, 'null'] }
+        normalP95Ms: { type: [number, 'null'] }
+        openIncidentId: { type: [string, 'null'] }
+        endpoints: { type: array, items: { $ref: '#/components/schemas/EndpointHealth' } }
+    Incident:
+      type: object
+      properties:
+        id: { type: string }
+        environment: { type: string }
+        provider: { type: string }
+        scope: { type: string, enum: [endpoint, provider] }
+        kind: { type: string, enum: [errors, latency] }
+        status: { type: string, enum: [open, resolved] }
+        openedAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        durationMinutes: { type: integer }
+        peakErrorRate: { type: number }
+        peakP95Ms: { type: [number, 'null'] }
+        alertsMuted: { type: boolean, description: Opened during a cooldown; no alerts were sent }
+        endpoints:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              endpoint: { type: string }
+              firstSeenAt: { type: string, format: date-time }
+              recoveredAt: { type: [string, 'null'], format: date-time }
+              peakErrorRate: { type: number }
+        summary: { type: string, description: Plain-text summary, ready to paste to the provider }
+        sampleRequestIds: { type: array, items: { type: string } }
+    Error:
+      type: object
+      properties: { error: { type: string }, detail: { type: string } }
+paths:
+  /v1/ingest:
+    post:
+      summary: Ingest a batch of call events (used by the SDK)
+      description: 'Body may be gzip-compressed (`Content-Encoding: gzip`); at most 1 MB compressed and 5,000 events.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestBatch' }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { type: object, properties: { accepted: { type: integer } } }
+        '400':
+          {
+            description: Invalid batch,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+          }
+        '401': { description: Missing, invalid or revoked key, or no ingest scope }
+        '413': { description: Batch too large }
+        '415': { description: Unsupported Content-Encoding }
+        '429': { description: Over the plan's monthly call limit; retry later (Retry-After) }
+        '503': { description: Storage unavailable; retry later (Retry-After) }
+  /v1/sdk-config:
+    get:
+      summary: Dashboard settings for the SDK (polled every 60 s)
+      description: Hidden and internal host patterns, explicit routes per provider and optional sampling. Any key with the `ingest` or `read` scope. Send `If-None-Match` with the last ETag to get 304 when unchanged.
+      parameters:
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: Config
+          headers: { ETag: { schema: { type: string } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hidden: { type: array, items: { type: string } }
+                  internal: { type: array, items: { type: string } }
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        hosts: { type: array, items: { type: string } }
+                        routes: { type: array, items: { type: string } }
+                  sampleRate: { type: [number, 'null'] }
+        '304': { description: Not modified }
+        '401': { description: Missing or invalid key }
+  /v1/health:
+    get:
+      summary: Current health per provider and endpoint
+      description: Scores and rates over the last 5 complete minutes; see docs/scoring.md.
+      parameters:
+        - {
+            name: environment,
+            in: query,
+            schema: { type: string },
+            description: Only this environment,
+          }
+      responses:
+        '200':
+          description: Health report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  minute:
+                    { type: string, format: date-time, description: Last complete minute evaluated }
+                  windowMinutes: { type: integer }
+                  environment: { type: [string, 'null'] }
+                  providers: { type: array, items: { $ref: '#/components/schemas/ProviderHealth' } }
+        '401': { description: Missing or invalid key, or no read scope }
+  /v1/incidents:
+    get:
+      summary: Incidents, newest first
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, resolved] } }
+        - { name: provider, in: query, schema: { type: string } }
+        - {
+            name: limit,
+            in: query,
+            schema: { type: integer, minimum: 1, maximum: 500, default: 50 },
+          }
+      responses:
+        '200':
+          description: Incidents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  { incidents: { type: array, items: { $ref: '#/components/schemas/Incident' } } }
+        '401': { description: Missing or invalid key, or no read scope }
+  /status/{token}:
+    get:
+      summary: Public status page (HTML)
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+        - { name: theme, in: query, schema: { type: string, enum: [auto, light, dark] } }
+        - {
+            name: providers,
+            in: query,
+            schema: { type: string },
+            description: Comma-separated public display names,
+          }
+        - {
+            name: embed,
+            in: query,
+            schema: { type: string, enum: ['1'] },
+            description: Compact layout for the iframe,
+          }
+      responses:
+        '200': { description: HTML page, cached 30 s, content: { text/html: {} } }
+        '404': { description: Unknown token }
+  /embed.js:
+    get:
+      summary: Script that embeds the status page as an iframe
+      security: []
+      description: |
+        `<script src="https://collector.example/embed.js" data-token="…" data-theme="dark" data-providers="Card issuing" async></script>`
+      responses:
+        '200': { description: JavaScript, content: { application/javascript: {} } }
+  /healthz:
+    get:
+      summary: Liveness (always 200; reports database state)
+      security: []
+      responses:
+        '200': { description: '{ status: ok, db: ok | unavailable }' }
+  /readyz:
+    get:
+      summary: Readiness (503 while the database is unreachable)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Storage unavailable }

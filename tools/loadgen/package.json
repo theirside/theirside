@@ -1,0 +1,23 @@
+{
+  "name": "@theirside/loadgen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drives traffic for the demo: directly through the SDK against the chaos provider, or through the NestJS demo app.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/main.js",
+    "e2e": "node dist/e2e.js",
+    "dev": "node --conditions=@theirside/source --import tsx src/main.ts"
+  },
+  "dependencies": {
+    "@theirside/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

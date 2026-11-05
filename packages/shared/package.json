@@ -1,0 +1,34 @@
+{
+  "name": "@theirside/shared",
+  "version": "0.1.0",
+  "description": "Event schema, ingest protocol and endpoint templating shared by the Theirside SDK and collector. Not published: bundled into @theirside/sdk.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@theirside/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "@theirside/source": "./src/core.ts",
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "catalog.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "tldts": "^7.4.19",
+    "zod": "^4.6.7"
+  }
+}

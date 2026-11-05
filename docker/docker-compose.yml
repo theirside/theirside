@@ -1,0 +1,179 @@
+# Self-hosted collector + Postgres.
+#   docker compose -f docker/docker-compose.yml up -d
+# Demo stack (chaos provider, NestJS demo app, load generator):
+#   docker compose -f docker/docker-compose.yml --profile demo up
+#
+# Settings come from the shell or an env file: cp .env.example .env, edit it, then
+#   docker compose --env-file .env -f docker/docker-compose.yml up -d
+# Change THEIRSIDE_BOOTSTRAP_API_KEY and THEIRSIDE_ADMIN_TOKEN before exposing this anywhere.
+name: theirside
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: theirside
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-theirside-local-only}
+      POSTGRES_DB: theirside
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U theirside -d theirside']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.collector
+    image: theirside/collector:local
+    environment:
+      DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
+      THEIRSIDE_DEPLOYMENT_MODE: self_hosted
+      THEIRSIDE_BOOTSTRAP_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      THEIRSIDE_PUBLIC_URL: ${THEIRSIDE_PUBLIC_URL:-http://localhost:${COLLECTOR_PORT:-4318}}
+      THEIRSIDE_LICENSE_KEY: ${THEIRSIDE_LICENSE_KEY:-}
+      # extra catalog entries for the demo's fake providers; they only match the reserved
+      # .test TLD, so they never affect real traffic. Set it to empty to disable.
+      THEIRSIDE_CATALOG_OVERRIDE: ${THEIRSIDE_CATALOG_OVERRIDE-/app/demo-catalog.json}
+      # email alerts (see .env.example); empty = email channel disabled
+      THEIRSIDE_SMTP_URL: ${THEIRSIDE_SMTP_URL:-}
+      THEIRSIDE_SMTP_HOST: ${THEIRSIDE_SMTP_HOST:-}
+      THEIRSIDE_SMTP_PORT: ${THEIRSIDE_SMTP_PORT:-}
+      THEIRSIDE_SMTP_SECURE: ${THEIRSIDE_SMTP_SECURE:-}
+      THEIRSIDE_SMTP_REQUIRE_TLS: ${THEIRSIDE_SMTP_REQUIRE_TLS:-}
+      THEIRSIDE_SMTP_USER: ${THEIRSIDE_SMTP_USER:-}
+      THEIRSIDE_SMTP_PASS: ${THEIRSIDE_SMTP_PASS:-}
+      THEIRSIDE_SMTP_FROM: ${THEIRSIDE_SMTP_FROM:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${COLLECTOR_PORT:-4318}:4318'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- demo / e2e helpers -------------------------------------------------
+
+  # Fake providers (Acme Cards, KYCo, BankCo) + alert sink at /__alerts.
+  chaos:
+    profiles: ['demo', 'e2e']
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node-app
+      args:
+        PACKAGE: '@theirside/chaos-provider'
+    image: theirside/chaos-provider:local
+    environment:
+      CHAOS_PORT: 4010
+      SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}
+    ports:
+      - '${CHAOS_PUBLISH_PORT:-4010}:4010'
+    networks:
+      default:
+        # fake providers (several hosts for Acme Cards), plus an internal service and a
+        # telemetry host the zero-config SDK must exclude; *.saasco.test is resolved in the demo app
+        aliases:
+          - api.acmecards.test
+          - files.acmecards.test
+          - sandbox.acmecards.test
+          - api.kyco.test
+          - api.bankco.test
+          - api.notifyco.test
+          - api.geoapi.test
+          - ledger
+          - o4501.ingest.sentry.io
+
+  # NestJS demo app: @nestjs/axios HttpService + fetch, SDK + AWS X-Ray (local daemon stub).
+  demo:
+    profiles: ['demo']
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node-app
+      args:
+        PACKAGE: '@theirside/nestjs-demo'
+    image: theirside/nestjs-demo:local
+    environment:
+      PORT: 3000
+      THEIRSIDE_COLLECTOR_URL: http://collector:4318
+      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
+      THEIRSIDE_ENVIRONMENT: demo
+      # zero-config SDK: no provider list, see examples/nestjs-demo/src/instrumentation.ts
+      SAASCO_TARGET: chaos
+    ports:
+      - '${DEMO_PORT:-3000}:3000'
+    depends_on:
+      collector:
+        condition: service_healthy
+      chaos:
+        condition: service_started
+    restart: unless-stopped
+
+  # One-shot: backfills 7 days of demo data on first start (docs/demo.md). Refuses
+  # (exit 2) on anything that is not an empty demo install; no-op once seeded.
+  demo-seed:
+    profiles: ['demo']
+    image: theirside/collector:local
+    command: ['node', 'dist/demo-seed.js']
+    environment:
+      DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: 'no'
+
+  # Demo traffic: calls the NestJS demo app, and sets the demo up (alert sink, provider contacts).
+  loadgen:
+    profiles: ['demo']
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node-app
+      args:
+        PACKAGE: '@theirside/loadgen'
+    image: theirside/loadgen:local
+    environment:
+      MODE: demo
+      DEMO_URL: http://demo:3000
+      RPS: ${RPS:-20}
+      THEIRSIDE_COLLECTOR_URL: http://collector:4318
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      SINK_URL: http://chaos:4010/__alerts
+      SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}
+    depends_on:
+      demo:
+        condition: service_started
+      demo-seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Phase 3 acceptance: SDK traffic, injected failure, alert assertions.
+  #   docker compose -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit e2e
+  e2e:
+    profiles: ['e2e']
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.node-app
+      args:
+        PACKAGE: '@theirside/loadgen'
+    image: theirside/loadgen:local
+    command: ['node', 'dist/e2e.js']
+    environment:
+      THEIRSIDE_COLLECTOR_URL: http://collector:4318
+      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      CHAOS_URL: http://chaos:4010
+      CHAOS_PORT: 4010
+      SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}
+      WARMUP_MINUTES: ${WARMUP_MINUTES:-6}
+      RPS: ${RPS:-30}
+    depends_on:
+      collector:
+        condition: service_healthy
+      chaos:
+        condition: service_started
+
+volumes:
+  pgdata:

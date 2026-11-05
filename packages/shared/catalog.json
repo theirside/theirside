@@ -1,0 +1,1409 @@
+{
+  "version": 1,
+  "comment": "Known API providers for auto-discovery naming and grouping (docs/architecture.md \u00a73.2). Domains only where certain; support contacts and status URLs are left to the provider settings. Match is exact domain or any subdomain; the longest matching domain wins. Optional routes: known path templates sent to SDKs as explicit routes (they bypass the 5-sightings rule for literal segments).",
+  "providers": [
+    {
+      "name": "Stripe",
+      "category": "payments",
+      "domains": ["stripe.com", "stripe.network"],
+      "supportEmail": null,
+      "supportUrl": null,
+      "routes": [
+        "/v1/customers",
+        "/v1/customers/:id",
+        "/v1/payment_intents",
+        "/v1/payment_intents/:id",
+        "/v1/charges",
+        "/v1/charges/:id",
+        "/v1/refunds",
+        "/v1/refunds/:id",
+        "/v1/subscriptions",
+        "/v1/subscriptions/:id",
+        "/v1/invoices",
+        "/v1/invoices/:id",
+        "/v1/payment_methods",
+        "/v1/payment_methods/:id",
+        "/v1/setup_intents",
+        "/v1/setup_intents/:id",
+        "/v1/checkout/sessions",
+        "/v1/checkout/sessions/:id",
+        "/v1/prices",
+        "/v1/prices/:id",
+        "/v1/products",
+        "/v1/products/:id",
+        "/v1/events",
+        "/v1/events/:id",
+        "/v1/payment_intents/:id/confirm",
+        "/v1/payment_intents/:id/capture",
+        "/v1/payment_intents/:id/cancel",
+        "/v1/payment_methods/:id/attach",
+        "/v1/payment_methods/:id/detach",
+        "/v1/invoices/:id/pay",
+        "/v1/customers/:id/payment_methods"
+      ]
+    },
+    {
+      "name": "PayPal",
+      "category": "payments",
+      "domains": ["paypal.com", "braintreegateway.com", "braintree-api.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Adyen",
+      "category": "payments",
+      "domains": ["adyen.com", "adyenpayments.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Checkout.com",
+      "category": "payments",
+      "domains": ["checkout.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Square",
+      "category": "payments",
+      "domains": ["squareup.com", "squareupsandbox.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Worldpay",
+      "category": "payments",
+      "domains": ["worldpay.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mollie",
+      "category": "payments",
+      "domains": ["mollie.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Klarna",
+      "category": "payments",
+      "domains": ["klarna.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Affirm",
+      "category": "payments",
+      "domains": ["affirm.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Afterpay",
+      "category": "payments",
+      "domains": ["afterpay.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Razorpay",
+      "category": "payments",
+      "domains": ["razorpay.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Paddle",
+      "category": "payments",
+      "domains": ["paddle.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Authorize.Net",
+      "category": "payments",
+      "domains": ["authorize.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "GoCardless",
+      "category": "payments",
+      "domains": ["gocardless.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Paysafe",
+      "category": "payments",
+      "domains": ["paysafe.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Rapyd",
+      "category": "payments",
+      "domains": ["rapyd.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "dLocal",
+      "category": "payments",
+      "domains": ["dlocal.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Nuvei",
+      "category": "payments",
+      "domains": ["nuvei.com", "safecharge.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Payoneer",
+      "category": "payments",
+      "domains": ["payoneer.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Marqeta",
+      "category": "payments",
+      "domains": ["marqeta.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Lithic",
+      "category": "payments",
+      "domains": ["lithic.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Recurly",
+      "category": "payments",
+      "domains": ["recurly.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Chargebee",
+      "category": "payments",
+      "domains": ["chargebee.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Paystack",
+      "category": "payments",
+      "domains": ["paystack.co"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Flutterwave",
+      "category": "payments",
+      "domains": ["flutterwave.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mercado Pago",
+      "category": "payments",
+      "domains": ["mercadopago.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "PayU",
+      "category": "payments",
+      "domains": ["payu.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Revolut Business",
+      "category": "payments",
+      "domains": ["revolut.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Coinbase",
+      "category": "payments",
+      "domains": ["coinbase.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Wise",
+      "category": "payments",
+      "domains": ["wise.com", "transferwise.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Plaid",
+      "category": "banking",
+      "domains": ["plaid.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "TrueLayer",
+      "category": "banking",
+      "domains": ["truelayer.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Tink",
+      "category": "banking",
+      "domains": ["tink.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Yapily",
+      "category": "banking",
+      "domains": ["yapily.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Modern Treasury",
+      "category": "banking",
+      "domains": ["moderntreasury.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Unit",
+      "category": "banking",
+      "domains": ["unit.co"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Treasury Prime",
+      "category": "banking",
+      "domains": ["treasuryprime.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Increase",
+      "category": "banking",
+      "domains": ["increase.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Dwolla",
+      "category": "banking",
+      "domains": ["dwolla.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Railsr",
+      "category": "banking",
+      "domains": ["railsr.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Solaris",
+      "category": "banking",
+      "domains": ["solarisgroup.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Currencycloud",
+      "category": "banking",
+      "domains": ["currencycloud.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Synctera",
+      "category": "banking",
+      "domains": ["synctera.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "MX",
+      "category": "banking",
+      "domains": ["mx.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Finicity",
+      "category": "banking",
+      "domains": ["finicity.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Codat",
+      "category": "banking",
+      "domains": ["codat.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Nordigen (GoCardless Bank Account Data)",
+      "category": "banking",
+      "domains": ["nordigen.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Onfido",
+      "category": "kyc",
+      "domains": ["onfido.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Jumio",
+      "category": "kyc",
+      "domains": ["jumio.com", "netverify.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Veriff",
+      "category": "kyc",
+      "domains": ["veriff.com", "veriff.me"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Sumsub",
+      "category": "kyc",
+      "domains": ["sumsub.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Persona",
+      "category": "kyc",
+      "domains": ["withpersona.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Alloy",
+      "category": "kyc",
+      "domains": ["alloy.co"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Socure",
+      "category": "kyc",
+      "domains": ["socure.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Trulioo",
+      "category": "kyc",
+      "domains": ["trulioo.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "ComplyAdvantage",
+      "category": "kyc",
+      "domains": ["complyadvantage.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "IDnow",
+      "category": "kyc",
+      "domains": ["idnow.de", "idnow.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Shufti Pro",
+      "category": "kyc",
+      "domains": ["shuftipro.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mitek",
+      "category": "kyc",
+      "domains": ["miteksystems.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Incode",
+      "category": "kyc",
+      "domains": ["incode.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Sardine",
+      "category": "kyc",
+      "domains": ["sardine.ai"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Sift",
+      "category": "kyc",
+      "domains": ["sift.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Signifyd",
+      "category": "kyc",
+      "domains": ["signifyd.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Seon",
+      "category": "kyc",
+      "domains": ["seon.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Experian",
+      "category": "kyc",
+      "domains": ["experian.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Equifax",
+      "category": "kyc",
+      "domains": ["equifax.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "TransUnion",
+      "category": "kyc",
+      "domains": ["transunion.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Twilio",
+      "category": "messaging",
+      "domains": ["twilio.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Vonage",
+      "category": "messaging",
+      "domains": ["nexmo.com", "vonage.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "MessageBird (Bird)",
+      "category": "messaging",
+      "domains": ["messagebird.com", "bird.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Sinch",
+      "category": "messaging",
+      "domains": ["sinch.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Plivo",
+      "category": "messaging",
+      "domains": ["plivo.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Telnyx",
+      "category": "messaging",
+      "domains": ["telnyx.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Infobip",
+      "category": "messaging",
+      "domains": ["infobip.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Bandwidth",
+      "category": "messaging",
+      "domains": ["bandwidth.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Slack",
+      "category": "messaging",
+      "domains": ["slack.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Discord",
+      "category": "messaging",
+      "domains": ["discord.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Telegram",
+      "category": "messaging",
+      "domains": ["telegram.org"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Meta Graph API",
+      "category": "messaging",
+      "domains": ["graph.facebook.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "OneSignal",
+      "category": "messaging",
+      "domains": ["onesignal.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Firebase Cloud Messaging",
+      "category": "messaging",
+      "domains": ["fcm.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Apple Push Notification service",
+      "category": "messaging",
+      "domains": ["push.apple.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Pusher",
+      "category": "messaging",
+      "domains": ["pusher.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Ably",
+      "category": "messaging",
+      "domains": ["ably.io", "ably.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Stream",
+      "category": "messaging",
+      "domains": ["getstream.io", "stream-io-api.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Intercom",
+      "category": "messaging",
+      "domains": ["intercom.io", "intercom.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "SendGrid",
+      "category": "email",
+      "domains": ["sendgrid.com", "sendgrid.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mailgun",
+      "category": "email",
+      "domains": ["mailgun.net", "mailgun.org"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Postmark",
+      "category": "email",
+      "domains": ["postmarkapp.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mailchimp",
+      "category": "email",
+      "domains": ["mailchimp.com", "mandrillapp.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Brevo",
+      "category": "email",
+      "domains": ["brevo.com", "sendinblue.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "SparkPost",
+      "category": "email",
+      "domains": ["sparkpost.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Resend",
+      "category": "email",
+      "domains": ["resend.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mailjet",
+      "category": "email",
+      "domains": ["mailjet.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Customer.io",
+      "category": "email",
+      "domains": ["customer.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Klaviyo",
+      "category": "email",
+      "domains": ["klaviyo.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Loops",
+      "category": "email",
+      "domains": ["loops.so"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "OpenAI",
+      "category": "ai",
+      "domains": ["openai.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Anthropic",
+      "category": "ai",
+      "domains": ["anthropic.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Gemini API",
+      "category": "ai",
+      "domains": ["generativelanguage.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Cohere",
+      "category": "ai",
+      "domains": ["cohere.ai", "cohere.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mistral AI",
+      "category": "ai",
+      "domains": ["mistral.ai"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Hugging Face",
+      "category": "ai",
+      "domains": ["huggingface.co"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Replicate",
+      "category": "ai",
+      "domains": ["replicate.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Groq",
+      "category": "ai",
+      "domains": ["groq.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Together AI",
+      "category": "ai",
+      "domains": ["together.xyz", "together.ai"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Perplexity",
+      "category": "ai",
+      "domains": ["perplexity.ai"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "ElevenLabs",
+      "category": "ai",
+      "domains": ["elevenlabs.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Deepgram",
+      "category": "ai",
+      "domains": ["deepgram.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "AssemblyAI",
+      "category": "ai",
+      "domains": ["assemblyai.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Pinecone",
+      "category": "ai",
+      "domains": ["pinecone.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Auth0",
+      "category": "auth",
+      "domains": ["auth0.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Okta",
+      "category": "auth",
+      "domains": ["okta.com", "oktapreview.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Clerk",
+      "category": "auth",
+      "domains": ["clerk.com", "clerk.dev"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Firebase Authentication",
+      "category": "auth",
+      "domains": ["identitytoolkit.googleapis.com", "securetoken.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Microsoft identity platform",
+      "category": "auth",
+      "domains": ["login.microsoftonline.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google OAuth",
+      "category": "auth",
+      "domains": ["oauth2.googleapis.com", "accounts.google.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "WorkOS",
+      "category": "auth",
+      "domains": ["workos.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Stytch",
+      "category": "auth",
+      "domains": ["stytch.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Salesforce",
+      "category": "crm",
+      "domains": ["salesforce.com", "force.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "HubSpot",
+      "category": "crm",
+      "domains": ["hubapi.com", "hubspot.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Zendesk",
+      "category": "crm",
+      "domains": ["zendesk.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Freshdesk",
+      "category": "crm",
+      "domains": ["freshdesk.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Pipedrive",
+      "category": "crm",
+      "domains": ["pipedrive.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Zoho",
+      "category": "crm",
+      "domains": ["zoho.com", "zohoapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Front",
+      "category": "crm",
+      "domains": ["frontapp.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Segment",
+      "category": "analytics",
+      "domains": ["segment.io", "segment.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mixpanel",
+      "category": "analytics",
+      "domains": ["mixpanel.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Amplitude",
+      "category": "analytics",
+      "domains": ["amplitude.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "PostHog",
+      "category": "analytics",
+      "domains": ["posthog.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Analytics",
+      "category": "analytics",
+      "domains": ["google-analytics.com", "analytics.google.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Heap",
+      "category": "analytics",
+      "domains": ["heapanalytics.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "RudderStack",
+      "category": "analytics",
+      "domains": ["rudderstack.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Maps Platform",
+      "category": "maps",
+      "domains": ["maps.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Mapbox",
+      "category": "maps",
+      "domains": ["mapbox.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "HERE",
+      "category": "maps",
+      "domains": ["hereapi.com", "here.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Radar",
+      "category": "maps",
+      "domains": ["radar.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Shopify",
+      "category": "commerce",
+      "domains": ["myshopify.com", "shopify.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "BigCommerce",
+      "category": "commerce",
+      "domains": ["bigcommerce.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "commercetools",
+      "category": "commerce",
+      "domains": ["commercetools.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Avalara",
+      "category": "commerce",
+      "domains": ["avalara.com", "avalara.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "TaxJar",
+      "category": "commerce",
+      "domains": ["taxjar.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Shippo",
+      "category": "shipping",
+      "domains": ["goshippo.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "EasyPost",
+      "category": "shipping",
+      "domains": ["easypost.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "ShipEngine",
+      "category": "shipping",
+      "domains": ["shipengine.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "FedEx",
+      "category": "shipping",
+      "domains": ["fedex.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "UPS",
+      "category": "shipping",
+      "domains": ["ups.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "DHL",
+      "category": "shipping",
+      "domains": ["dhl.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "USPS",
+      "category": "shipping",
+      "domains": ["usps.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "GitHub",
+      "category": "productivity",
+      "domains": ["github.com", "githubusercontent.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "GitLab",
+      "category": "productivity",
+      "domains": ["gitlab.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Atlassian",
+      "category": "productivity",
+      "domains": ["atlassian.net", "atlassian.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Notion",
+      "category": "productivity",
+      "domains": ["notion.com", "notion.so"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Airtable",
+      "category": "productivity",
+      "domains": ["airtable.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Workspace APIs",
+      "category": "productivity",
+      "domains": [
+        "sheets.googleapis.com",
+        "drive.googleapis.com",
+        "gmail.googleapis.com",
+        "calendar.googleapis.com"
+      ],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Microsoft Graph",
+      "category": "productivity",
+      "domains": ["graph.microsoft.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Dropbox",
+      "category": "productivity",
+      "domains": ["dropboxapi.com", "dropbox.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Box",
+      "category": "productivity",
+      "domains": ["box.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "DocuSign",
+      "category": "productivity",
+      "domains": ["docusign.net", "docusign.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Calendly",
+      "category": "productivity",
+      "domains": ["calendly.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Zoom",
+      "category": "productivity",
+      "domains": ["zoom.us"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Typeform",
+      "category": "productivity",
+      "domains": ["typeform.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Linear",
+      "category": "productivity",
+      "domains": ["linear.app"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Asana",
+      "category": "productivity",
+      "domains": ["asana.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Xero",
+      "category": "accounting",
+      "domains": ["xero.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "QuickBooks (Intuit)",
+      "category": "accounting",
+      "domains": ["intuit.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "NetSuite",
+      "category": "accounting",
+      "domains": ["netsuite.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Sage",
+      "category": "accounting",
+      "domains": ["sage.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Bill.com",
+      "category": "accounting",
+      "domains": ["bill.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Algolia",
+      "category": "search",
+      "domains": ["algolia.net", "algolianet.com", "algolia.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Elastic Cloud",
+      "category": "search",
+      "domains": ["elastic.co"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Typesense Cloud",
+      "category": "search",
+      "domains": ["typesense.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "AWS",
+      "category": "infrastructure",
+      "domains": ["amazonaws.com", "aws.amazon.com", "awsapps.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Cloud",
+      "category": "infrastructure",
+      "domains": ["googleapis.com", "cloud.google.com", "storage.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Microsoft Azure",
+      "category": "infrastructure",
+      "domains": ["azure.com", "windows.net", "azure.net", "azurewebsites.net", "azure-api.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Cloudflare",
+      "category": "infrastructure",
+      "domains": ["cloudflare.com", "r2.cloudflarestorage.com", "workers.dev"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Fastly",
+      "category": "infrastructure",
+      "domains": ["fastly.net", "fastly.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Akamai",
+      "category": "infrastructure",
+      "domains": ["akamaized.net", "akamai.net", "akamaihd.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Vercel",
+      "category": "infrastructure",
+      "domains": ["vercel.com", "vercel.app"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Netlify",
+      "category": "infrastructure",
+      "domains": ["netlify.com", "netlify.app"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Heroku",
+      "category": "infrastructure",
+      "domains": ["heroku.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "DigitalOcean",
+      "category": "infrastructure",
+      "domains": ["digitalocean.com", "digitaloceanspaces.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Supabase",
+      "category": "infrastructure",
+      "domains": ["supabase.co", "supabase.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Firebase",
+      "category": "infrastructure",
+      "domains": ["firebaseio.com", "firebaseapp.com", "firestore.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "MongoDB Atlas",
+      "category": "infrastructure",
+      "domains": ["mongodb.net", "mongodb.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Upstash",
+      "category": "infrastructure",
+      "domains": ["upstash.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Redis Cloud",
+      "category": "infrastructure",
+      "domains": ["redis.cloud", "redislabs.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Neon",
+      "category": "infrastructure",
+      "domains": ["neon.tech"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "PlanetScale",
+      "category": "infrastructure",
+      "domains": ["psdb.cloud", "planetscale.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Backblaze B2",
+      "category": "infrastructure",
+      "domains": ["backblazeb2.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Cloudinary",
+      "category": "infrastructure",
+      "domains": ["cloudinary.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "imgix",
+      "category": "infrastructure",
+      "domains": ["imgix.net"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Docker Hub",
+      "category": "infrastructure",
+      "domains": ["docker.io", "docker.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "npm registry",
+      "category": "infrastructure",
+      "domains": ["npmjs.org", "npmjs.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Let's Encrypt",
+      "category": "infrastructure",
+      "domains": ["letsencrypt.org"],
+      "supportEmail": null,
+      "supportUrl": null
+    }
+  ]
+}

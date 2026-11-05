@@ -1,0 +1,391 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Slack message > latency, many endpoints, no dashboard link 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": true,
+        "text": "Incident opened: Acme Cards",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":red_circle: *Acme Cards: 7 endpoints slow*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (since 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• GET /v2/thing0/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET /v2/thing1/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET /v2/thing2/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET /v2/thing3/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET /v2/thing4/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• …and 2 more endpoints",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":warning: Other Acme Cards endpoints: also degraded (GET /v2/cards).",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident opened: Acme Cards: 7 endpoints slow
+Other Acme Cards endpoints: also degraded (GET /v2/cards).",
+}
+`;
+
+exports[`Slack message > open 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": true,
+        "text": "Incident opened: Acme Cards",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":red_circle: *Acme Cards: POST /v2/cards/:id/activate failing (38%)*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (since 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+production",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@acmecards.test · https://status.acmecards.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":white_check_mark: Other Acme Cards endpoints: OK.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "style": "danger",
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_01",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident opened: Acme Cards: POST /v2/cards/:id/activate failing (38%)
+Other Acme Cards endpoints: OK.
+https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`Slack message > resolve 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": true,
+        "text": "Incident resolved: Acme Cards",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":large_green_circle: *Acme Cards: POST /v2/cards/:id/activate recovered*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+20 min (from 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+production",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@acmecards.test · https://status.acmecards.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":white_check_mark: Other Acme Cards endpoints: OK.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_01",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident resolved: Acme Cards: POST /v2/cards/:id/activate recovered
+Other Acme Cards endpoints: OK.
+https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`email > latency, many endpoints, no dashboard link: text and HTML bodies > html 1`] = `
+"<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f6f8fa;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2328">
+<div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;padding:20px">
+<div style="font-size:13px;font-weight:600;color:#cf222e;text-transform:uppercase;letter-spacing:.04em">Incident opened</div>
+<h1 style="font-size:18px;margin:6px 0 14px">Acme Cards: 7 endpoints slow</h1>
+<table style="border-collapse:collapse;font-size:14px;margin-bottom:12px"><tr><td style="padding:2px 16px 2px 0;color:#59636e">Duration</td><td style="padding:2px 0">6 min (since 10:20 UTC)</td></tr><tr><td style="padding:2px 16px 2px 0;color:#59636e">Environment</td><td style="padding:2px 0">production</td></tr></table>
+<ul style="font-size:14px;padding-left:18px;margin:0 0 10px"><li>GET /v2/thing0/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)</li><li>GET /v2/thing1/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)</li><li>GET /v2/thing2/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)</li><li>GET /v2/thing3/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)</li><li>GET /v2/thing4/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)</li><li>…and 2 more endpoints</li></ul><p style="font-size:14px;margin:0 0 14px">Other Acme Cards endpoints: also degraded (GET /v2/cards).</p>
+<div style="font-size:12px;color:#59636e;margin-bottom:4px">Summary for the provider (paste as is):</div>
+<pre style="white-space:pre-wrap;font-size:13px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:10px;margin:0 0 16px">Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test</pre>
+</div>
+<div style="max-width:640px;margin:10px auto 0;font-size:12px;color:#59636e;text-align:center">Theirside</div>
+</body></html>"
+`;
+
+exports[`email > latency, many endpoints, no dashboard link: text and HTML bodies > text 1`] = `
+"Incident opened: Acme Cards: 7 endpoints slow
+
+Duration: 6 min (since 10:20 UTC)
+Environment: production
+
+- GET /v2/thing0/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+- GET /v2/thing1/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+- GET /v2/thing2/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+- GET /v2/thing3/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+- GET /v2/thing4/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+- …and 2 more endpoints
+Other Acme Cards endpoints: also degraded (GET /v2/cards).
+
+Summary for the provider (paste as is):
+Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test
+
+-- Theirside"
+`;
+
+exports[`email > open: text and HTML bodies > html 1`] = `
+"<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f6f8fa;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2328">
+<div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;padding:20px">
+<div style="font-size:13px;font-weight:600;color:#cf222e;text-transform:uppercase;letter-spacing:.04em">Incident opened</div>
+<h1 style="font-size:18px;margin:6px 0 14px">Acme Cards: POST /v2/cards/:id/activate failing (38%)</h1>
+<table style="border-collapse:collapse;font-size:14px;margin-bottom:12px"><tr><td style="padding:2px 16px 2px 0;color:#59636e">Duration</td><td style="padding:2px 0">6 min (since 10:20 UTC)</td></tr><tr><td style="padding:2px 16px 2px 0;color:#59636e">Environment</td><td style="padding:2px 0">production</td></tr><tr><td style="padding:2px 16px 2px 0;color:#59636e">Provider support</td><td style="padding:2px 0">support@acmecards.test · https://status.acmecards.test</td></tr></table>
+<ul style="font-size:14px;padding-left:18px;margin:0 0 10px"><li>POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)</li></ul><p style="font-size:14px;margin:0 0 14px">Other Acme Cards endpoints: OK.</p>
+<div style="font-size:12px;color:#59636e;margin-bottom:4px">Summary for the provider (paste as is):</div>
+<pre style="white-space:pre-wrap;font-size:13px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:10px;margin:0 0 16px">Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test</pre>
+<a href="https://theirside.internal.example/#/incidents/inc_01" style="display:inline-block;background:#1f2328;color:#ffffff;text-decoration:none;font-size:14px;padding:8px 14px;border-radius:6px">Open in dashboard</a>
+</div>
+<div style="max-width:640px;margin:10px auto 0;font-size:12px;color:#59636e;text-align:center">Theirside</div>
+</body></html>"
+`;
+
+exports[`email > open: text and HTML bodies > text 1`] = `
+"Incident opened: Acme Cards: POST /v2/cards/:id/activate failing (38%)
+
+Duration: 6 min (since 10:20 UTC)
+Environment: production
+Provider support: support@acmecards.test · https://status.acmecards.test
+
+- POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+Other Acme Cards endpoints: OK.
+
+Summary for the provider (paste as is):
+Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test
+
+Open in dashboard: https://theirside.internal.example/#/incidents/inc_01
+
+-- Theirside"
+`;
+
+exports[`email > resolve: text and HTML bodies > html 1`] = `
+"<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f6f8fa;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2328">
+<div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;padding:20px">
+<div style="font-size:13px;font-weight:600;color:#1a7f37;text-transform:uppercase;letter-spacing:.04em">Incident resolved</div>
+<h1 style="font-size:18px;margin:6px 0 14px">Acme Cards: POST /v2/cards/:id/activate recovered</h1>
+<table style="border-collapse:collapse;font-size:14px;margin-bottom:12px"><tr><td style="padding:2px 16px 2px 0;color:#59636e">Duration</td><td style="padding:2px 0">20 min (from 10:20 UTC)</td></tr><tr><td style="padding:2px 16px 2px 0;color:#59636e">Environment</td><td style="padding:2px 0">production</td></tr><tr><td style="padding:2px 16px 2px 0;color:#59636e">Provider support</td><td style="padding:2px 0">support@acmecards.test · https://status.acmecards.test</td></tr></table>
+<ul style="font-size:14px;padding-left:18px;margin:0 0 10px"><li>POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)</li></ul><p style="font-size:14px;margin:0 0 14px">Other Acme Cards endpoints: OK.</p>
+<div style="font-size:12px;color:#59636e;margin-bottom:4px">Summary for the provider (paste as is):</div>
+<pre style="white-space:pre-wrap;font-size:13px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:10px;margin:0 0 16px">Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test</pre>
+<a href="https://theirside.internal.example/#/incidents/inc_01" style="display:inline-block;background:#1f2328;color:#ffffff;text-decoration:none;font-size:14px;padding:8px 14px;border-radius:6px">Open in dashboard</a>
+</div>
+<div style="max-width:640px;margin:10px auto 0;font-size:12px;color:#59636e;text-align:center">Theirside</div>
+</body></html>"
+`;
+
+exports[`email > resolve: text and HTML bodies > text 1`] = `
+"Incident resolved: Acme Cards: POST /v2/cards/:id/activate recovered
+
+Duration: 20 min (from 10:20 UTC)
+Environment: production
+Provider support: support@acmecards.test · https://status.acmecards.test
+
+- POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+Other Acme Cards endpoints: OK.
+
+Summary for the provider (paste as is):
+Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test
+
+Open in dashboard: https://theirside.internal.example/#/incidents/inc_01
+
+-- Theirside"
+`;

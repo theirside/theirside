@@ -1,0 +1,55 @@
+# dependencies and build output
+node_modules/
+*.tgz
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.turbo/
+.vite/
+apps/collector/public/
+playwright-report/
+test-results/
+
+# env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# JetBrains per-user files (shared project files stay tracked)
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/tasks.xml
+.idea/shelf/
+.idea/dictionaries/
+.idea/httpRequests/
+.idea/dataSources/
+.idea/dataSources.local.xml
+.idea/contentModel.xml
+.idea/**/sonarlint/
+.idea/copilot*
+
+# VS Code per-user files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# soak results (local runs)
+tools/soak/results/
+
+# vocabulary miner cache (segments of the APIs.guru specs)
+tools/vocabulary/.cache/
+
+Claude outputs
+.private/

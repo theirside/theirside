@@ -1,0 +1,16 @@
+{
+  "name": "@theirside/soak",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SDK memory soak: a host app making mixed fetch/http/axios calls through the built SDK while the collector goes up and down.",
+  "type": "module",
+  "scripts": {
+    "soak": "node src/run.mjs",
+    "soak:ci": "node src/run.mjs --minutes 5 --warmup 1 --project-minutes 55 --max-growth-mb 5 --ci",
+    "diff": "node src/diff-snapshots.mjs"
+  },
+  "dependencies": {
+    "@theirside/sdk": "workspace:*",
+    "axios": "^1.21.0"
+  }
+}

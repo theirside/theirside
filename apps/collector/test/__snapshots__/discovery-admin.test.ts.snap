@@ -1,0 +1,62 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`discovery digest > renders for Slack and email 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": true,
+        "text": "New providers discovered",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": "• *Stripe* (payments): api.stripe.com
+• *AWS* (infrastructure): *.amazonaws.com · alerts off",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": "Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Review providers",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal/#/settings/providers",
+        },
+      ],
+      "type": "actions",
+    },
+  ],
+  "text": "New providers discovered: 2 new providers discovered: Stripe, AWS
+Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.
+https://theirside.internal/#/settings/providers",
+}
+`;
+
+exports[`discovery digest > renders for Slack and email 2`] = `
+"2 new providers discovered: Stripe, AWS
+
+- Stripe (payments): api.stripe.com
+- AWS (infrastructure): *.amazonaws.com (alerts off)
+
+Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.
+
+Review providers: https://theirside.internal/#/settings/providers
+
+-- Theirside"
+`;

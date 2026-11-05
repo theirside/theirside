@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/coverage
+apps/collector/public
+.git
+.idea
+*.iml
+**/.env
+**/.env.*
+playwright-report
+test-results
