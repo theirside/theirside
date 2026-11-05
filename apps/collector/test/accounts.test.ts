@@ -261,7 +261,8 @@ describe('sign-in, sessions and CSRF', () => {
       currentPassword: 'wrong wrong wrong',
       newPassword: 'another long passphrase',
     });
-    expect(bad.statusCode).toBe(401);
+    expect(bad.statusCode).toBe(403);
+    expect(bad.json().error).toBe('wrong_password');
     const res = await a.req('POST', '/v1/account/password', {
       currentPassword: PASSWORD,
       newPassword: 'another long passphrase',
@@ -578,6 +579,7 @@ describe('password reset', () => {
 
     const link = await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, {
       sendEmail: false,
+      stepUp: { password: PASSWORD },
     });
     expect(link.statusCode).toBe(200);
     const { url, emailed } = link.json();
@@ -610,12 +612,20 @@ describe('password reset', () => {
 
   it('expires after 1 hour, and a newer link replaces the older one', async () => {
     const one = tokenFrom(
-      (await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, { sendEmail: false })).json()
-        .url,
+      (
+        await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, {
+          sendEmail: false,
+          stepUp: { password: PASSWORD },
+        })
+      ).json().url,
     );
     const two = tokenFrom(
-      (await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, { sendEmail: false })).json()
-        .url,
+      (
+        await admin.req('POST', `/v1/admin/users/${userId}/reset-link`, {
+          sendEmail: false,
+          stepUp: { password: PASSWORD },
+        })
+      ).json().url,
     );
     expect(
       (await new Browser(t).req('POST', '/v1/auth/password-reset/info', { token: one })).statusCode,
@@ -697,7 +707,10 @@ describe('managing users', () => {
     expect((await kim.me()).statusCode).toBe(401);
 
     await kim.login('kim@example.com');
-    expect((await kim.req('DELETE', `/v1/admin/users/${me}`)).statusCode).toBe(204);
+    const removed = await kim.req('DELETE', `/v1/admin/users/${me}`, {
+      stepUp: { password: PASSWORD },
+    });
+    expect(removed.statusCode).toBe(200);
     expect((await admin.me()).statusCode).toBe(401);
     // kim is now the last user
     const adminToken = { authorization: `Bearer ${THEIRSIDE_ADMIN_TOKEN}` };

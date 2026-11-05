@@ -65,7 +65,7 @@ export function App() {
   if (section === 'providers' && arg) page = <Provider name={arg} environment={environment} />;
   else if (section === 'incidents' && arg) page = <Incident id={arg} />;
   else if (section === 'incidents') page = <Incidents />;
-  else if (section === 'settings') page = <Settings tab={arg ?? 'providers'} />;
+  else if (section === 'settings') page = <Settings tab={arg ?? 'providers'} me={me} />;
   else if (section === 'account') page = <Account me={me} onSignedOut={() => setMe(null)} />;
   else page = <Overview environment={environment} />;
 

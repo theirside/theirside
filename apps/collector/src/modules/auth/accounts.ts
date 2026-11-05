@@ -7,7 +7,7 @@ import { newId, safeEqual, sha256Hex } from '../../util/ids.js';
 import type { EntitlementsResolver } from '../entitlements/types.js';
 import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
-import { hashToken, newToken, type SessionManager } from './session.js';
+import { hashToken, newToken, type Principal, type SessionManager } from './session.js';
 import { loginKey, type LoginThrottle } from './throttle.js';
 import type { ProxyIdentity } from './proxy-auth.js';
 import { newRecoveryCode } from './totp.js';
@@ -275,7 +275,10 @@ export class Accounts {
     return user;
   }
 
-  /** Re-check the password before sensitive account changes (throttled like sign-in). */
+  /**
+   * Re-check the password before sensitive account changes (throttled like sign-in).
+   * 403, not 401: the session is fine, only this confirmation failed.
+   */
   async confirmPassword(userId: string, password: unknown, ip: string): Promise<UserRecord> {
     const user = await this.storage.auth.getUser(userId);
     if (!user || user.authSource !== 'password')
@@ -285,9 +288,69 @@ export class Accounts {
     if (!(await verifyPassword(user.passwordHash, typeof password === 'string' ? password : ''))) {
       await this.throttle.fail('login', login);
       await this.throttle.fail('ip', ip);
-      throw new HttpProblem(401, 'invalid_credentials', 'The current password is not correct.');
+      throw new HttpProblem(403, 'wrong_password', 'Your password is not correct.');
     }
     return user;
+  }
+
+  /**
+   * Step-up before changing someone else's account (their 2FA, a password reset link,
+   * removal, role): the acting user's password and, with their 2FA on, a code from
+   * their app (or a recovery code); a session from the admin token re-enters the
+   * token. Bearer requests just presented the token, and proxy users are
+   * re-authenticated by their identity provider. Failures count like sign-in failures.
+   */
+  async stepUp(p: Principal, raw: unknown, ip: string): Promise<void> {
+    if (p.via === 'admin-token' || p.via === 'proxy') return;
+    const given = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+    if (p.userId === ADMIN_TOKEN_USER_ID) {
+      const token = str(given.adminToken);
+      if (!token) throw stepUpRequired(['adminToken']);
+      await this.checkIp(ip);
+      if (!this.config.adminToken || !safeEqual(token, this.config.adminToken)) {
+        await this.failIp(ip);
+        throw new HttpProblem(403, 'wrong_admin_token', 'That admin token is not valid.');
+      }
+      return;
+    }
+    const me = await this.storage.auth.getUser(p.userId);
+    if (!me || me.authSource !== 'password') throw stepUpRequired(['password']);
+    const needs = me.totpEnabled ? ['password', 'code'] : ['password'];
+    if (!str(given.password) || (me.totpEnabled && !str(given.code))) throw stepUpRequired(needs);
+    await this.confirmPassword(me.id, given.password, ip);
+    const login = loginKey(me.email ?? me.id, ip);
+    if (me.totpEnabled && !(await this.twoFactor.verify(me, given.code))) {
+      await this.throttle.fail('login', login);
+      await this.throttle.fail('ip', ip);
+      throw new HttpProblem(
+        403,
+        'wrong_code',
+        'That two-factor code is not correct (each code works once; wait for the next one).',
+      );
+    }
+    // only a complete step-up clears the count: a right password alone mustn't reset code guessing
+    await this.throttle.clear('login', login);
+  }
+
+  /** How an email names who made a change. */
+  private async actorLabel(userId: string): Promise<string> {
+    if (userId === ADMIN_TOKEN_USER_ID) return 'Someone using the collector admin token';
+    const u = await this.storage.auth.getUser(userId);
+    return u ? (u.email ? `${u.name} (${u.email})` : u.name) : 'Another user';
+  }
+
+  /** Tell a user that someone else changed their account; best effort, SMTP only. */
+  private async notify(user: UserRecord, actorId: string, subject: string, what: string) {
+    if (actorId === user.id) return { notified: false };
+    const by = await this.actorLabel(actorId);
+    const sent = await this.deliver(
+      user.email,
+      subject,
+      `${by} ${what}\n\nIf you didn't expect this, contact them or another Theirside admin.\n`,
+      true,
+    );
+    return { notified: sent.emailed };
   }
 
   async signedIn(userId: string): Promise<void> {
@@ -507,6 +570,14 @@ export class Accounts {
       resetEmailText(url),
       input.sendEmail,
     );
+    // the link itself goes to whoever made it: tell the owner it exists
+    if (!sent.emailed)
+      await this.notify(
+        user,
+        input.byUserId,
+        'A password reset link was made for your Theirside account',
+        `made a link that sets a new password for your Theirside account (${user.email}). It works once, until ${expiresAt.slice(0, 16).replace('T', ' ')} UTC.`,
+      );
     return { url, expiresAt, ...sent };
   }
 
@@ -616,16 +687,38 @@ export class Accounts {
     return this.storage.auth.deleteUserSessions(userId);
   }
 
-  async removeUser(orgId: string, actorId: string, userId: string): Promise<void> {
+  async removeUser(orgId: string, actorId: string, userId: string): Promise<{ notified: boolean }> {
     if (actorId === userId)
       throw new HttpProblem(400, 'cannot_remove_self', 'You cannot remove your own account.');
-    await this.memberOf(orgId, userId);
+    const user = await this.memberOf(orgId, userId);
     const others = (await this.storage.auth.listUsers(orgId)).filter(
       (u) => u.id !== userId && (u.authSource === 'proxy' || u.passwordHash),
     );
     if (others.length === 0)
       throw new HttpProblem(409, 'last_user', 'This is the last user who can sign in.');
     await this.storage.auth.deleteUser(userId);
+    return this.notify(
+      user,
+      actorId,
+      'Your Theirside account was removed',
+      `removed your Theirside account (${user.email}). You can no longer sign in to the dashboard.`,
+    );
+  }
+
+  /** Lost phone: someone else turns a user's 2FA off (recovery codes go too). */
+  async disableTwoFactorFor(
+    orgId: string,
+    actorId: string,
+    userId: string,
+  ): Promise<{ notified: boolean }> {
+    const user = await this.memberOf(orgId, userId);
+    await this.twoFactor.disable(userId);
+    return this.notify(
+      user,
+      actorId,
+      'Two-factor sign-in was turned off for your Theirside account',
+      `turned off two-factor sign-in for your Theirside account (${user.email}). Signing in now needs only your password; you can set it up again on your account page.`,
+    );
   }
 }
 
@@ -635,4 +728,13 @@ function resetEmailText(url: string): string {
     `Choose a new password here (the link works once and expires in 1 hour):\n${url}\n\n` +
     `If you didn't ask for this, ignore this email; your password stays the same.\n`
   );
+}
+
+function stepUpRequired(needs: string[]): HttpProblem {
+  const what = needs.includes('adminToken')
+    ? 'the admin token'
+    : needs.includes('code')
+      ? 'your password and a two-factor code'
+      : 'your password';
+  return new HttpProblem(403, 'step_up_required', `Confirm with ${what} to do this.`, { needs });
 }

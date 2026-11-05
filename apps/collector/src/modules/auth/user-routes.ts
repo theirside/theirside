@@ -55,8 +55,11 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return reply.code(204).send();
   });
 
+  // changes to someone else's account need step-up (body.stepUp) and email them
+
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/reset-link', pre, async (req) => {
     const p = writer(req);
+    await ctx.accounts.stepUp(p, body(req).stepUp, req.ip);
     return ctx.accounts.resetLink({
       orgId: p.orgId,
       byUserId: p.userId,
@@ -71,18 +74,23 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return { signedOut: await ctx.accounts.signOutUser(p.orgId, req.params.id) };
   });
 
-  app.delete<{ Params: { id: string } }>('/v1/admin/users/:id', pre, async (req, reply) => {
+  app.delete<{ Params: { id: string } }>('/v1/admin/users/:id', pre, async (req) => {
     const p = writer(req);
-    await ctx.accounts.removeUser(p.orgId, p.userId, req.params.id);
-    return reply.code(204).send();
+    if (p.userId === req.params.id)
+      throw new HttpProblem(400, 'cannot_remove_self', 'You cannot remove your own account.');
+    await ctx.accounts.memberOf(p.orgId, req.params.id);
+    await ctx.accounts.stepUp(p, body(req).stepUp, req.ip);
+    return ctx.accounts.removeUser(p.orgId, p.userId, req.params.id);
   });
 
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/disable-2fa', pre, async (req) => {
-    // a lost phone: another user (or the admin token) turns 2FA off; recovery codes go too
     const p = writer(req);
     await ctx.accounts.memberOf(p.orgId, req.params.id);
-    await ctx.accounts.twoFactor.disable(req.params.id);
-    return { ok: true };
+    await ctx.accounts.stepUp(p, body(req).stepUp, req.ip);
+    return {
+      ok: true,
+      ...(await ctx.accounts.disableTwoFactorFor(p.orgId, p.userId, req.params.id)),
+    };
   });
 
   app.get('/v1/admin/settings/security', pre, async (req) => {

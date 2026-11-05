@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type LinkResult, type PendingInvite, type UserRow } from '../api';
+import { api, type LinkResult, type Me, type PendingInvite, type UserRow } from '../api';
 import { Card, CopyButton, ErrorBox, usePoll } from '../components/ui';
 import { ago, when } from '../format';
 
@@ -46,6 +46,79 @@ function LinkCard({
   );
 }
 
+interface StepUp {
+  password?: string;
+  code?: string;
+  adminToken?: string;
+}
+
+/**
+ * Changes to someone else's account ask who you are again: your password (and a
+ * 2FA code when yours is on), or the admin token in a break-glass session. Identity
+ * proxy users are re-checked by their identity provider, so they only confirm.
+ */
+function StepUpForm({
+  me,
+  question,
+  onConfirm,
+  onCancel,
+}: {
+  me: Me;
+  question: string;
+  onConfirm: (s: StepUp) => void;
+  onCancel: () => void;
+}) {
+  const [s, setS] = useState<StepUp>({});
+  const field = (key: keyof StepUp, label: string, props: Record<string, unknown>) => (
+    <label>
+      {label}
+      <input
+        value={s[key] ?? ''}
+        onChange={(e) => setS({ ...s, [key]: e.target.value })}
+        name={`step-up-${key}`}
+        {...props}
+      />
+    </label>
+  );
+  return (
+    <Card title="Confirm it's you">
+      <form
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onConfirm(s);
+        }}
+      >
+        <p className="wide">{question}</p>
+        {me.via === 'proxy' ? null : me.breakGlass ? (
+          field('adminToken', 'Admin token', { type: 'password', autoFocus: true })
+        ) : (
+          <>
+            {field('password', 'Your password', {
+              type: 'password',
+              autoFocus: true,
+              autoComplete: 'current-password',
+            })}
+            {me.twoFactor.enabled &&
+              field('code', 'Code from your authenticator app', {
+                inputMode: 'numeric',
+                autoComplete: 'one-time-code',
+              })}
+          </>
+        )}
+        <div className="wide row">
+          <button className="btn primary" type="submit">
+            Confirm
+          </button>
+          <button className="btn" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 function SecurityCard() {
   const [data, error, reload] = usePoll(
     () => api<Security>('/v1/admin/settings/security'),
@@ -81,16 +154,29 @@ function SecurityCard() {
   );
 }
 
-export function UsersTab() {
+export function UsersTab({ me }: { me: Me }) {
   const [data, error, reload] = usePoll(() => api<UsersData>('/v1/admin/users'), [], 30_000);
   const [email, setEmail] = useState('');
   const [sendEmail, setSendEmail] = useState(true);
   const [link, setLink] = useState<{ title: string; link: LinkResult } | null>(null);
   const [msg, setMsg] = useState('');
+  const [done, setDone] = useState('');
+  const [pending, setPending] = useState<{
+    question: string;
+    act: (stepUp: StepUp) => Promise<unknown>;
+  } | null>(null);
 
   const run = (p: Promise<unknown>) => {
     setMsg('');
+    setDone('');
     p.then(reload, (e) => setMsg((e as Error).message));
+  };
+  /** An action on someone else's account: step-up first, and say whether they were emailed. */
+  const stepUp = (question: string, act: (stepUp: StepUp) => Promise<unknown>) => {
+    setMsg('');
+    setDone('');
+    setLink(null);
+    setPending({ question, act });
   };
   const inviteUser = () =>
     run(
@@ -103,10 +189,10 @@ export function UsersTab() {
       }),
     );
   const resetLink = (u: UserRow) =>
-    run(
+    stepUp(`Make a password reset link for ${u.email ?? u.name}?`, (s) =>
       api<LinkResult>(`/v1/admin/users/${u.id}/reset-link`, {
         method: 'POST',
-        body: { sendEmail: !!data?.emailEnabled && sendEmail },
+        body: { sendEmail: !!data?.emailEnabled && sendEmail, stepUp: s },
       }).then((r) => setLink({ title: `Password reset for ${u.email ?? u.name}`, link: r })),
     );
   const confirmThen = (question: string, p: () => Promise<unknown>) => {
@@ -120,8 +206,30 @@ export function UsersTab() {
         Everyone here can do everything, including managing users. Roles, SSO and an audit log are
         part of the paid editions.
       </p>
+      {pending && (
+        <StepUpForm
+          me={me}
+          question={pending.question}
+          onCancel={() => setPending(null)}
+          onConfirm={(s) => {
+            const act = pending.act;
+            setMsg('');
+            // the form stays open on a wrong password or code
+            act(s).then(
+              (r) => {
+                setPending(null);
+                if ((r as { notified?: boolean } | undefined)?.notified)
+                  setDone('Done. They were emailed about it.');
+                reload();
+              },
+              (e) => setMsg((e as Error).message),
+            );
+          }}
+        />
+      )}
       {link && <LinkCard title={link.title} link={link.link} onClose={() => setLink(null)} />}
       {msg && <div className="error">{msg}</div>}
+      {done && <div className="ok">{done}</div>}
       <Card title="Invite someone">
         <form
           className="form"
@@ -199,9 +307,13 @@ export function UsersTab() {
                     <button
                       className="btn small"
                       onClick={() =>
-                        confirmThen(
+                        stepUp(
                           `Turn off two-factor sign-in for ${u.email}? Do this when they lost their phone; they can set it up again.`,
-                          () => api(`/v1/admin/users/${u.id}/disable-2fa`, { method: 'POST' }),
+                          (s) =>
+                            api(`/v1/admin/users/${u.id}/disable-2fa`, {
+                              method: 'POST',
+                              body: { stepUp: s },
+                            }),
                         )
                       }
                     >
@@ -224,8 +336,8 @@ export function UsersTab() {
                     <button
                       className="btn small danger"
                       onClick={() =>
-                        confirmThen(`Remove ${u.email ?? u.name}? They lose access at once.`, () =>
-                          api(`/v1/admin/users/${u.id}`, { method: 'DELETE' }),
+                        stepUp(`Remove ${u.email ?? u.name}? They lose access at once.`, (s) =>
+                          api(`/v1/admin/users/${u.id}`, { method: 'DELETE', body: { stepUp: s } }),
                         )
                       }
                     >

@@ -197,7 +197,7 @@ describe('two-factor sign-in', () => {
     expect(
       (await b.req('POST', '/v1/account/2fa/recovery-codes', { password: 'nope nope nope' }))
         .statusCode,
-    ).toBe(401);
+    ).toBe(403);
     const fresh = await b.req('POST', '/v1/account/2fa/recovery-codes', { password: PASSWORD });
     expect(fresh.json().recoveryCodes).toHaveLength(10);
     // the old ones stop working
@@ -205,7 +205,9 @@ describe('two-factor sign-in', () => {
     recoveryCodes = fresh.json().recoveryCodes;
     expect(
       (await b.req('POST', '/v1/account/2fa/disable', { password: 'nope nope nope' })).statusCode,
-    ).toBe(401);
+    ).toBe(403);
+    // a wrong confirmation is not a lost session
+    expect((await b.me()).statusCode).toBe(200);
   });
 });
 
@@ -214,6 +216,7 @@ describe('requiring 2FA for everyone', () => {
   let admin: Browser;
   let bob: Browser;
   let bobId: string;
+  let adminSecret: string;
   beforeAll(async () => {
     t = await startTestApp({ env: { THEIRSIDE_SECRET_KEY: KEY_A } });
     admin = await setUp(t);
@@ -231,7 +234,7 @@ describe('requiring 2FA for everyone', () => {
     const res = await admin.req('PUT', '/v1/admin/settings/security', { require2fa: true });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('enable_2fa_first');
-    await enrol(t, admin);
+    adminSecret = (await enrol(t, admin)).secret;
     expect(
       (await admin.req('PUT', '/v1/admin/settings/security', { require2fa: true })).statusCode,
     ).toBe(200);
@@ -261,7 +264,10 @@ describe('requiring 2FA for everyone', () => {
   });
 
   it('a lost phone: another user turns 2FA off for you; the admin token is never asked for a code', async () => {
-    expect((await admin.req('POST', `/v1/admin/users/${bobId}/disable-2fa`)).statusCode).toBe(200);
+    const off = await admin.req('POST', `/v1/admin/users/${bobId}/disable-2fa`, {
+      stepUp: { password: PASSWORD, code: codeAt(t, adminSecret) },
+    });
+    expect(off.statusCode).toBe(200);
     const b = new Browser(t);
     const res = await b.login('bob@example.com');
     expect(res.json().mfaRequired).toBeUndefined();

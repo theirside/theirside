@@ -22,6 +22,14 @@ Then name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup p
 - **Sessions**: an `HttpOnly`, `SameSite=Strict` cookie, `Secure` when the dashboard is served over https. A session ends after 7 days (`THEIRSIDE_SESSION_MAX_AGE_HOURS`) or 24 hours without use (`THEIRSIDE_SESSION_IDLE_HOURS`). **Sign out everywhere** (your account page) ends all of yours; Settings → Users → Sign out ends someone else's; changing your password ends your other sessions.
 - **Removing a user** takes effect at once. Nobody can remove themselves or the last user who can sign in.
 
+## Changes to someone else's account
+
+Making a password reset link for someone, turning off their 2FA or removing them asks **who you are again** first (step-up): your password, plus a code from your authenticator app when your own 2FA is on (a recovery code works too). Wrong answers count like wrong sign-ins. So an unlocked laptop or a stolen session cookie isn't enough to take over another account.
+
+- Signed in with the **admin token**, you enter the token again. Scripts using `Authorization: Bearer` aren't asked; they just sent it.
+- Through an **identity proxy**, you aren't asked: there is no password, and the proxy signs you in on every request.
+- With **SMTP** configured, the person is emailed who did it: "Ada (ada@example.com) turned off two-factor sign-in for your Theirside account…". When their reset link is emailed to them, that email is the notice. Signing someone out (Settings → Users → Sign out) doesn't ask or email.
+
 ## Brute-force protection
 
 - **Per email and address**: 4 wrong passwords or 2FA codes for one email from one address are free; after that, each failure makes that email wait at that address 1 second, then 2, 4, 8… up to 15 minutes, even for the right password. A success, or a day, starts the count over. Because the address is part of the key, someone guessing from their own address never slows the real user down at theirs, and nobody can lock an account. Emails without an account are delayed exactly the same way, so the answers never reveal who has one. Confirming your password for a sensitive change counts the same way.

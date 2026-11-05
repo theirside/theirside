@@ -8,6 +8,7 @@ import {
   type SdkInstance,
   type StatusPage,
   type StatusPageList,
+  type Me,
 } from '../api';
 import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
 import { ago, when } from '../format';
@@ -23,7 +24,7 @@ const TABS = [
   ['users', 'Users'],
 ] as const;
 
-export function Settings({ tab }: { tab: string }) {
+export function Settings({ tab, me }: { tab: string; me: Me }) {
   return (
     <>
       <div className="page-h">
@@ -41,7 +42,7 @@ export function Settings({ tab }: { tab: string }) {
       {tab === 'api-keys' && <ApiKeysTab />}
       {tab === 'sdk' && <SdkTab />}
       {tab === 'status-page' && <StatusPageTab />}
-      {tab === 'users' && <UsersTab />}
+      {tab === 'users' && <UsersTab me={me} />}
     </>
   );
 }

@@ -250,7 +250,12 @@ test('accounts: invite link, two-factor setup, sign-in with a recovery code', as
   await page.reload();
   const row = page.getByTestId('users').getByRole('row', { name: new RegExp(email) });
   await expect(row).toBeVisible();
-  page.once('dialog', (d) => void d.accept());
+  // a change to someone else's account asks for your password again
   await row.getByRole('button', { name: 'Remove' }).click();
+  await page.getByLabel('Your password').fill('not my password');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByText('Your password is not correct.')).toBeVisible();
+  await page.getByLabel('Your password').fill(SMOKE_PASSWORD);
+  await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(row).toHaveCount(0);
 });
