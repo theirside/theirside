@@ -53,6 +53,7 @@ services:
       THEIRSIDE_AUTH_PROXY_HEADER: ${THEIRSIDE_AUTH_PROXY_HEADER:-}
       THEIRSIDE_AUTH_PROXY_ALB_ARN: ${THEIRSIDE_AUTH_PROXY_ALB_ARN:-}
       THEIRSIDE_AUTH_PROXY_AUTO_CREATE: ${THEIRSIDE_AUTH_PROXY_AUTO_CREATE:-}
+      THEIRSIDE_ADMIN_EMAILS: ${THEIRSIDE_ADMIN_EMAILS:-}
       # extra catalog entries for the demo's fake providers; they only match the reserved
       # .test TLD, so they never affect real traffic. Set it to empty to disable.
       THEIRSIDE_CATALOG_OVERRIDE: ${THEIRSIDE_CATALOG_OVERRIDE-/app/demo-catalog.json}

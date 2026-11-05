@@ -102,12 +102,12 @@ describe('API keys (Settings → API keys)', () => {
     expect((await t.app.inject(ingestRequest(batch([event()])))).statusCode).toBe(401);
   });
 
-  it('only owners and admins create or revoke keys', async () => {
-    await t.db.pool.query(`UPDATE memberships SET role = 'viewer'`);
+  it('only admins create or revoke keys', async () => {
+    await t.db.pool.query(`UPDATE memberships SET role = 'member'`);
     expect(
       (await admin('POST', '/v1/admin/api-keys', { name: 'x', scopes: ['read'] })).statusCode,
     ).toBe(403);
-    await t.db.pool.query(`UPDATE memberships SET role = 'owner'`);
+    await t.db.pool.query(`UPDATE memberships SET role = 'admin'`);
   });
 });
 

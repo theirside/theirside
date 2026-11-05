@@ -4,7 +4,7 @@ import type { AppContext } from '../../context.js';
 import type { ApiKeyRecord } from '../../storage/types.js';
 import { createApiKey } from './api-keys.js';
 import { requireAdmin } from './routes.js';
-import { adminTenant, canWrite } from './tenant.js';
+import { adminTenant } from './tenant.js';
 
 const keyInput = z.object({
   name: z.string().trim().min(1).max(100),
@@ -42,7 +42,6 @@ export async function registerApiKeyRoutes(app: FastifyInstance, ctx: AppContext
   });
 
   app.post('/v1/admin/api-keys', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = keyInput.safeParse(req.body);
@@ -62,7 +61,6 @@ export async function registerApiKeyRoutes(app: FastifyInstance, ctx: AppContext
 
   /** Revocation applies at once on this collector; other replicas within their 60 s key cache. */
   app.delete('/v1/admin/api-keys/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const ok = await ctx.storage.config.revokeApiKey(tenant, (req.params as { id: string }).id);

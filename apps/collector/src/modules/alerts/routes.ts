@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../context.js';
 import type { AlertChannelRecord } from '../../storage/types.js';
 import { requireAdmin } from '../auth/routes.js';
-import { adminTenant, canWrite } from '../auth/tenant.js';
+import { adminTenant } from '../auth/tenant.js';
 import type { AlertPayload } from './channels.js';
 
 const channelFields = {
@@ -78,7 +78,6 @@ export async function registerAlertRoutes(app: FastifyInstance, ctx: AppContext)
   });
 
   app.post('/v1/admin/alert-channels', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = channelInput.safeParse(req.body);
@@ -93,7 +92,6 @@ export async function registerAlertRoutes(app: FastifyInstance, ctx: AppContext)
   });
 
   app.patch('/v1/admin/alert-channels/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const { id } = req.params as { id: string };
@@ -117,7 +115,6 @@ export async function registerAlertRoutes(app: FastifyInstance, ctx: AppContext)
   });
 
   app.delete('/v1/admin/alert-channels/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const ok = await ctx.storage.config.deleteAlertChannel(

@@ -6,9 +6,9 @@ import type { AppContext } from '../../context.js';
 import { isStorageUnavailable } from '../../storage/postgres.js';
 import type { Incident, Tenant } from '../../storage/types.js';
 import { bearerToken } from '../auth/api-keys.js';
-import { requireAdmin } from '../auth/routes.js';
+import { adminOnly, requireAdmin } from '../auth/routes.js';
 import { OTHER_PROVIDER } from '../discovery/directory.js';
-import { adminTenant, canWrite } from '../auth/tenant.js';
+import { adminTenant } from '../auth/tenant.js';
 import { computeHealth } from './health.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
 
@@ -133,6 +133,8 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
 
   // ---------------------------------------------------------------- dashboard API (admin session)
   const auth = { preHandler: requireAdmin(ctx) };
+  // members manage providers too, except what the public status page shows
+  const members = { ...auth, config: { role: 'member' as const } };
   const tenantOf = (req: FastifyRequest, reply: FastifyReply) => adminTenant(ctx, req, reply);
 
   app.get('/v1/admin/overview', auth, async (req, reply) => {
@@ -221,8 +223,7 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     return { providers: await ctx.storage.config.listProviders(tenant) };
   });
 
-  app.patch('/v1/admin/providers/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
+  app.patch('/v1/admin/providers/:id', members, async (req, reply) => {
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
     const parsed = providerPatch.safeParse(req.body);
@@ -234,11 +235,19 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
       Object.entries(parsed.data).filter(([, v]) => v !== undefined),
     );
     if (patch.displayName === '') patch.displayName = null;
-    const updated = await ctx.storage.config.updateProvider(
-      tenant,
-      (req.params as { id: string }).id,
-      patch,
-    );
+    const id = (req.params as { id: string }).id;
+    if (req.principal!.role !== 'admin') {
+      // the dashboard sends the whole form: unchanged status page fields are fine
+      const current = (await ctx.storage.config.listProviders(tenant)).find((p) => p.id === id);
+      if (
+        current &&
+        ((patch.isPublic !== undefined && patch.isPublic !== current.isPublic) ||
+          (patch.publicDisplayName !== undefined &&
+            (patch.publicDisplayName || null) !== (current.publicDisplayName || null)))
+      )
+        throw adminOnly('change what the status page shows');
+    }
+    const updated = await ctx.storage.config.updateProvider(tenant, id, patch);
     // hosts, hidden/internal: ingest must see the change at once (the SDK within a minute)
     ctx.directory.invalidate(tenant);
     return updated ?? reply.code(404).send({ error: 'not found' });
@@ -263,7 +272,6 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
   });
 
   app.put('/v1/admin/settings/thresholds', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
     const parsed = z

@@ -78,8 +78,8 @@ export async function setUp(t: TestApp, email = 'ada@example.com') {
   return b;
 }
 
-export async function invite(admin: Browser, email: string) {
-  const res = await admin.req('POST', '/v1/admin/users/invites', { email });
+export async function invite(admin: Browser, email: string, role: 'admin' | 'member' = 'member') {
+  const res = await admin.req('POST', '/v1/admin/users/invites', { email, role });
   expect(res.statusCode).toBe(201);
   return res.json() as { id: string; url: string; emailed: boolean; emailError?: string };
 }

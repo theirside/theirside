@@ -79,6 +79,11 @@ export interface CollectorConfig {
   secretKeyPrevious: string[];
   /** Sign-in by a trusted proxy in front of the collector (off unless THEIRSIDE_AUTH_PROXY is set). */
   authProxy: AuthProxyConfig | undefined;
+  /**
+   * Emails (lower case) that become admins when an identity proxy creates their
+   * account; everyone else it creates is a member (or gets the invite's role).
+   */
+  adminEmails: string[];
 }
 
 export interface AuthProxyConfig {
@@ -248,5 +253,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
       .filter(Boolean)
       .map((k) => secretKey(k, 'THEIRSIDE_SECRET_KEY_PREVIOUS')!),
     authProxy: authProxyConfig(env),
+    adminEmails: (env.THEIRSIDE_ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean),
   };
 }

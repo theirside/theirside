@@ -183,7 +183,11 @@ export interface IncidentStore {
 
 // ------------------------------------------------------------------ config
 
-export type Role = 'owner' | 'admin' | 'member' | 'viewer';
+/**
+ * Free edition: admin (everything) or member (view everything, manage providers, own
+ * account). Custom roles are the paid `rbac` entitlement.
+ */
+export type Role = 'admin' | 'member';
 export type ApiKeyScope = 'ingest' | 'read';
 
 export interface ApiKeyRecord extends Tenant {
@@ -455,6 +459,8 @@ export interface AuthTokenRecord {
   userId: string | null;
   email: string | null;
   createdBy: string | null;
+  /** What an invite grants; null for other kinds. */
+  role: Role | null;
   createdAt: Date;
   expiresAt: Date;
   usedAt: Date | null;
@@ -472,8 +478,13 @@ export interface AuthStore {
   countSignInUsers(): Promise<number>;
   getUser(id: string): Promise<UserRecord | null>;
   findUserByEmail(email: string): Promise<UserRecord | null>;
-  /** Users with a membership in the org, system users excluded, oldest first. */
-  listUsers(orgId: string): Promise<UserRecord[]>;
+  /** Users with a membership in the org and their role, system users excluded, oldest first. */
+  listUsers(orgId: string): Promise<(UserRecord & { role: Role })[]>;
+  /**
+   * Admins of the org who can sign in (system users excluded), with their memberships
+   * locked until the transaction ends: last-admin checks can't race.
+   */
+  lockAdmins(orgId: string): Promise<string[]>;
   createUser(u: {
     id: string;
     email: string | null;

@@ -99,12 +99,12 @@ describe('setup with the admin token, no bootstrap org, and an older install', (
     try {
       await t.db.pool.query(`INSERT INTO users (id, name) VALUES ('usr_old', 'Admin')`);
       await t.db.pool.query(
-        `INSERT INTO memberships (org_id, user_id, role) VALUES ($1, 'usr_old', 'owner')`,
+        `INSERT INTO memberships (org_id, user_id, role) VALUES ($1, 'usr_old', 'admin')`,
         [t.orgId],
       );
       await t.db.storage.config.setMeta('bootstrap_admin_user_id', 'usr_old');
       const b = await setUp(t, 'old@example.com');
-      expect((await b.me()).json()).toMatchObject({ userId: 'usr_old', role: 'owner' });
+      expect((await b.me()).json()).toMatchObject({ userId: 'usr_old', role: 'admin' });
       const { rows } = await t.db.pool.query(`SELECT count(*)::int AS n FROM users`);
       expect(rows[0].n).toBe(1);
     } finally {
@@ -287,7 +287,7 @@ describe('sign-in, sessions and CSRF', () => {
     ).toBe(200);
     expect((await b.me()).json()).toMatchObject({
       via: 'session',
-      role: 'owner',
+      role: 'admin',
       breakGlass: true,
     });
     // a session from the admin token has no account settings either
@@ -543,12 +543,41 @@ describe('invites', () => {
     expect(mailer.sent.length).toBe(n);
   });
 
-  it('invited users are equal: they can invite and manage users too', async () => {
+  it('invited users are members unless the invite says admin', async () => {
     const g = new Browser(t);
     await g.login('grace@example.com');
+    expect((await g.me()).json().role).toBe('member');
+    const refused = await g.req('POST', '/v1/admin/users/invites', { email: 'third@example.com' });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error).toBe('admin_only');
+
+    const inv = await admin.req('POST', '/v1/admin/users/invites', {
+      email: 'fourth@example.com',
+      role: 'admin',
+    });
+    expect(inv.json().role).toBe('admin');
+    const invites = (await admin.req('GET', '/v1/admin/users')).json().invites;
+    expect(invites.find((i: { email: string }) => i.email === 'fourth@example.com').role).toBe(
+      'admin',
+    );
+    const fourth = new Browser(t);
+    await fourth.req('POST', '/v1/auth/invite/accept', {
+      token: tokenFrom(inv.json().url),
+      password: PASSWORD,
+    });
+    expect((await fourth.me()).json().role).toBe('admin');
     expect(
-      (await g.req('POST', '/v1/admin/users/invites', { email: 'third@example.com' })).statusCode,
+      (await fourth.req('POST', '/v1/admin/users/invites', { email: 'fifth@example.com' }))
+        .statusCode,
     ).toBe(201);
+    expect(
+      (
+        await admin.req('POST', '/v1/admin/users/invites', {
+          email: 'x@example.com',
+          role: 'owner',
+        })
+      ).statusCode,
+    ).toBe(400);
   });
 });
 
@@ -690,7 +719,7 @@ describe('managing users', () => {
   it('lists users without secrets, signs a user out, removes users but never yourself or the last one', async () => {
     const me = (await admin.me()).json().userId;
     expect((await admin.req('DELETE', `/v1/admin/users/${me}`)).statusCode).toBe(400);
-    const inv = await invite(admin, 'kim@example.com');
+    const inv = await invite(admin, 'kim@example.com', 'admin');
     const kim = new Browser(t);
     await kim.req('POST', '/v1/auth/invite/accept', {
       token: tokenFrom(inv.url),

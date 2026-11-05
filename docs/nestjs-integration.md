@@ -16,7 +16,7 @@ Tick every line before the SDK goes into a production service.
 - [ ] **Discovered providers reviewed in the first hour**: Providers lists every third-party host the service calls (auto-discovery is on by default). Hide anything internal or unwanted (pushed to the SDK within a minute), or set `autoDiscover: false` to record only listed providers.
 - [ ] Provider list reviewed: names, hosts, and explicit `routes` for any API that puts names, letters-only IDs or other personal values in its paths.
 - [ ] **One API key per service** (Settings → API keys, `ingest` scope), stored as a secret together with `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` and the database password (not in the repo, not in plain task definitions).
-- [ ] **Dashboard accounts**: everyone who needs the dashboard has their own account (invites, or sign-in through the client's identity proxy), two-factor sign-in required for everyone (Settings → Users), and `THEIRSIDE_SECRET_KEY` backed up ([security.md](security.md)). The admin token is kept for break-glass only.
+- [ ] **Dashboard accounts**: everyone who needs the dashboard has their own account (invites, or sign-in through the client's identity proxy), admins only for those who manage users, keys, channels and status pages (others are members), two-factor sign-in required for everyone (Settings → Users), and `THEIRSIDE_SECRET_KEY` backed up ([security.md](security.md)). The admin token is kept for break-glass only.
 - [ ] **Removal rehearsed**: the one commit that takes the SDK out is known (below) and `THEIRSIDE_ENABLED=false` works as an instant kill switch without a code change.
 
 ### Removing the SDK in one commit
@@ -296,6 +296,7 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `THEIRSIDE_TRUST_PROXY` | private ranges | Which proxies' `X-Forwarded-*` to believe (client IP for sign-in limits, https detection): by default those on private and loopback addresses; or the load balancers' CIDRs, a hop count, `false`, or `true` for any (logged as a warning). |
 | `THEIRSIDE_SESSION_MAX_AGE_HOURS` / `THEIRSIDE_SESSION_IDLE_HOURS` | `168` / `24` | Dashboard session lifetime and idle timeout. |
 | `THEIRSIDE_AUTH_PROXY` (`header`, `alb`), `THEIRSIDE_AUTH_PROXY_TRUSTED_IPS`, `THEIRSIDE_AUTH_PROXY_HEADER`, `THEIRSIDE_AUTH_PROXY_ALB_ARN`, `THEIRSIDE_AUTH_PROXY_AUTO_CREATE` | off | Sign-in through an identity proxy or an ALB with OIDC ([security.md](security.md#sign-in-through-an-identity-proxy)). |
+| `THEIRSIDE_ADMIN_EMAILS` | none | Comma-separated emails that become admins when the identity proxy creates their account; others are members ([security.md](security.md#roles)). |
 | `THEIRSIDE_RAW_RETENTION_DAYS` / `THEIRSIDE_ROLLUP_RETENTION_DAYS` | `30` / `90` | |
 | `THEIRSIDE_SMTP_URL` (or `THEIRSIDE_SMTP_HOST`, `_PORT`, `_SECURE`, `_REQUIRE_TLS`, `_USER`, `_PASS`), `THEIRSIDE_SMTP_FROM` | – | Needed for email alert channels. `smtp://user:pass@host:587` uses STARTTLS, `smtps://…:465` TLS; TLS is required when credentials are set. Gmail, SES and Postmark examples: `.env.example`. |
 | `THEIRSIDE_LICENSE_KEY` | – | Paid features; never needed for ingest or alerts. |

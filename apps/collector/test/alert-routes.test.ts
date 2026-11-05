@@ -178,15 +178,15 @@ describe('alert channel admin API', () => {
     expect(res.json()).toMatchObject({ name: 'paused, renamed', enabled: false });
   });
 
-  it('only owners and admins can change channels', async () => {
-    await t.db.pool.query(`UPDATE memberships SET role = 'viewer'`);
+  it('only admins can change channels', async () => {
+    await t.db.pool.query(`UPDATE memberships SET role = 'member'`);
     const res = await admin('POST', '/v1/admin/alert-channels', {
       kind: 'webhook',
       name: 'x',
       config: { url: `${hookUrl}/ok`, secret: '0123456789abcdef' },
     });
     expect(res.statusCode).toBe(403);
-    await t.db.pool.query(`UPDATE memberships SET role = 'owner'`);
+    await t.db.pool.query(`UPDATE memberships SET role = 'admin'`);
   });
 });
 

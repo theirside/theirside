@@ -14,14 +14,51 @@ import {
   type AuthMethod,
   type Principal,
 } from './session.js';
+import type { Role } from '../../storage/types.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
     principal?: Principal;
   }
+  interface FastifyContextConfig {
+    /**
+     * Who may call a dashboard route. Default: members may read (GET), only admins
+     * may change anything; a route says `member` to let members change it, `admin`
+     * to keep members from reading it.
+     */
+    role?: Role;
+  }
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** What a member was refused, for the 403 message. */
+const ADMIN_AREAS: [RegExp, string][] = [
+  [/^\/v1\/admin\/users/, 'manage users, invites and roles'],
+  [/^\/v1\/admin\/api-keys/, 'manage API keys'],
+  [/^\/v1\/admin\/(alert-channels|deliveries)/, 'manage alert channels'],
+  [/^\/v1\/admin\/status-pages/, 'manage status pages'],
+  [/^\/v1\/admin\/settings\/security/, 'change security settings'],
+  [/^\/v1\/admin\/settings\/thresholds/, 'change alert thresholds'],
+  [/^\/v1\/admin\/settings\/discovery/, 'change the new-provider digest'],
+];
+
+export function adminOnly(what: string): HttpProblem {
+  return new HttpProblem(
+    403,
+    'admin_only',
+    `Only admins can ${what}. Ask an admin to do it, or to make you an admin.`,
+  );
+}
+
+/** Members may read; writes, and routes marked `role: 'admin'`, need an admin. */
+function checkRole(req: FastifyRequest, p: Principal): void {
+  const needed =
+    req.routeOptions.config.role ?? (SAFE_METHODS.has(req.method) ? 'member' : 'admin');
+  if (needed === 'member' || p.role === 'admin') return;
+  const url = req.routeOptions.url ?? '';
+  throw adminOnly(ADMIN_AREAS.find(([re]) => re.test(url))?.[1] ?? 'do this');
+}
 
 /** What a user who must still set up 2FA may call (the dashboard's enrolment screen). */
 const ENROLMENT_ROUTES = new Set([
@@ -126,7 +163,8 @@ export async function authenticate(
 
 /**
  * preHandler for dashboard/admin routes: a signed-in user, or the admin token. State-
- * changing requests on a cookie session also need the CSRF header and a same-site origin.
+ * changing requests on a cookie session also need the CSRF header and a same-site
+ * origin. The route's `role` (see FastifyContextConfig) decides whether members may call it.
  */
 export function requireAdmin(ctx: AppContext) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
@@ -151,6 +189,7 @@ export function requireAdmin(ctx: AppContext) {
           '2fa_required',
           'Two-factor sign-in is required for everyone here. Set it up to continue.',
         );
+      checkRole(req, p);
       req.principal = p;
     } catch (err) {
       if (isStorageUnavailable(err)) return reply.code(503).send({ error: 'storage unavailable' });

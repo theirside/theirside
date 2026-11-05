@@ -5,7 +5,7 @@ import type { StatusPageRecord } from '../../storage/types.js';
 import { publicBase } from '../../util/origin.js';
 import { randomBase62 } from '../../util/ids.js';
 import { requireAdmin } from '../auth/routes.js';
-import { adminTenant, canWrite } from '../auth/tenant.js';
+import { adminTenant } from '../auth/tenant.js';
 import { createStatusPage, StatusPageLimitError } from './create.js';
 
 const pageFields = {
@@ -59,7 +59,6 @@ export async function registerStatusPageAdminRoutes(
   });
 
   app.post('/v1/admin/status-pages', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = pageInput.safeParse(req.body);
@@ -86,7 +85,6 @@ export async function registerStatusPageAdminRoutes(
 
   /** Edits show on the public page within the status cache TTL (THEIRSIDE_STATUS_CACHE_SECONDS). */
   app.patch('/v1/admin/status-pages/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = pagePatch.safeParse(req.body);
@@ -103,7 +101,6 @@ export async function registerStatusPageAdminRoutes(
   });
 
   app.delete('/v1/admin/status-pages/:id', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const ok = await ctx.storage.config.deleteStatusPage(tenant, (req.params as { id: string }).id);

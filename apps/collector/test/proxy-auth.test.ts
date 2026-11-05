@@ -148,7 +148,7 @@ describe('auto-create', () => {
       const all = await Promise.all(Array.from({ length: 5 }, () => from(t, PROXY_IP, h)));
       expect(all.filter((r) => r.statusCode === 200).length).toBeGreaterThanOrEqual(1);
       const ok = await from(t, PROXY_IP, h);
-      expect(ok.json()).toMatchObject({ via: 'proxy', role: 'owner', user: { name: 'first' } });
+      expect(ok.json()).toMatchObject({ via: 'proxy', role: 'admin', user: { name: 'first' } });
       const { rows } = await t.db.pool.query(`SELECT count(*)::int AS n FROM users`);
       expect(rows[0].n).toBe(1);
       expect((await t.db.pool.query(`SELECT count(*)::int AS n FROM orgs`)).rows[0].n).toBe(1);
@@ -157,7 +157,8 @@ describe('auto-create', () => {
         (await t.app.inject({ method: 'GET', url: '/v1/auth/status' })).json().setupRequired,
       ).toBe(false);
       const second = await from(t, PROXY_IP, { 'x-auth-request-email': 'second@example.com' });
-      expect(second.json().role).toBe('admin');
+      // the first user is the admin; later ones are members
+      expect(second.json().role).toBe('member');
     } finally {
       await t.close();
     }

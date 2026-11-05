@@ -90,6 +90,12 @@ export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promis
     }
   });
 
+  await registerRoutes(app, ctx);
+  return app;
+}
+
+/** Every API route and the dashboard (separate so tests can list the routes). */
+export async function registerRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   await registerIngest(app, {
     storage: ctx.storage,
     apiKeys: ctx.apiKeys,
@@ -107,5 +113,4 @@ export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promis
   await registerStatusPage(app, ctx);
   await registerStatusPageAdminRoutes(app, ctx);
   await registerDashboard(app, ctx.config.staticDir);
-  return app;
 }

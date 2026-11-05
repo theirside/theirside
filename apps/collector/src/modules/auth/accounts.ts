@@ -1,6 +1,12 @@
 import { createDefaultOrg } from '../../bootstrap.js';
 import type { CollectorConfig } from '../../config.js';
-import type { AuthTokenKind, AuthTokenRecord, Storage, UserRecord } from '../../storage/types.js';
+import type {
+  AuthTokenKind,
+  AuthTokenRecord,
+  Role,
+  Storage,
+  UserRecord,
+} from '../../storage/types.js';
 import type { Clock } from '../../util/clock.js';
 import { HttpProblem } from '../../util/http-problem.js';
 import { newId, safeEqual, sha256Hex } from '../../util/ids.js';
@@ -36,6 +42,14 @@ function normalizeName(raw: unknown, email: string): string {
   return name || email.split('@')[0]!;
 }
 
+export const ROLES: readonly Role[] = ['admin', 'member'];
+
+export function parseRole(raw: unknown, dflt?: Role): Role {
+  if (raw === undefined && dflt) return dflt;
+  if (raw === 'admin' || raw === 'member') return raw;
+  throw new HttpProblem(400, 'invalid_role', 'The role must be admin or member.');
+}
+
 function checkPassword(password: unknown, email: string | null): string {
   if (typeof password !== 'string')
     throw new HttpProblem(400, 'weak_password', 'Enter a password.');
@@ -52,6 +66,7 @@ export interface UserView {
   email: string | null;
   name: string;
   source: 'password' | 'proxy';
+  role: Role;
   /** false = no way to sign in with a password yet (proxy user, or never set). */
   hasPassword: boolean;
   createdAt: string;
@@ -70,8 +85,9 @@ export interface LinkResult {
 
 /**
  * Built-in user accounts (free edition): first-run setup, email + password sign-in,
- * invites and password resets by one-time link, and user management. Every user is
- * equal; roles, SSO and an audit log are paid features behind entitlements (not built).
+ * invites and password resets by one-time link, and user management. Two fixed roles,
+ * admin and member (see tenant.ts); custom roles, SSO and an audit log are paid
+ * features behind entitlements (not built).
  */
 export class Accounts {
   constructor(
@@ -177,7 +193,7 @@ export class Accounts {
         return placeholder.id;
       }
       await tx.auth.createUser({ id: userId, email, name, authSource: 'password', passwordHash });
-      await tx.config.addMembership({ orgId, userId, role: 'owner' });
+      await tx.config.addMembership({ orgId, userId, role: 'admin' });
       await tx.config.deleteMetaPrefix(SETUP_CODE_META);
       return userId;
     });
@@ -236,7 +252,7 @@ export class Accounts {
       await this.storage.config.addMembership({
         orgId,
         userId: ADMIN_TOKEN_USER_ID,
-        role: 'owner',
+        role: 'admin',
       });
     }
     return ADMIN_TOKEN_USER_ID;
@@ -368,6 +384,8 @@ export class Accounts {
   /**
    * The account for an identity a trusted proxy vouched for. Unknown emails get an
    * account when they have a pending invite, or with auto-create on; otherwise 403.
+   * New accounts are members (or the invite's role), admins when the email is in
+   * THEIRSIDE_ADMIN_EMAILS; without that list the very first user is the admin.
    */
   async proxyUser(id: ProxyIdentity, autoCreate: boolean): Promise<UserRecord> {
     const now = this.clock.now();
@@ -393,6 +411,11 @@ export class Accounts {
           throw new HttpProblem(409, 'link_used', 'The invite was just used. Reload the page.');
         orgId ??= (await tx.config.listOrgs())[0]?.id ?? (await this.createOrg(tx));
         const first = (await tx.auth.countSignInUsers()) === 0;
+        const listed = this.config.adminEmails.includes(id.email.toLowerCase());
+        const role: Role =
+          listed || (first && this.config.adminEmails.length === 0)
+            ? 'admin'
+            : (invite?.role ?? 'member');
         const userId = newId('usr');
         await tx.auth.createUser({
           id: userId,
@@ -401,7 +424,7 @@ export class Accounts {
           authSource: 'proxy',
           passwordHash: null,
         });
-        await tx.config.addMembership({ orgId, userId, role: first ? 'owner' : 'admin' });
+        await tx.config.addMembership({ orgId, userId, role });
         await tx.auth.markLogin(userId, now);
         if (first) await tx.config.deleteMetaPrefix(SETUP_CODE_META);
       });
@@ -430,7 +453,7 @@ export class Accounts {
 
   private async issueToken(
     kind: AuthTokenKind,
-    t: Pick<AuthTokenRecord, 'orgId' | 'userId' | 'email' | 'createdBy'>,
+    t: Pick<AuthTokenRecord, 'orgId' | 'userId' | 'email' | 'createdBy'> & { role?: Role },
     ttlMs: number,
   ): Promise<{ token: string; record: AuthTokenRecord }> {
     const token = newToken();
@@ -439,6 +462,7 @@ export class Accounts {
       id: newId(kind === 'invite' ? 'inv' : kind === 'reset' ? 'rst' : 'mfa'),
       kind,
       tokenHash: hashToken(token),
+      role: null,
       ...t,
       createdAt: now,
       expiresAt: new Date(now.getTime() + ttlMs),
@@ -488,16 +512,17 @@ export class Accounts {
     orgId: string;
     byUserId: string;
     email: unknown;
+    role: Role;
     sendEmail: boolean;
     baseUrl: string;
-  }): Promise<LinkResult & { id: string; email: string }> {
+  }): Promise<LinkResult & { id: string; email: string; role: Role }> {
     const email = normalizeEmail(input.email);
     if (await this.storage.auth.findUserByEmail(email))
       throw new HttpProblem(409, 'user_exists', `${email} already has an account.`);
     await this.storage.auth.revokeInvitesForEmail(input.orgId, email);
     const { token, record } = await this.issueToken(
       'invite',
-      { orgId: input.orgId, userId: null, email, createdBy: input.byUserId },
+      { orgId: input.orgId, userId: null, email, createdBy: input.byUserId, role: input.role },
       INVITE_TTL_MS,
     );
     const url = `${input.baseUrl}/#/invite/${token}`;
@@ -511,7 +536,14 @@ export class Accounts {
         `If you didn't expect this invitation, you can ignore this email.\n`,
       input.sendEmail,
     );
-    return { id: record.id, email, url, expiresAt: record.expiresAt.toISOString(), ...sent };
+    return {
+      id: record.id,
+      email,
+      role: input.role,
+      url,
+      expiresAt: record.expiresAt.toISOString(),
+      ...sent,
+    };
   }
 
   async inviteInfo(token: unknown): Promise<{ email: string; expiresAt: string }> {
@@ -536,8 +568,7 @@ export class Accounts {
         authSource: 'password',
         passwordHash,
       });
-      // every user is equal in the free edition; roles are an `rbac` entitlement
-      await tx.config.addMembership({ orgId: rec.orgId, userId, role: 'admin' });
+      await tx.config.addMembership({ orgId: rec.orgId, userId, role: rec.role ?? 'member' });
       return userId;
     });
   }
@@ -664,6 +695,7 @@ export class Accounts {
         email: u.email,
         name: u.name,
         source: u.authSource === 'proxy' ? ('proxy' as const) : ('password' as const),
+        role: u.role,
         hasPassword: !!u.passwordHash,
         createdAt: u.createdAt.toISOString(),
         lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
@@ -677,6 +709,7 @@ export class Accounts {
     return (await this.storage.auth.listInvites(orgId, this.clock.now())).map((t) => ({
       id: t.id,
       email: t.email,
+      role: t.role ?? 'member',
       createdAt: t.createdAt.toISOString(),
       expiresAt: t.expiresAt.toISOString(),
     }));
@@ -691,18 +724,63 @@ export class Accounts {
     if (actorId === userId)
       throw new HttpProblem(400, 'cannot_remove_self', 'You cannot remove your own account.');
     const user = await this.memberOf(orgId, userId);
-    const others = (await this.storage.auth.listUsers(orgId)).filter(
-      (u) => u.id !== userId && (u.authSource === 'proxy' || u.passwordHash),
-    );
-    if (others.length === 0)
-      throw new HttpProblem(409, 'last_user', 'This is the last user who can sign in.');
-    await this.storage.auth.deleteUser(userId);
+    await this.storage.transaction(async (tx) => {
+      const others = (await tx.auth.listUsers(orgId)).filter(
+        (u) => u.id !== userId && (u.authSource === 'proxy' || u.passwordHash),
+      );
+      if (others.length === 0)
+        throw new HttpProblem(409, 'last_user', 'This is the last user who can sign in.');
+      await this.keepAnAdmin(tx, orgId, userId, 'remove');
+      await tx.auth.deleteUser(userId);
+    });
     return this.notify(
       user,
       actorId,
       'Your Theirside account was removed',
       `removed your Theirside account (${user.email}). You can no longer sign in to the dashboard.`,
     );
+  }
+
+  /**
+   * Refuses to take away the org's last admin who can sign in (inside a transaction:
+   * the admins' memberships stay locked until it ends, so two admins can't demote
+   * each other at once). The admin token is not counted: it is break-glass.
+   */
+  private async keepAnAdmin(tx: Storage, orgId: string, userId: string, verb: string) {
+    const admins = await tx.auth.lockAdmins(orgId);
+    if (admins.length === 1 && admins[0] === userId)
+      throw new HttpProblem(
+        409,
+        'last_admin',
+        `This is the last admin; make someone else an admin before you ${verb} them.`,
+      );
+  }
+
+  /** Make a user an admin or a member. */
+  async setRole(
+    orgId: string,
+    actorId: string,
+    userId: string,
+    role: Role,
+  ): Promise<{ role: Role; notified: boolean }> {
+    const user = await this.memberOf(orgId, userId);
+    const changed = await this.storage.transaction(async (tx) => {
+      const current = (await tx.auth.listUsers(orgId)).find((u) => u.id === userId)?.role;
+      if (current === role) return false;
+      if (role === 'member') await this.keepAnAdmin(tx, orgId, userId, 'demote');
+      await tx.config.addMembership({ orgId, userId, role });
+      return true;
+    });
+    if (!changed) return { role, notified: false };
+    const sent = await this.notify(
+      user,
+      actorId,
+      `Your Theirside role is now ${role}`,
+      role === 'admin'
+        ? `made you an admin of Theirside (${user.email}): you can now manage users, API keys, alert channels, status pages and security settings.`
+        : `made you a member of Theirside (${user.email}): you can still see everything and manage providers, but no longer users, API keys, alert channels, status pages or security settings.`,
+    );
+    return { role, ...sent };
   }
 
   /** Lost phone: someone else turns a user's 2FA off (recovery codes go too). */

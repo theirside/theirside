@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { requireAdmin } from '../auth/routes.js';
-import { adminTenant, canWrite } from '../auth/tenant.js';
+import { adminTenant } from '../auth/tenant.js';
 import { ProviderActionError, mergeProviders, splitHostOut } from './merge.js';
 
 const mergeInput = z.object({ into: z.string().min(1) });
@@ -15,9 +15,9 @@ export async function registerDiscoveryAdminRoutes(
   ctx: AppContext,
 ): Promise<void> {
   const auth = { preHandler: requireAdmin(ctx) };
+  const members = { ...auth, config: { role: 'member' as const } };
 
-  app.post('/v1/admin/providers/:id/merge', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
+  app.post('/v1/admin/providers/:id/merge', members, async (req, reply) => {
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = mergeInput.safeParse(req.body);
@@ -39,8 +39,7 @@ export async function registerDiscoveryAdminRoutes(
     }
   });
 
-  app.post('/v1/admin/providers/:id/split', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
+  app.post('/v1/admin/providers/:id/split', members, async (req, reply) => {
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = splitInput.safeParse(req.body);
@@ -69,7 +68,6 @@ export async function registerDiscoveryAdminRoutes(
   });
 
   app.put('/v1/admin/settings/discovery', auth, async (req, reply) => {
-    if (!canWrite(req)) return reply.code(403).send({ error: 'admin role required' });
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
     const parsed = discoverySettings.safeParse(req.body);

@@ -98,7 +98,7 @@ describe('bootstrap', () => {
 });
 
 describe('THEIRSIDE_ADMIN_TOKEN login (break-glass)', () => {
-  it('signs in as the admin-token system user, an owner of the org', async () => {
+  it('signs in as the admin-token system user, an admin of the org', async () => {
     const login = await t.app.inject({
       method: 'POST',
       url: '/v1/auth/login',
@@ -113,7 +113,7 @@ describe('THEIRSIDE_ADMIN_TOKEN login (break-glass)', () => {
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({
       orgId: t.orgId,
-      role: 'owner',
+      role: 'admin',
       via: 'session',
       entitlements: { plan: 'oss' },
     });

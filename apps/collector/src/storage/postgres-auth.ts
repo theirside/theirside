@@ -5,6 +5,7 @@ import type {
   AuthTokenKind,
   AuthTokenRecord,
   SessionRecord,
+  Role,
   ThrottleState,
   TotpState,
   UserRecord,
@@ -49,6 +50,7 @@ function toToken(r: Row): AuthTokenRecord {
     userId: (r.user_id as string | null) ?? null,
     email: (r.email as string | null) ?? null,
     createdBy: (r.created_by as string | null) ?? null,
+    role: (r.role as Role | null) ?? null,
     createdAt: r.created_at as Date,
     expiresAt: r.expires_at as Date,
     usedAt: (r.used_at as Date | null) ?? null,
@@ -88,12 +90,23 @@ export class PgAuthStore implements AuthStore {
   }
   async listUsers(orgId: string) {
     const { rows } = await this.db.query(
-      `SELECT ${USER_COLUMNS} FROM users u JOIN memberships m ON m.user_id = u.id
+      `SELECT ${USER_COLUMNS}, m.role FROM users u JOIN memberships m ON m.user_id = u.id
         WHERE m.org_id = $1 AND u.auth_source <> 'system'
         ORDER BY u.created_at, u.id`,
       [orgId],
     );
-    return rows.map(toUser);
+    return rows.map((r) => ({ ...toUser(r), role: r.role as Role }));
+  }
+  async lockAdmins(orgId: string) {
+    const { rows } = await this.db.query(
+      `SELECT m.user_id FROM memberships m JOIN users u ON u.id = m.user_id
+        WHERE m.org_id = $1 AND m.role = 'admin' AND u.auth_source <> 'system'
+          AND (u.auth_source = 'proxy' OR u.password_hash IS NOT NULL)
+        ORDER BY m.user_id
+        FOR UPDATE OF m`,
+      [orgId],
+    );
+    return rows.map((r) => r.user_id as string);
   }
   async createUser(u: {
     id: string;
@@ -173,8 +186,8 @@ export class PgAuthStore implements AuthStore {
 
   async createToken(t: AuthTokenRecord) {
     await this.db.query(
-      `INSERT INTO auth_tokens (id, kind, token_hash, org_id, user_id, email, created_by, created_at, expires_at, used_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO auth_tokens (id, kind, token_hash, org_id, user_id, email, created_by, created_at, expires_at, used_at, role)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         t.id,
         t.kind,
@@ -186,6 +199,7 @@ export class PgAuthStore implements AuthStore {
         t.createdAt,
         t.expiresAt,
         t.usedAt,
+        t.role,
       ],
     );
   }

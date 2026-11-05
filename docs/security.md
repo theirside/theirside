@@ -1,6 +1,6 @@
 # Dashboard accounts and security
 
-How people sign in to a self-hosted collector, and what to set up and keep safe. Everything here is in the free edition; every user can do everything (roles, SSO and an audit log are paid features). What is stored about users: [privacy.md](privacy.md#dashboard-users).
+How people sign in to a self-hosted collector, and what to set up and keep safe. Everything here is in the free edition, including the admin and member roles (custom roles, SSO and an audit log are paid features). What is stored about users: [privacy.md](privacy.md#dashboard-users).
 
 ## First run
 
@@ -24,11 +24,35 @@ Then name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup p
 
 ## Changes to someone else's account
 
-Making a password reset link for someone, turning off their 2FA or removing them asks **who you are again** first (step-up): your password, plus a code from your authenticator app when your own 2FA is on (a recovery code works too). Wrong answers count like wrong sign-ins. So an unlocked laptop or a stolen session cookie isn't enough to take over another account.
+Making a password reset link for someone, turning off their 2FA, changing their role or removing them asks **who you are again** first (step-up): your password, plus a code from your authenticator app when your own 2FA is on (a recovery code works too). Wrong answers count like wrong sign-ins. So an unlocked laptop or a stolen session cookie isn't enough to take over another account.
 
 - Signed in with the **admin token**, you enter the token again. Scripts using `Authorization: Bearer` aren't asked; they just sent it.
 - Through an **identity proxy**, you aren't asked: there is no password, and the proxy signs you in on every request.
 - With **SMTP** configured, the person is emailed who did it: "Ada (ada@example.com) turned off two-factor sign-in for your Theirside account…". When their reset link is emailed to them, that email is the notice. Signing someone out (Settings → Users → Sign out) doesn't ask or email.
+
+## Roles
+
+Each user is an **admin** or a **member** (Settings → Users).
+
+| | Admin | Member |
+|---|---|---|
+| See providers, endpoints, incidents, SDK health, settings | yes | yes |
+| Copy incident summaries; health API (with an API key) | yes | yes |
+| Manage providers: rename, hide, alerts on/off, merge, split, support contact, path privacy, allowed path words | yes | yes |
+| Own account: password, 2FA, sign out everywhere | yes | yes |
+| Users, invites and roles; other users' 2FA, reset links, sign-out, removal | yes | no |
+| API keys, alert channels and thresholds, the new-provider digest | yes | no |
+| Status pages, and which providers they show | yes | no |
+| Security settings (require 2FA) | yes | no |
+
+The collector enforces this on every request (403 "Only admins can …"); the dashboard just hides what members can't use. Trusted proxy settings and the licence are environment variables, so only whoever runs the collector changes them.
+
+- The user from the setup page is an admin. Invites pick the role (member by default).
+- Users created by an identity proxy are members, unless their email is in **`THEIRSIDE_ADMIN_EMAILS`** (comma-separated, e.g. `alice@example.com,ops@example.com`). Without that list, the very first user is the admin. The list only applies when the account is created; change roles later on Settings → Users. An invite's role applies when the invitee signs in through the proxy.
+- There is always an admin: the last admin who can sign in can't be demoted or removed. Make someone else an admin first.
+- Changing a role asks for step-up like other changes to someone's account, and emails them.
+- The admin token acts as an admin. If no admin can sign in any more, use it to make someone an admin.
+- Upgrading from a version without roles makes every existing user an admin (they could do everything before); pending invites also make admins.
 
 ## Brute-force protection
 
@@ -71,7 +95,7 @@ If the dashboard already sits behind something that signs people in with your co
 
 The identity header is only believed when the connection comes from an address in **`THEIRSIDE_AUTH_PROXY_TRUSTED_IPS`** (required; the proxy's addresses or subnets). The collector checks the TCP peer, not `X-Forwarded-For`, and ignores the header from anyone else. So the collector must not be reachable except through the proxy, and the proxy must always overwrite the header.
 
-People need an account: an invite (Settings → Users; they don't need to open the link, signing in through the proxy accepts it) or `THEIRSIDE_AUTH_PROXY_AUTO_CREATE=true`, which creates an account for everyone the proxy lets through (the very first one becomes the owner). Proxy users have no password, aren't asked for 2FA by Theirside (your identity provider handles MFA), and sign out at the proxy. Password accounts and the admin token keep working alongside.
+People need an account: an invite (Settings → Users; they don't need to open the link, signing in through the proxy accepts it) or `THEIRSIDE_AUTH_PROXY_AUTO_CREATE=true`, which creates an account for everyone the proxy lets through (as members; see [Roles](#roles) for `THEIRSIDE_ADMIN_EMAILS`). Proxy users have no password, aren't asked for 2FA by Theirside (your identity provider handles MFA), and sign out at the proxy. Password accounts and the admin token keep working alongside.
 
 ### Generic header (oauth2-proxy, Pomerium, Cloudflare Access, …)
 

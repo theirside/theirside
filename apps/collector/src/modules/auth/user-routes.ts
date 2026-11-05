@@ -2,14 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { HttpProblem } from '../../util/http-problem.js';
 import { publicBase } from '../../util/origin.js';
-import { ADMIN_TOKEN_USER_ID } from './accounts.js';
+import { ADMIN_TOKEN_USER_ID, parseRole } from './accounts.js';
 import { body, endSessionCookie, requireAdmin } from './routes.js';
-import { canWrite } from './tenant.js';
-
-function writer(req: FastifyRequest) {
-  if (!canWrite(req)) throw new HttpProblem(403, 'forbidden', 'admin role required');
-  return req.principal!;
-}
 
 /** Only real accounts manage their own password and sessions, not the admin token. */
 function account(req: FastifyRequest) {
@@ -21,11 +15,16 @@ function account(req: FastifyRequest) {
 
 const wantsEmail = (v: unknown) => v !== false;
 
-/** Users page: everyone can manage users in the free edition (no roles). */
+/**
+ * Users page (admins only, reads included: it lists everyone's email and sign-ins) and
+ * each user's own account and 2FA (members too).
+ */
 export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const pre = { preHandler: requireAdmin(ctx) };
+  const admins = { ...pre, config: { role: 'admin' as const } };
+  const own = { ...pre, config: { role: 'member' as const } };
 
-  app.get('/v1/admin/users', pre, async (req) => {
+  app.get('/v1/admin/users', admins, async (req) => {
     const p = req.principal!;
     return {
       users: await ctx.accounts.listUsers(p.orgId),
@@ -36,12 +35,13 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
   });
 
   app.post('/v1/admin/users/invites', pre, async (req, reply) => {
-    const p = writer(req);
+    const p = req.principal!;
     const b = body(req);
     const res = await ctx.accounts.invite({
       orgId: p.orgId,
       byUserId: p.userId,
       email: b.email,
+      role: parseRole(b.role, 'member'),
       sendEmail: wantsEmail(b.sendEmail),
       baseUrl: publicBase(ctx.config, req),
     });
@@ -49,7 +49,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
   });
 
   app.delete<{ Params: { id: string } }>('/v1/admin/users/invites/:id', pre, async (req, reply) => {
-    const p = writer(req);
+    const p = req.principal!;
     if (!(await ctx.storage.auth.deleteInvite(p.orgId, req.params.id)))
       throw new HttpProblem(404, 'not_found', 'Invite not found.');
     return reply.code(204).send();
@@ -58,7 +58,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
   // changes to someone else's account need step-up (body.stepUp) and email them
 
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/reset-link', pre, async (req) => {
-    const p = writer(req);
+    const p = req.principal!;
     await ctx.accounts.stepUp(p, body(req).stepUp, req.ip);
     return ctx.accounts.resetLink({
       orgId: p.orgId,
@@ -70,12 +70,12 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
   });
 
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/sign-out', pre, async (req) => {
-    const p = writer(req);
+    const p = req.principal!;
     return { signedOut: await ctx.accounts.signOutUser(p.orgId, req.params.id) };
   });
 
   app.delete<{ Params: { id: string } }>('/v1/admin/users/:id', pre, async (req) => {
-    const p = writer(req);
+    const p = req.principal!;
     if (p.userId === req.params.id)
       throw new HttpProblem(400, 'cannot_remove_self', 'You cannot remove your own account.');
     await ctx.accounts.memberOf(p.orgId, req.params.id);
@@ -83,8 +83,17 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return ctx.accounts.removeUser(p.orgId, p.userId, req.params.id);
   });
 
+  app.put<{ Params: { id: string } }>('/v1/admin/users/:id/role', pre, async (req) => {
+    const p = req.principal!;
+    const b = body(req);
+    const role = parseRole(b.role);
+    await ctx.accounts.memberOf(p.orgId, req.params.id);
+    await ctx.accounts.stepUp(p, b.stepUp, req.ip);
+    return ctx.accounts.setRole(p.orgId, p.userId, req.params.id, role);
+  });
+
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/disable-2fa', pre, async (req) => {
-    const p = writer(req);
+    const p = req.principal!;
     await ctx.accounts.memberOf(p.orgId, req.params.id);
     await ctx.accounts.stepUp(p, body(req).stepUp, req.ip);
     return {
@@ -93,7 +102,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     };
   });
 
-  app.get('/v1/admin/settings/security', pre, async (req) => {
+  app.get('/v1/admin/settings/security', admins, async (req) => {
     const p = req.principal!;
     const users = await ctx.storage.auth.listUsers(p.orgId);
     return {
@@ -105,7 +114,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
   });
 
   app.put('/v1/admin/settings/security', pre, async (req) => {
-    const p = writer(req);
+    const p = req.principal!;
     const require2fa = body(req).require2fa;
     if (typeof require2fa !== 'boolean')
       throw new HttpProblem(400, 'invalid', 'require2fa must be true or false');
@@ -131,7 +140,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
 
   // ---------------------------------------------------------------- own account
 
-  app.post('/v1/account/password', pre, async (req) => {
+  app.post('/v1/account/password', own, async (req) => {
     const p = account(req);
     const b = body(req);
     await ctx.accounts.changePassword({
@@ -144,7 +153,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return { ok: true };
   });
 
-  app.post('/v1/account/sign-out-everywhere', pre, async (req, reply) => {
+  app.post('/v1/account/sign-out-everywhere', own, async (req, reply) => {
     const p = account(req);
     const n = await ctx.storage.auth.deleteUserSessions(p.userId);
     endSessionCookie(ctx, req, reply);
@@ -170,17 +179,17 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return ctx.accounts.twoFactor.status(user, p.orgId);
   });
 
-  app.post('/v1/account/2fa/setup', pre, async (req) => {
+  app.post('/v1/account/2fa/setup', own, async (req) => {
     const { user } = await passwordUser(req);
     return ctx.accounts.twoFactor.begin(user);
   });
 
-  app.post('/v1/account/2fa/enable', pre, async (req) => {
+  app.post('/v1/account/2fa/enable', own, async (req) => {
     const { user } = await passwordUser(req);
     return { recoveryCodes: await ctx.accounts.twoFactor.confirm(user, body(req).code) };
   });
 
-  app.post('/v1/account/2fa/disable', pre, async (req) => {
+  app.post('/v1/account/2fa/disable', own, async (req) => {
     const { p, user } = await passwordUser(req);
     if (await ctx.storage.auth.getRequire2fa(p.orgId))
       throw new HttpProblem(
@@ -193,7 +202,7 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: AppContext):
     return { ok: true };
   });
 
-  app.post('/v1/account/2fa/recovery-codes', pre, async (req) => {
+  app.post('/v1/account/2fa/recovery-codes', own, async (req) => {
     const { user } = await passwordUser(req);
     if (!user.totpEnabled)
       throw new HttpProblem(400, 'not_enabled', 'Two-factor sign-in is not on.');

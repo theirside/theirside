@@ -21,9 +21,3 @@ export async function adminTenant(
   }
   return { orgId: p.orgId, projectId: project.id };
 }
-
-/** Admin-only mutations: owners and admins. */
-export function canWrite(req: FastifyRequest): boolean {
-  const role = req.principal?.role;
-  return role === 'owner' || role === 'admin';
-}
