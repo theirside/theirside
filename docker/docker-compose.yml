@@ -1,5 +1,7 @@
-# Self-hosted collector + Postgres.
-#   docker compose -f docker/docker-compose.yml up -d
+# Self-hosted collector + Postgres, from the released image (ghcr.io/theirside/collector):
+#   THEIRSIDE_VERSION=0.1.0 docker compose -f docker/docker-compose.yml up -d
+# Without THEIRSIDE_VERSION (or with --build) the collector is built from this checkout
+# and tagged :local, which is never pulled.
 # Demo stack (chaos provider, NestJS demo app, load generator):
 #   docker compose -f docker/docker-compose.yml --profile demo up
 #
@@ -28,7 +30,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.collector
-    image: theirside/collector:local
+    image: ghcr.io/theirside/collector:${THEIRSIDE_VERSION:-local}
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
       THEIRSIDE_DEPLOYMENT_MODE: self_hosted
@@ -116,7 +118,7 @@ services:
   # (exit 2) on anything that is not an empty demo install; no-op once seeded.
   demo-seed:
     profiles: ['demo']
-    image: theirside/collector:local
+    image: ghcr.io/theirside/collector:${THEIRSIDE_VERSION:-local}
     command: ['node', 'dist/demo-seed.js']
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside

@@ -157,9 +157,30 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 ## 8. Running the collector in the client's infrastructure
 
-The collector is one Docker image (`docker/Dockerfile.collector`) plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
+The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-Build and push the image:
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.1.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.1.0 -R theirside/theirside`).
+
+### Mirroring the image into a private registry
+
+If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
+
+```sh
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.1.0
+ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
+aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
+
+docker pull --platform linux/amd64 ghcr.io/theirside/collector:$VERSION   # or linux/arm64 for Graviton
+docker tag ghcr.io/theirside/collector:$VERSION $ECR/theirside-collector:$VERSION
+docker push $ECR/theirside-collector:$VERSION
+```
+
+`docker pull` + `push` copies one architecture. To copy both, with the signatures and SBOM, use `docker buildx imagetools create --tag $ECR/theirside-collector:$VERSION ghcr.io/theirside/collector:$VERSION` (or `crane copy`) instead of the last three lines.
+
+### Building from source
+
+To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
 docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.1.0 .
@@ -172,10 +193,10 @@ On a small VM (1 vCPU / 2 GB is plenty; measured 25k events/s on 1 CPU, see `doc
 
 ```sh
 git clone <this repo> theirside && cd theirside
-cp .env.example .env    # then fill in: POSTGRES_PASSWORD, THEIRSIDE_BOOTSTRAP_API_KEY,
-                        # THEIRSIDE_ADMIN_TOKEN, THEIRSIDE_PUBLIC_URL, SMTP if email alerts
+cp .env.example .env    # then fill in: THEIRSIDE_VERSION (the release to run), POSTGRES_PASSWORD,
+                        # THEIRSIDE_BOOTSTRAP_API_KEY, THEIRSIDE_ADMIN_TOKEN, THEIRSIDE_PUBLIC_URL, SMTP if email alerts
 chmod 600 .env
-docker compose --env-file .env -f docker/docker-compose.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
 
 Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep the VM's port 4318 closed to the internet (see "Network exposure"). Back up the `pgdata` volume, or point `DATABASE_URL` at a managed Postgres instead.
@@ -183,7 +204,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM <registry>/theirside-collector:0.1.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.1.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN` (and `THEIRSIDE_SMTP_PASS` if email alerts are used).
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.

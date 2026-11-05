@@ -11,15 +11,15 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + collector on port 4318):
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.1.0` on port 4318, amd64 and arm64):
 
 ```sh
 git clone <this repo> theirside && cd theirside
-THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16) THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 16) \
-  docker compose -f docker/docker-compose.yml up -d --build
+THEIRSIDE_VERSION=0.1.0 THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16) THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 16) \
+  docker compose -f docker/docker-compose.yml up -d
 ```
 
-Note the two values: `THEIRSIDE_BOOTSTRAP_API_KEY` is your project API key, `THEIRSIDE_ADMIN_TOKEN` your dashboard login.
+Note the two values: `THEIRSIDE_BOOTSTRAP_API_KEY` is your project API key, `THEIRSIDE_ADMIN_TOKEN` your dashboard login. To build the image from source instead, leave out `THEIRSIDE_VERSION` and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
 
 **2. Add the SDK** at the very top of your app's entry point (for NestJS: `main.ts`, before `NestFactory.create`):
 

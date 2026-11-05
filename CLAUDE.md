@@ -52,6 +52,7 @@ pnpm workspaces (pnpm 12, via corepack). Keep this list accurate:
 - demo data by hand (empty demo database only; refuses anything else): `DATABASE_URL=… pnpm demo:seed`
 - rebuild the path-word vocabulary (`packages/shared/src/vocabulary-words.ts`; see `tools/vocabulary/README.md`): `cd tools/vocabulary && node src/fetch.mjs && node src/build.mjs`
 - SDK tarball for installing into another service: `cd packages/sdk && pnpm pack`
+- collector image release (maintainer; CI builds and pushes `ghcr.io/theirside/collector`, amd64 + arm64, after the collector tests): `git tag v0.1.0 && git push origin v0.1.0`, or run the "Release collector image" workflow with a version. Compose runs a release with `THEIRSIDE_VERSION=0.1.0`; unset, it builds from source.
 - SDK publish (maintainer): `cd packages/sdk && pnpm publish` (pnpm, not npm: it applies `publishConfig.exports`; `prepublishOnly` builds, runs the SDK tests and the compat smoke). `@theirside/shared` is private, bundled into the SDK.
 
 ## Editions
