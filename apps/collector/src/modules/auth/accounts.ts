@@ -3,13 +3,14 @@ import type { CollectorConfig } from '../../config.js';
 import type { AuthTokenKind, AuthTokenRecord, Storage, UserRecord } from '../../storage/types.js';
 import type { Clock } from '../../util/clock.js';
 import { HttpProblem } from '../../util/http-problem.js';
-import { newId, randomBase62, safeEqual, sha256Hex } from '../../util/ids.js';
+import { newId, safeEqual, sha256Hex } from '../../util/ids.js';
 import type { EntitlementsResolver } from '../entitlements/types.js';
 import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { hashToken, newToken, type SessionManager } from './session.js';
 import type { LoginThrottle } from './throttle.js';
 import type { ProxyIdentity } from './proxy-auth.js';
+import { newRecoveryCode } from './totp.js';
 import type { TwoFactor } from './two-factor.js';
 
 export const INVITE_TTL_MS = 7 * 24 * 3600_000;
@@ -56,6 +57,7 @@ export interface UserView {
   createdAt: string;
   lastLoginAt: string | null;
   activeSessions: number;
+  twoFactor: boolean;
 }
 
 export interface LinkResult {
@@ -100,8 +102,8 @@ export class Accounts {
    */
   async issueSetupCode(): Promise<string | null> {
     if (!(await this.setupRequired())) return null;
-    const raw = randomBase62(12);
-    const code = `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}`;
+    // upper case without look-alikes (0/O, 1/I/L): read from a log, typed by hand; ~59 bits
+    const code = newRecoveryCode().slice(0, 14);
     const expires = new Date(this.clock.now().getTime() + SETUP_CODE_TTL_MS);
     await this.storage.config.setMeta(
       `${SETUP_CODE_META}${sha256Hex(code.toUpperCase())}`,
@@ -112,9 +114,15 @@ export class Accounts {
 
   private async setupSecretValid(input: { code?: unknown; adminToken?: unknown }) {
     const { code, adminToken } = input;
-    if (typeof adminToken === 'string' && adminToken && this.config.adminToken)
-      return safeEqual(adminToken, this.config.adminToken);
-    if (typeof code !== 'string' || !code.trim()) return false;
+    // either one; the setup page sends what was typed as both
+    if (
+      typeof adminToken === 'string' &&
+      adminToken &&
+      this.config.adminToken &&
+      safeEqual(adminToken, this.config.adminToken)
+    )
+      return true;
+    if (typeof code !== 'string' || !code.trim() || code.length > 40) return false;
     const expires = await this.storage.config.getMeta(
       `${SETUP_CODE_META}${sha256Hex(code.trim().toUpperCase())}`,
     );
@@ -579,6 +587,7 @@ export class Accounts {
         createdAt: u.createdAt.toISOString(),
         lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
         activeSessions: await this.storage.auth.countUserSessions(u.id, now),
+        twoFactor: u.totpEnabled,
       })),
     );
   }

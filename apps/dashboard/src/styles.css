@@ -519,3 +519,73 @@ details.infra summary {
   display: block;
   margin: 0 0 14px;
 }
+
+/* sign-in, setup, accounts */
+.login-sub {
+  font-size: 15px;
+  font-weight: 600;
+  margin: -6px 0 0;
+}
+.login-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px;
+  width: min(440px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login form,
+.login-card {
+  max-width: calc(100vw - 32px);
+}
+.login .stack label,
+.card .stack label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.qr {
+  width: 200px;
+  height: 200px;
+  background: #fff;
+  border-radius: 6px;
+}
+.qr svg {
+  width: 100%;
+  height: 100%;
+}
+.summary.recovery {
+  columns: 2;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+.ok {
+  color: var(--green);
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

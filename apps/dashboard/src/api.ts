@@ -236,6 +236,55 @@ export interface Me {
   userId: string;
   orgId: string;
   role: string;
+  /** session = signed in here; proxy = identity proxy; admin-token = Bearer token. */
+  via: 'session' | 'proxy' | 'admin-token';
+  /** null for the admin token's system user. */
+  user: { id: string; email: string | null; name: string } | null;
+  /** Signed in with THEIRSIDE_ADMIN_TOKEN (break-glass): no account settings. */
+  breakGlass: boolean;
+  twoFactor: { enabled: boolean; enrollmentRequired: boolean };
+  csrfToken: string | null;
   projects: { id: string; name: string }[];
   entitlements: { plan: string; source: string };
+}
+
+export interface AuthStatus {
+  setupRequired: boolean;
+  emailEnabled: boolean;
+  adminTokenEnabled: boolean;
+  proxy: 'header' | 'alb' | null;
+}
+
+export interface UserRow {
+  id: string;
+  email: string | null;
+  name: string;
+  source: 'password' | 'proxy';
+  hasPassword: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  activeSessions: number;
+  twoFactor: boolean;
+}
+
+export interface PendingInvite {
+  id: string;
+  email: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** A one-time link the collector made (invite or password reset). */
+export interface LinkResult {
+  url: string;
+  expiresAt: string;
+  emailed: boolean;
+  emailError?: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  recoveryCodesLeft: number;
+  required: boolean;
+  available: boolean;
 }

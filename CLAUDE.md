@@ -47,7 +47,7 @@ pnpm workspaces (pnpm 12, via corepack). Keep this list accurate:
 - alerting end-to-end in docker (~25 min: warm-up, 40% failure for 6 min, open + resolve checks): `docker compose -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit --exit-code-from e2e e2e`
 - chaos provider locally: `pnpm --filter @theirside/chaos-provider dev` (admin API `/__chaos`, alert sink `/__alerts`)
 - dashboard dev server (proxies the API to a collector on :4318): `pnpm --filter @theirside/dashboard dev`; build into the collector: `pnpm --filter @theirside/dashboard build`
-- Playwright smoke against a running stack (`--profile demo`): `THEIRSIDE_ADMIN_TOKEN=change-me-admin-token pnpm --filter @theirside/dashboard smoke` (first time: `pnpm --filter @theirside/dashboard exec playwright install chromium`)
+- Playwright smoke against a running stack (`--profile demo`; start it with a throwaway `THEIRSIDE_SECRET_KEY` to cover 2FA, as CI does): `THEIRSIDE_ADMIN_TOKEN=change-me-admin-token pnpm --filter @theirside/dashboard smoke` (first time: `pnpm --filter @theirside/dashboard exec playwright install chromium`). It completes the setup page on a fresh stack and signs in as `smoke@example.test` after that
 - demo stack (postgres, collector, chaos provider, NestJS demo on :3000, loadgen; seeds 7 days of demo data on first start; see `docs/demo.md`): `docker compose -f docker/docker-compose.yml --profile demo up --build`
 - demo data by hand (empty demo database only; refuses anything else): `DATABASE_URL=… pnpm demo:seed`
 - rebuild the path-word vocabulary (`packages/shared/src/vocabulary-words.ts`; see `tools/vocabulary/README.md`): `cd tools/vocabulary && node src/fetch.mjs && node src/build.mjs`

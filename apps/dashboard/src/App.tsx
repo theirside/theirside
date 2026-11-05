@@ -1,44 +1,19 @@
 import { useEffect, useState } from 'react';
-import { api, setUnauthorizedHandler, type Me } from './api';
+import { api, setUnauthorizedHandler, type AuthStatus, type Me } from './api';
+import { Account } from './pages/Account';
+import {
+  AcceptInvite,
+  EnrolTwoFactor,
+  ForgotPassword,
+  Login,
+  ResetPassword,
+  Setup,
+} from './pages/Auth';
 import { Incident, Incidents } from './pages/Incidents';
 import { Overview } from './pages/Overview';
 import { Provider } from './pages/Provider';
 import { Settings } from './pages/Settings';
 import { href, useRoute } from './router';
-
-function Login({ onLogin }: { onLogin: () => void }) {
-  const [token, setToken] = useState('');
-  const [error, setError] = useState('');
-  return (
-    <div className="login">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          api('/v1/auth/login', { method: 'POST', body: { token } }).then(onLogin, () =>
-            setError('That token is not valid.'),
-          );
-        }}
-      >
-        <h1>Theirside</h1>
-        <label>
-          Admin token
-          <input
-            type="password"
-            autoFocus
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            name="token"
-          />
-        </label>
-        {error && <div className="error">{error}</div>}
-        <button className="btn primary" type="submit">
-          Sign in
-        </button>
-        <p className="muted">Self-hosted login uses the collector's THEIRSIDE_ADMIN_TOKEN.</p>
-      </form>
-    </div>
-  );
-}
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -46,9 +21,23 @@ export function App() {
   const [envs, setEnvs] = useState<string[]>([]);
   const route = useRoute();
 
+  const [status, setStatus] = useState<AuthStatus>();
+
   const loadMe = () => api<Me>('/v1/me').then(setMe, () => setMe(null));
+  const loadStatus = () => api<AuthStatus>('/v1/auth/status').then(setStatus, () => {});
+  const signedIn = () => {
+    // leave one-time link pages for the dashboard
+    if (/^#\/(invite|reset|forgot|setup)\b/.test(window.location.hash)) window.location.hash = '#/';
+    void loadMe();
+  };
+  const signOut = () =>
+    void api('/v1/auth/logout', { method: 'POST' }).then(() => {
+      setMe(null);
+      void loadStatus();
+    });
   useEffect(() => {
     setUnauthorizedHandler(() => setMe(null));
+    void loadStatus();
     void loadMe();
   }, []);
   useEffect(() => {
@@ -59,15 +48,25 @@ export function App() {
       );
   }, [me]);
 
-  if (me === undefined) return null;
-  if (me === null) return <Login onLogin={() => void loadMe()} />;
-
   const [section, arg] = route;
+  // one-time links work whether or not someone is signed in on this browser
+  if (section === 'invite' && arg) return <AcceptInvite token={arg} onDone={signedIn} />;
+  if (section === 'reset' && arg) return <ResetPassword token={arg} />;
+  if (me === undefined || status === undefined) return null;
+  if (me === null) {
+    if (section === 'forgot') return <ForgotPassword />;
+    if (status.setupRequired) return <Setup onDone={signedIn} />;
+    return <Login status={status} onDone={signedIn} />;
+  }
+  if (me.twoFactor.enrollmentRequired)
+    return <EnrolTwoFactor me={me} onDone={() => void loadMe()} onSignOut={signOut} />;
+
   let page;
   if (section === 'providers' && arg) page = <Provider name={arg} environment={environment} />;
   else if (section === 'incidents' && arg) page = <Incident id={arg} />;
   else if (section === 'incidents') page = <Incidents />;
   else if (section === 'settings') page = <Settings tab={arg ?? 'providers'} />;
+  else if (section === 'account') page = <Account me={me} onSignedOut={() => setMe(null)} />;
   else page = <Overview environment={environment} />;
 
   const active = (s: string) =>
@@ -108,12 +107,14 @@ export function App() {
             </select>
           )}
           <span className="muted">{me.entitlements.plan}</span>
-          <button
-            className="btn"
-            onClick={() => void api('/v1/auth/logout', { method: 'POST' }).then(() => setMe(null))}
-          >
-            Sign out
-          </button>
+          <a href={href('account')} className={active('account')} data-testid="account-link">
+            {me.breakGlass ? 'Admin token' : (me.user?.name ?? 'Account')}
+          </a>
+          {me.via !== 'proxy' && (
+            <button className="btn" onClick={signOut}>
+              Sign out
+            </button>
+          )}
         </div>
       </header>
       <main>{page}</main>

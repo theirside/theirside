@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { HttpProblem } from '../../util/http-problem.js';
 import { publicBase } from '../../util/origin.js';
+import { ADMIN_TOKEN_USER_ID } from './accounts.js';
 import { body, endSessionCookie, requireAdmin } from './routes.js';
 import { canWrite } from './tenant.js';
 
@@ -13,7 +14,7 @@ function writer(req: FastifyRequest) {
 /** Only real accounts manage their own password and sessions, not the admin token. */
 function account(req: FastifyRequest) {
   const p = req.principal!;
-  if (p.via === 'admin-token')
+  if (p.via === 'admin-token' || p.userId === ADMIN_TOKEN_USER_ID)
     throw new HttpProblem(400, 'not_an_account', 'Signed in with the admin token, not an account.');
   return p;
 }

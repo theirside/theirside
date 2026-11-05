@@ -13,7 +13,7 @@ describe('first-run setup', () => {
     const b = new Browser(t);
     expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({ setupRequired: true });
     const code = await t.ctx.accounts.issueSetupCode();
-    expect(code).toMatch(/^[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/);
+    expect(code).toMatch(/^[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}$/);
 
     const wrong = await b.req('POST', '/v1/auth/setup', {
       setupCode: 'AAAA-BBBB-CCCC',
@@ -46,7 +46,9 @@ describe('first-run setup', () => {
     expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({ setupRequired: false });
     expect(await t.ctx.accounts.issueSetupCode()).toBeNull();
 
+    // the setup page sends one field as both setupCode and adminToken
     const again = await new Browser(t).req('POST', '/v1/auth/setup', {
+      setupCode: THEIRSIDE_ADMIN_TOKEN,
       adminToken: THEIRSIDE_ADMIN_TOKEN,
       email: 'eve@example.com',
       password: PASSWORD,
@@ -280,7 +282,13 @@ describe('sign-in, sessions and CSRF', () => {
     expect(
       (await b.req('POST', '/v1/auth/login', { token: THEIRSIDE_ADMIN_TOKEN })).statusCode,
     ).toBe(200);
-    expect((await b.me()).json()).toMatchObject({ via: 'session', role: 'owner' });
+    expect((await b.me()).json()).toMatchObject({
+      via: 'session',
+      role: 'owner',
+      breakGlass: true,
+    });
+    // a session from the admin token has no account settings either
+    expect((await b.req('POST', '/v1/account/sign-out-everywhere')).statusCode).toBe(400);
     const pw = await t.app.inject({
       method: 'POST',
       url: '/v1/account/password',

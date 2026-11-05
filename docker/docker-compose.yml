@@ -44,6 +44,15 @@ services:
       THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
       THEIRSIDE_PUBLIC_URL: ${THEIRSIDE_PUBLIC_URL:-http://localhost:${COLLECTOR_PORT:-4318}}
       THEIRSIDE_LICENSE_KEY: ${THEIRSIDE_LICENSE_KEY:-}
+      # user accounts (docs/nestjs-integration.md): 2FA key, proxy sign-in, load balancers
+      THEIRSIDE_SECRET_KEY: ${THEIRSIDE_SECRET_KEY:-}
+      THEIRSIDE_SECRET_KEY_PREVIOUS: ${THEIRSIDE_SECRET_KEY_PREVIOUS:-}
+      THEIRSIDE_TRUST_PROXY: ${THEIRSIDE_TRUST_PROXY:-}
+      THEIRSIDE_AUTH_PROXY: ${THEIRSIDE_AUTH_PROXY:-}
+      THEIRSIDE_AUTH_PROXY_TRUSTED_IPS: ${THEIRSIDE_AUTH_PROXY_TRUSTED_IPS:-}
+      THEIRSIDE_AUTH_PROXY_HEADER: ${THEIRSIDE_AUTH_PROXY_HEADER:-}
+      THEIRSIDE_AUTH_PROXY_ALB_ARN: ${THEIRSIDE_AUTH_PROXY_ALB_ARN:-}
+      THEIRSIDE_AUTH_PROXY_AUTO_CREATE: ${THEIRSIDE_AUTH_PROXY_AUTO_CREATE:-}
       # extra catalog entries for the demo's fake providers; they only match the reserved
       # .test TLD, so they never affect real traffic. Set it to empty to disable.
       THEIRSIDE_CATALOG_OVERRIDE: ${THEIRSIDE_CATALOG_OVERRIDE-/app/demo-catalog.json}

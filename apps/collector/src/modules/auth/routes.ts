@@ -4,6 +4,7 @@ import { isStorageUnavailable } from '../../storage/postgres.js';
 import { HttpProblem } from '../../util/http-problem.js';
 import { safeEqual } from '../../util/ids.js';
 import { publicBase } from '../../util/origin.js';
+import { ADMIN_TOKEN_USER_ID } from './accounts.js';
 import { bearerToken } from './api-keys.js';
 import {
   CSRF_HEADER,
@@ -289,6 +290,8 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
       role: p.role,
       via: p.via,
       user: user && { id: user.id, email: user.email, name: user.name },
+      // signed in with THEIRSIDE_ADMIN_TOKEN: no account settings
+      breakGlass: p.userId === ADMIN_TOKEN_USER_ID,
       twoFactor: {
         enabled: !!user?.totpEnabled,
         enrollmentRequired: !!p.mustEnroll2fa,

@@ -102,6 +102,9 @@ jobs:
       # no --wait: the one-shot demo-seed container exits by design; `up -d` already
       # waits for it to complete before starting loadgen, and for the collector's healthcheck
       - run: docker compose -f docker/docker-compose.yml --profile demo up -d --build
+        env:
+          # a throwaway key so the smoke test can exercise two-factor sign-in
+          THEIRSIDE_SECRET_KEY: ci-smoke-only-not-a-secret-0123456789
       - run: pnpm --filter @theirside/dashboard exec playwright install --with-deps chromium
       - run: pnpm --filter @theirside/dashboard smoke
         env:

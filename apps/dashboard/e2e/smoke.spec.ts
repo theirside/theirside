@@ -1,7 +1,76 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { createHmac } from 'node:crypto';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const THEIRSIDE_ADMIN_TOKEN = process.env.THEIRSIDE_ADMIN_TOKEN ?? 'change-me-admin-token';
 const auth = { authorization: `Bearer ${THEIRSIDE_ADMIN_TOKEN}` };
+const SMOKE_EMAIL = 'smoke@example.test';
+const SMOKE_PASSWORD = 'smoke test passphrase 1';
+
+interface UserRow {
+  id: string;
+  email: string;
+  twoFactor: boolean;
+}
+
+/** RFC 6238 code for a base32 secret, as an authenticator app would show it. */
+function totp(secretB32: string, at = Date.now()): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of secretB32.replace(/=+$/, ''))
+    bits += alphabet.indexOf(c).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(at / 30_000)));
+  const mac = createHmac('sha1', key).update(counter).digest();
+  const o = mac[mac.length - 1]! & 0x0f;
+  return String((mac.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
+}
+
+async function users(request: APIRequestContext): Promise<UserRow[]> {
+  return (await (await request.get('/v1/admin/users', { headers: auth })).json()).users;
+}
+
+/**
+ * Signs the smoke user in. A fresh stack shows the setup page (completed with the admin
+ * token); on a stack set up before, the smoke user is (re)created through an invite and
+ * any 2FA a previous run left on is turned off with the admin token.
+ */
+async function signIn(page: Page, request: APIRequestContext) {
+  const status = await (await request.get('/v1/auth/status')).json();
+  await page.goto('/');
+  if (status.setupRequired) {
+    await page.getByLabel('Setup code or admin token').fill('wrong');
+    await page.getByLabel('Your name').fill('Smoke');
+    await page.getByLabel('Email').fill(SMOKE_EMAIL);
+    await page.getByLabel('Password', { exact: false }).first().fill(SMOKE_PASSWORD);
+    await page.getByLabel('Repeat password').fill(SMOKE_PASSWORD);
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await expect(page.getByText('That setup code or admin token is not valid.')).toBeVisible();
+    await page.getByLabel('Setup code or admin token').fill(THEIRSIDE_ADMIN_TOKEN);
+    await page.getByRole('button', { name: 'Create account' }).click();
+    return;
+  }
+  const smoke = (await users(request)).find((u) => u.email === SMOKE_EMAIL);
+  if (!smoke) {
+    const { url } = await (
+      await request.post('/v1/admin/users/invites', {
+        headers: auth,
+        data: { email: SMOKE_EMAIL, sendEmail: false },
+      })
+    ).json();
+    await request.post('/v1/auth/invite/accept', {
+      data: { token: url.split('/').pop(), name: 'Smoke', password: SMOKE_PASSWORD },
+    });
+  } else if (smoke.twoFactor) {
+    await request.post(`/v1/admin/users/${smoke.id}/disable-2fa`, { headers: auth });
+  }
+  await page.getByLabel('Email').fill(SMOKE_EMAIL);
+  await page.getByLabel('Password').fill('not the password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByText('That email and password do not match.')).toBeVisible();
+  await page.getByLabel('Password').fill(SMOKE_PASSWORD);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+}
 
 async function firstProviderWithTraffic(request: APIRequestContext) {
   for (let i = 0; i < 30; i++) {
@@ -19,12 +88,7 @@ test('dashboard: login, providers, endpoint charts, incidents, settings', async 
 }) => {
   const provider = await firstProviderWithTraffic(request);
 
-  await page.goto('/');
-  await page.getByLabel('Admin token').fill('wrong');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByText('That token is not valid.')).toBeVisible();
-  await page.getByLabel('Admin token').fill(THEIRSIDE_ADMIN_TOKEN);
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await signIn(page, request);
 
   const providers = page.getByTestId('providers');
   await expect(providers).toBeVisible();
@@ -123,4 +187,70 @@ test('status page shows public providers only, and embed.js works', async ({ pag
   await page.goto(partnerUrl);
   const frame = page.frameLocator('iframe');
   await expect(frame.getByText('Smoke test integration')).toBeVisible();
+});
+
+test('accounts: invite link, two-factor setup, sign-in with a recovery code', async ({
+  page,
+  request,
+  browser,
+}) => {
+  await signIn(page, request);
+  await expect(page.getByTestId('providers')).toBeVisible();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('link', { name: 'Users', exact: true }).click();
+  const email = `invitee-${Date.now()}@example.test`;
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByRole('button', { name: 'Create invite link' }).click();
+  const link = await page.getByTestId('one-time-link').textContent();
+  expect(link).toMatch(/#\/invite\/[A-Za-z0-9_-]{43}$/);
+  await expect(page.getByTestId('invites')).toContainText(email);
+
+  // the invitee, in their own browser
+  const other = await browser.newContext();
+  const p2 = await other.newPage();
+  await p2.goto(link!);
+  await expect(p2.getByText(`You were invited as ${email}`)).toBeVisible();
+  await p2.getByLabel('Your name').fill('Invitee');
+  await p2.getByLabel('Password', { exact: false }).first().fill('invitee passphrase 1');
+  await p2.getByLabel('Repeat password').fill('invitee passphrase 1');
+  await p2.getByRole('button', { name: 'Create account' }).click();
+  await expect(p2.getByTestId('providers')).toBeVisible();
+
+  await p2.getByTestId('account-link').click();
+  await expect(p2.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  const setUp = p2.getByRole('button', { name: 'Set up two-factor sign-in' });
+  const noKey = p2.getByText('needs THEIRSIDE_SECRET_KEY', { exact: false });
+  await expect(setUp.or(noKey)).toBeVisible();
+  if (await noKey.isVisible()) {
+    // the stack runs without THEIRSIDE_SECRET_KEY: 2FA is explained, not offered
+  } else {
+    await setUp.click();
+    await expect(p2.locator('.qr svg')).toBeVisible();
+    const secret = (await p2.getByTestId('totp-secret').textContent())!;
+    await p2.getByLabel('Enter the 6-digit code it shows', { exact: false }).fill(totp(secret));
+    await p2.getByRole('button', { name: 'Turn on' }).click();
+    const codes = (await p2.getByTestId('recovery-codes').textContent())!.trim().split(/\s+/);
+    expect(codes).toHaveLength(10);
+    await p2.getByRole('button', { name: 'I saved them' }).click();
+    await expect(p2.getByText('recovery codes left', { exact: false })).toBeVisible();
+
+    await p2.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await p2.getByLabel('Email').fill(email);
+    await p2.getByLabel('Password').fill('invitee passphrase 1');
+    await p2.getByRole('button', { name: 'Sign in' }).click();
+    await p2.getByLabel('Code from your authenticator app', { exact: false }).fill(codes[0]!);
+    await p2.getByRole('button', { name: 'Verify' }).click();
+    // back on the page they signed out from, one recovery code used
+    await expect(p2.getByRole('heading', { name: 'Your account' })).toBeVisible();
+    await expect(p2.getByText('9 recovery codes left', { exact: false })).toBeVisible();
+  }
+  await other.close();
+
+  // the invitee shows up for everyone; remove them again
+  await page.reload();
+  const row = page.getByTestId('users').getByRole('row', { name: new RegExp(email) });
+  await expect(row).toBeVisible();
+  page.once('dialog', (d) => void d.accept());
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await expect(row).toHaveCount(0);
 });
