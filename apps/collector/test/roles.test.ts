@@ -323,6 +323,42 @@ describe('the last admin', () => {
   });
 });
 
+describe('the setup page with THEIRSIDE_ADMIN_EMAILS set (no proxy)', () => {
+  const env = { THEIRSIDE_ADMIN_EMAILS: 'someone.else@example.com' };
+
+  it('still makes the first user an admin, even if the list leaves them out', async () => {
+    const t = await startTestApp({ env });
+    try {
+      const ada = await setUp(t, 'ada@example.com');
+      expect((await ada.me()).json()).toMatchObject({ role: 'admin', via: 'session' });
+      expect((await ada.req('GET', '/v1/admin/users')).statusCode).toBe(200);
+      // and the list doesn't touch password invites either
+      await invite(ada, 'someone.else@example.com');
+      expect((await ada.req('GET', '/v1/admin/users')).json().invites[0].role).toBe('member');
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('makes a claimed placeholder from an older bootstrap an admin', async () => {
+    const t = await startTestApp({ env });
+    try {
+      await t.db.pool.query(
+        `INSERT INTO users (id, email, name, auth_source) VALUES ('usr_old', NULL, 'Admin', 'password')`,
+      );
+      await t.db.pool.query(
+        `INSERT INTO memberships (org_id, user_id, role) VALUES ($1, 'usr_old', 'member')`,
+        [t.orgId],
+      );
+      await t.db.storage.config.setMeta('bootstrap_admin_user_id', 'usr_old');
+      const ada = await setUp(t, 'ada@example.com');
+      expect((await ada.me()).json()).toMatchObject({ userId: 'usr_old', role: 'admin' });
+    } finally {
+      await t.close();
+    }
+  });
+});
+
 describe('identity proxy users and THEIRSIDE_ADMIN_EMAILS', () => {
   const PROXY_IP = '10.0.0.5';
   const asUser = (t: TestApp, email: string) =>

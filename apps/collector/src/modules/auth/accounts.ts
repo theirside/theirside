@@ -188,6 +188,8 @@ export class Accounts {
       if (placeholder && placeholder.authSource === 'password' && !placeholder.passwordHash) {
         await tx.auth.updateUserProfile(placeholder.id, email, name);
         await tx.auth.setPassword(placeholder.id, passwordHash, this.clock.now());
+        // the setup user is always an admin (THEIRSIDE_ADMIN_EMAILS is for proxy-created users)
+        await tx.config.addMembership({ orgId, userId: placeholder.id, role: 'admin' });
         await tx.config.setMeta('setup_completed_by', placeholder.id);
         await tx.config.deleteMetaPrefix(SETUP_CODE_META);
         return placeholder.id;

@@ -47,7 +47,7 @@ Each user is an **admin** or a **member** (Settings → Users).
 
 The collector enforces this on every request (403 "Only admins can …"); the dashboard just hides what members can't use. Trusted proxy settings and the licence are environment variables, so only whoever runs the collector changes them.
 
-- The user from the setup page is an admin. Invites pick the role (member by default).
+- The user from the setup page is always an admin, whatever `THEIRSIDE_ADMIN_EMAILS` says (that list is only for accounts an identity proxy creates). Invites pick the role (member by default).
 - Users created by an identity proxy are members, unless their email is in **`THEIRSIDE_ADMIN_EMAILS`** (comma-separated, e.g. `alice@example.com,ops@example.com`). Without that list, the very first user is the admin. The list only applies when the account is created; change roles later on Settings → Users. An invite's role applies when the invitee signs in through the proxy.
 - There is always an admin: the last admin who can sign in can't be demoted or removed. Make someone else an admin first.
 - Changing a role asks for step-up like other changes to someone's account, and emails them.
