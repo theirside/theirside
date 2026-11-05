@@ -13,25 +13,42 @@ import {
 import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
 import { ago, when } from '../format';
 import { href } from '../router';
+import { useIsAdmin } from '../role';
 import { UsersTab } from './Users';
 
+/** [id, label, admins only] */
 const TABS = [
-  ['providers', 'Providers'],
-  ['alerts', 'Alert channels'],
-  ['api-keys', 'API keys'],
-  ['sdk', 'SDK health'],
-  ['status-page', 'Status page'],
-  ['users', 'Users'],
+  ['providers', 'Providers', false],
+  ['alerts', 'Alert channels', true],
+  ['api-keys', 'API keys', true],
+  ['sdk', 'SDK health', false],
+  ['status-page', 'Status page', true],
+  ['users', 'Users', true],
 ] as const;
 
 export function Settings({ tab, me }: { tab: string; me: Me }) {
+  const isAdmin = useIsAdmin();
+  const tabs = TABS.filter(([, , adminOnly]) => isAdmin || !adminOnly);
+  if (!tabs.some(([id]) => id === tab))
+    return (
+      <>
+        <div className="page-h">
+          <h1>Settings</h1>
+        </div>
+        <p className="notice">
+          Only admins can manage alert channels, API keys, status pages and users. Ask an admin if
+          you need a change, or to make you an admin.{' '}
+          <a href={href('settings', 'providers')}>Back to providers</a>
+        </p>
+      </>
+    );
   return (
     <>
       <div className="page-h">
         <h1>Settings</h1>
       </div>
       <nav className="tabs">
-        {TABS.map(([id, label]) => (
+        {tabs.map(([id, label]) => (
           <a key={id} href={href('settings', id)} className={tab === id ? 'on' : ''}>
             {label}
           </a>
@@ -83,6 +100,7 @@ function ProviderForm({
   });
   const [state, setState] = useState<string>('');
   const [mergeInto, setMergeInto] = useState('');
+  const isAdmin = useIsAdmin();
   const set =
     (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -111,8 +129,10 @@ function ProviderForm({
         supportEmail: form.supportEmail || null,
         supportUrl: form.supportUrl || null,
         supportNotes: form.supportNotes || null,
-        publicDisplayName: form.publicDisplayName || null,
-        isPublic: form.isPublic,
+        // what the status page shows is for admins
+        ...(isAdmin
+          ? { publicDisplayName: form.publicDisplayName || null, isPublic: form.isPublic }
+          : {}),
         alertsEnabled: form.alertsEnabled,
         pathPrivacy: form.pathPrivacy || null,
         allowedPathWords: form.allowedPathWords
@@ -229,11 +249,18 @@ function ProviderForm({
             value={form.publicDisplayName}
             onChange={set('publicDisplayName')}
             placeholder="Card issuing"
+            disabled={!isAdmin}
           />
         </label>
         <label className="check">
-          <input type="checkbox" checked={form.isPublic} onChange={set('isPublic')} /> Show on the
-          public status page
+          <input
+            type="checkbox"
+            checked={form.isPublic}
+            onChange={set('isPublic')}
+            disabled={!isAdmin}
+          />{' '}
+          Show on the public status page
+          {!isAdmin && <small className="muted"> (admins only)</small>}
         </label>
         <div>
           <button className="btn primary" onClick={() => void save()}>
@@ -300,6 +327,7 @@ function ProviderForm({
 }
 
 function DiscoverySettings() {
+  const isAdmin = useIsAdmin();
   const [data, , reload] = usePoll(
     () => api<{ digest: boolean }>('/v1/admin/settings/discovery'),
     [],
@@ -311,6 +339,7 @@ function DiscoverySettings() {
       <input
         type="checkbox"
         checked={data.digest}
+        disabled={!isAdmin}
         onChange={(e) =>
           void api('/v1/admin/settings/discovery', {
             method: 'PUT',
@@ -319,6 +348,7 @@ function DiscoverySettings() {
         }
       />{' '}
       Send a message to alert channels when new providers are discovered (at most hourly)
+      {!isAdmin && <small className="muted"> (admins only)</small>}
     </label>
   );
 }

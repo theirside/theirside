@@ -232,10 +232,12 @@ export interface ApiKey {
   revokedAt: string | null;
 }
 
+export type Role = 'admin' | 'member';
+
 export interface Me {
   userId: string;
   orgId: string;
-  role: string;
+  role: Role;
   /** session = signed in here; proxy = identity proxy; admin-token = Bearer token. */
   via: 'session' | 'proxy' | 'admin-token';
   /** null for the admin token's system user. */
@@ -260,6 +262,7 @@ export interface UserRow {
   email: string | null;
   name: string;
   source: 'password' | 'proxy';
+  role: Role;
   hasPassword: boolean;
   createdAt: string;
   lastLoginAt: string | null;
@@ -270,6 +273,7 @@ export interface UserRow {
 export interface PendingInvite {
   id: string;
   email: string;
+  role: Role;
   createdAt: string;
   expiresAt: string;
 }

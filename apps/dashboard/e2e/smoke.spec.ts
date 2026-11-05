@@ -216,6 +216,14 @@ test('accounts: invite link, two-factor setup, sign-in with a recovery code', as
   await p2.getByRole('button', { name: 'Create account' }).click();
   await expect(p2.getByTestId('providers')).toBeVisible();
 
+  // invited as a member: providers yes, admin pages no
+  await p2.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(p2.getByRole('link', { name: 'SDK health' })).toBeVisible();
+  await expect(p2.getByRole('link', { name: 'Users', exact: true })).toHaveCount(0);
+  await expect(p2.getByRole('link', { name: 'API keys' })).toHaveCount(0);
+  await p2.goto(link!.replace(/#.*$/, '#/settings/users'));
+  await expect(p2.getByText('Only admins can manage', { exact: false })).toBeVisible();
+
   await p2.getByTestId('account-link').click();
   await expect(p2.getByRole('heading', { name: 'Your account' })).toBeVisible();
   const setUp = p2.getByRole('button', { name: 'Set up two-factor sign-in' });

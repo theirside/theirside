@@ -13,6 +13,7 @@ import { Incident, Incidents } from './pages/Incidents';
 import { Overview } from './pages/Overview';
 import { Provider } from './pages/Provider';
 import { Settings } from './pages/Settings';
+import { AdminContext } from './role';
 import { href, useRoute } from './router';
 
 export function App() {
@@ -117,7 +118,9 @@ export function App() {
           )}
         </div>
       </header>
-      <main>{page}</main>
+      <main>
+        <AdminContext.Provider value={me.role === 'admin'}>{page}</AdminContext.Provider>
+      </main>
     </div>
   );
 }

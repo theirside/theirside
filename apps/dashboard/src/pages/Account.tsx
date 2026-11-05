@@ -212,8 +212,14 @@ export function Account({ me, onSignedOut }: { me: Me; onSignedOut: () => void }
         <>
           <Card title="Profile">
             <p>
-              <b>{me.user?.name}</b> · {me.user?.email}
+              <b>{me.user?.name}</b> · {me.user?.email} <span className="tag">{me.role}</span>
             </p>
+            {me.role === 'member' && (
+              <p className="muted">
+                As a member you see everything and manage providers; an admin manages users, API
+                keys, alert channels, status pages and security settings.
+              </p>
+            )}
             {me.via === 'proxy' && (
               <p className="muted">
                 You sign in through your organization's identity proxy; your password and two-factor

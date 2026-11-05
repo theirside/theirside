@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type LinkResult, type Me, type PendingInvite, type UserRow } from '../api';
+import { api, type LinkResult, type Me, type PendingInvite, type Role, type UserRow } from '../api';
 import { Card, CopyButton, ErrorBox, usePoll } from '../components/ui';
 import { ago, when } from '../format';
 
@@ -157,6 +157,7 @@ function SecurityCard() {
 export function UsersTab({ me }: { me: Me }) {
   const [data, error, reload] = usePoll(() => api<UsersData>('/v1/admin/users'), [], 30_000);
   const [email, setEmail] = useState('');
+  const [role, setRole] = useState<Role>('member');
   const [sendEmail, setSendEmail] = useState(true);
   const [link, setLink] = useState<{ title: string; link: LinkResult } | null>(null);
   const [msg, setMsg] = useState('');
@@ -182,10 +183,11 @@ export function UsersTab({ me }: { me: Me }) {
     run(
       api<LinkResult & { email: string }>('/v1/admin/users/invites', {
         method: 'POST',
-        body: { email: email.trim(), sendEmail: data?.emailEnabled ? sendEmail : false },
+        body: { email: email.trim(), role, sendEmail: data?.emailEnabled ? sendEmail : false },
       }).then((r) => {
-        setLink({ title: `Invite for ${r.email}`, link: r });
+        setLink({ title: `Invite for ${r.email} (${role})`, link: r });
         setEmail('');
+        setRole('member');
       }),
     );
   const resetLink = (u: UserRow) =>
@@ -195,6 +197,13 @@ export function UsersTab({ me }: { me: Me }) {
         body: { sendEmail: !!data?.emailEnabled && sendEmail, stepUp: s },
       }).then((r) => setLink({ title: `Password reset for ${u.email ?? u.name}`, link: r })),
     );
+  const changeRole = (u: UserRow, to: Role) =>
+    stepUp(
+      to === 'admin'
+        ? `Make ${u.email ?? u.name} an admin? Admins manage users, API keys, alert channels, status pages and security settings.`
+        : `Make ${u.email ?? u.name} a member? Members see everything and manage providers, but not users, keys, channels, status pages or security settings.`,
+      (s) => api(`/v1/admin/users/${u.id}/role`, { method: 'PUT', body: { role: to, stepUp: s } }),
+    );
   const confirmThen = (question: string, p: () => Promise<unknown>) => {
     if (confirm(question)) run(p());
   };
@@ -203,8 +212,9 @@ export function UsersTab({ me }: { me: Me }) {
     <>
       <ErrorBox error={error} />
       <p className="muted">
-        Everyone here can do everything, including managing users. Roles, SSO and an audit log are
-        part of the paid editions.
+        Admins can do everything. Members see everything and manage providers and their own account,
+        but not users, API keys, alert channels, status pages or security settings. Custom roles,
+        SSO and an audit log are part of the paid editions.
       </p>
       {pending && (
         <StepUpForm
@@ -248,6 +258,17 @@ export function UsersTab({ me }: { me: Me }) {
               name="invite-email"
             />
           </label>
+          <label>
+            Role
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as Role)}
+              name="invite-role"
+            >
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
           <label className="check">
             <input
               type="checkbox"
@@ -272,6 +293,7 @@ export function UsersTab({ me }: { me: Me }) {
           <thead>
             <tr>
               <th>User</th>
+              <th>Role</th>
               <th>Sign-in</th>
               <th>Last sign-in</th>
               <th>Sessions</th>
@@ -285,6 +307,16 @@ export function UsersTab({ me }: { me: Me }) {
                   <b>{u.name}</b>
                   {u.id === data.you && <span className="tag">you</span>}
                   <div className="muted">{u.email}</div>
+                </td>
+                <td>
+                  <select
+                    value={u.role}
+                    aria-label={`Role of ${u.email ?? u.name}`}
+                    onChange={(e) => changeRole(u, e.target.value as Role)}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                  </select>
                 </td>
                 <td>
                   <span className="tag">
@@ -356,7 +388,9 @@ export function UsersTab({ me }: { me: Me }) {
               <tbody>
                 {data.invites.map((i) => (
                   <tr key={i.id}>
-                    <td>{i.email}</td>
+                    <td>
+                      {i.email} <span className="tag">{i.role}</span>
+                    </td>
                     <td className="muted">expires {when(i.expiresAt)}</td>
                     <td className="actions">
                       <button
