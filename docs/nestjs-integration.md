@@ -187,13 +187,15 @@ docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.
 docker push <registry>/theirside-collector:0.1.0
 ```
 
+With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
+
 ### Option A: docker compose on a VM
 
 On a small VM (1 vCPU / 2 GB is plenty; measured 25k events/s on 1 CPU, see `docs/benchmarks.md`) inside the client's network:
 
 ```sh
 git clone <this repo> theirside && cd theirside
-cp .env.example .env    # then fill in: THEIRSIDE_VERSION (the release to run), POSTGRES_PASSWORD,
+cp .env.example .env    # then fill in: THEIRSIDE_VERSION (the release to pull), POSTGRES_PASSWORD,
                         # THEIRSIDE_BOOTSTRAP_API_KEY, THEIRSIDE_ADMIN_TOKEN, THEIRSIDE_PUBLIC_URL, SMTP if email alerts
 chmod 600 .env
 docker compose --env-file .env -f docker/docker-compose.yml up -d

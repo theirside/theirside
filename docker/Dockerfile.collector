@@ -2,6 +2,11 @@
 # Build from the repo root:  docker build -f docker/Dockerfile.collector -t theirside/collector .
 
 FROM node:22-bookworm-slim AS build
+# docker compose builds this only for THEIRSIDE_VERSION=local. For a release version it
+# falls back to a build when the pull fails; stop that here instead of silently running
+# a source build under a release tag. Plain `docker build` leaves the default.
+ARG THEIRSIDE_VERSION=local
+RUN [ "$THEIRSIDE_VERSION" = local ] || { echo "ERROR: ghcr.io/theirside/collector:$THEIRSIDE_VERSION could not be pulled (wrong version, no access to ghcr.io, or --build). Released versions are never built from source; set THEIRSIDE_VERSION=local to build this checkout." >&2; exit 1; }
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo

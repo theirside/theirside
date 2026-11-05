@@ -19,7 +19,7 @@ THEIRSIDE_VERSION=0.1.0 THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex
   docker compose -f docker/docker-compose.yml up -d
 ```
 
-Note the two values: `THEIRSIDE_BOOTSTRAP_API_KEY` is your project API key, `THEIRSIDE_ADMIN_TOKEN` your dashboard login. To build the image from source instead, leave out `THEIRSIDE_VERSION` and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+Note the two values: `THEIRSIDE_BOOTSTRAP_API_KEY` is your project API key, `THEIRSIDE_ADMIN_TOKEN` your dashboard login. A release version is always pulled, never built: if the pull fails (wrong version, no access to ghcr.io), compose stops with an error. To build the image from this checkout instead, use `THEIRSIDE_VERSION=local` (the default when unset) and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
 
 **2. Add the SDK** at the very top of your app's entry point (for NestJS: `main.ts`, before `NestFactory.create`):
 

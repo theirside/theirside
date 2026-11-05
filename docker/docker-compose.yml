@@ -1,7 +1,8 @@
 # Self-hosted collector + Postgres, from the released image (ghcr.io/theirside/collector):
 #   THEIRSIDE_VERSION=0.1.0 docker compose -f docker/docker-compose.yml up -d
-# Without THEIRSIDE_VERSION (or with --build) the collector is built from this checkout
-# and tagged :local, which is never pulled.
+# A release version is pulled, never built: if the pull fails, or with --build, it stops
+# with an error. THEIRSIDE_VERSION=local (the default; demo, dev, CI) builds the collector
+# from this checkout as ghcr.io/theirside/collector:local, a tag that is never published.
 # Demo stack (chaos provider, NestJS demo app, load generator):
 #   docker compose -f docker/docker-compose.yml --profile demo up
 #
@@ -30,7 +31,12 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.collector
+      # the Dockerfile refuses to build anything but local (no silent source builds of a release)
+      args:
+        THEIRSIDE_VERSION: ${THEIRSIDE_VERSION:-local}
     image: ghcr.io/theirside/collector:${THEIRSIDE_VERSION:-local}
+    # try the registry first; for local the pull finds nothing and compose builds
+    pull_policy: missing
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
       THEIRSIDE_DEPLOYMENT_MODE: self_hosted
