@@ -370,6 +370,20 @@ describe('brute-force limits', () => {
     expect(login.statusCode).toBe(429);
   });
 
+  it('forgets failed attempts after a day (they hold emails and addresses)', async () => {
+    await new Browser(t, '198.51.100.8').login('forget@example.com', 'whatever whatever');
+    const keys = async () =>
+      (
+        await t.db.pool.query(
+          `SELECT key FROM auth_throttle WHERE key LIKE '%forget%' OR key = 'ip:198.51.100.8'`,
+        )
+      ).rows.length;
+    expect(await keys()).toBe(2);
+    t.clock.advance(25 * 3600_000);
+    expect((await new Browser(t).login('ada@example.com')).statusCode).toBe(200);
+    expect(await keys()).toBe(0);
+  });
+
   it('counts concurrent failures exactly once each (shared across replicas)', async () => {
     const keys = await Promise.all(
       Array.from({ length: 20 }, () =>

@@ -523,6 +523,8 @@ export interface AuthStore {
     opts: { windowMs: number; limit: number; lockMs: number },
   ): Promise<ThrottleState>;
   clearThrottle(key: string): Promise<void>;
+  /** Drop counts whose window ended before `before` and that aren't locked any more. */
+  purgeThrottle(now: Date, before: Date): Promise<void>;
 
   getTotp(userId: string): Promise<TotpState | null>;
   setTotpPending(userId: string, pendingEnc: string | null): Promise<void>;

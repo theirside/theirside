@@ -287,8 +287,12 @@ export class Accounts {
 
   async signedIn(userId: string): Promise<void> {
     await this.storage.auth.markLogin(userId, this.clock.now());
+    // housekeeping on sign-in keeps these tables small without a scheduler job
+    const now = this.clock.now();
     await this.sessions.purge();
-    await this.storage.auth.purgeTokens(this.clock.now());
+    await this.storage.auth.purgeTokens(now);
+    // failed-attempt counts (emails, addresses) are kept a day, longer only while locked
+    await this.storage.auth.purgeThrottle(now, new Date(now.getTime() - 24 * 3600_000));
   }
 
   // ---------------------------------------------------------------- proxy sign-in

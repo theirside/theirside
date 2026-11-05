@@ -290,6 +290,13 @@ export class PgAuthStore implements AuthStore {
   async clearThrottle(key: string) {
     await this.db.query(`DELETE FROM auth_throttle WHERE key = $1`, [key]);
   }
+  async purgeThrottle(now: Date, before: Date) {
+    await this.db.query(
+      `DELETE FROM auth_throttle
+        WHERE window_start < $2 AND (locked_until IS NULL OR locked_until <= $1)`,
+      [now, before],
+    );
+  }
 
   async getTotp(userId: string): Promise<TotpState | null> {
     const { rows } = await this.db.query(
