@@ -18,10 +18,36 @@ export interface BootstrapResult {
 }
 
 /**
+ * The default org, project and status page of a self-hosted install. Users are not
+ * created here: the first one comes from the dashboard's setup page (modules/auth).
+ */
+export async function createDefaultOrg(
+  tx: Storage,
+  opts: Pick<BootstrapOptions, 'orgName' | 'projectName' | 'entitlements'>,
+): Promise<{ orgId: string; projectId: string }> {
+  const orgId = newId('org');
+  const projectId = newId('prj');
+  await tx.config.createOrg(orgId, opts.orgName);
+  await tx.config.createProject(orgId, projectId, opts.projectName);
+  await createStatusPage(
+    tx.config,
+    await opts.entitlements.for(orgId),
+    { orgId, projectId },
+    {
+      publicToken: randomBase62(24),
+      title: 'Integration status',
+      providerFilter: [],
+      theme: 'auto',
+    },
+  );
+  return { orgId, projectId };
+}
+
+/**
  * Self-hosted first start: with THEIRSIDE_BOOTSTRAP_API_KEY set and no org yet, create
- * the default org, the admin user (owner), a project, the API key
- * (ingest + read) and a status page, so self-hosting needs no setup step.
- * Idempotent; later starts only make sure the key exists.
+ * the default org, a project, the API key (ingest + read) and a status page, so the
+ * SDK can send data before anyone signs in. Idempotent; later starts only make sure
+ * the key exists.
  */
 export async function bootstrap(
   storage: Storage,
@@ -47,31 +73,13 @@ export async function bootstrap(
       }
       return { created: false, orgId, ...(projectId ? { projectId } : {}) };
     }
-    const orgId = newId('org');
-    const projectId = newId('prj');
-    const userId = newId('usr');
-    await tx.config.createOrg(orgId, opts.orgName);
-    await tx.config.createUser(userId, 'Admin', null);
-    await tx.config.addMembership({ orgId, userId, role: 'owner' });
-    await tx.config.setMetaIfAbsent('bootstrap_admin_user_id', userId);
-    await tx.config.createProject(orgId, projectId, opts.projectName);
+    const { orgId, projectId } = await createDefaultOrg(tx, opts);
     await createApiKey(
       tx.config,
       { orgId, projectId },
       'Bootstrap key',
       ['ingest', 'read'],
       opts.apiKey,
-    );
-    await createStatusPage(
-      tx.config,
-      await opts.entitlements.for(orgId),
-      { orgId, projectId },
-      {
-        publicToken: randomBase62(24),
-        title: 'Integration status',
-        providerFilter: [],
-        theme: 'auto',
-      },
     );
     return { created: true, orgId, projectId };
   });

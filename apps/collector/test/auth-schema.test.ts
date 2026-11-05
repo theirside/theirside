@@ -28,8 +28,16 @@ describe('schema', () => {
        WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
        GROUP BY c.relname ORDER BY c.relname`);
     // not tenant-owned: the tenants themselves, global users, install metadata, migration bookkeeping
-    const global = new Set(['orgs', 'users', 'install_meta', 'schema_migrations']);
-    const orgOnly = new Set(['memberships', 'projects']);
+    const global = new Set([
+      'orgs',
+      'users',
+      'install_meta',
+      'schema_migrations',
+      // a user's sessions, and sign-in throttling keyed by email/address
+      'sessions',
+      'auth_throttle',
+    ]);
+    const orgOnly = new Set(['memberships', 'projects', 'auth_tokens']);
     for (const r of rows) {
       if (global.has(r.table)) continue;
       expect(r.has_org, `${r.table} has org_id`).toBe(true);
@@ -56,10 +64,10 @@ describe('schema', () => {
 });
 
 describe('bootstrap', () => {
-  it('created one org, owner admin, project, key and status page', async () => {
+  it('created one org, project, key and status page, and no user (setup page makes the first)', async () => {
     const q = async (sql: string) => (await t.db.pool.query(sql)).rows;
     expect(await q('SELECT count(*)::int AS n FROM orgs')).toEqual([{ n: 1 }]);
-    expect(await q('SELECT role FROM memberships')).toEqual([{ role: 'owner' }]);
+    expect(await q('SELECT count(*)::int AS n FROM users')).toEqual([{ n: 0 }]);
     expect(await q('SELECT count(*)::int AS n FROM status_pages')).toEqual([{ n: 1 }]);
     expect((await q('SELECT scopes FROM api_keys'))[0].scopes.sort()).toEqual(['ingest', 'read']);
   });
@@ -88,8 +96,8 @@ describe('bootstrap', () => {
   });
 });
 
-describe('THEIRSIDE_ADMIN_TOKEN login', () => {
-  it('maps the admin token to the bootstrap admin user via memberships', async () => {
+describe('THEIRSIDE_ADMIN_TOKEN login (break-glass)', () => {
+  it('signs in as the admin-token system user, an owner of the org', async () => {
     const login = await t.app.inject({
       method: 'POST',
       url: '/v1/auth/login',
@@ -98,12 +106,14 @@ describe('THEIRSIDE_ADMIN_TOKEN login', () => {
     expect(login.statusCode).toBe(200);
     const cookie = String(login.headers['set-cookie']).split(';')[0]!;
     expect(String(login.headers['set-cookie'])).toContain('HttpOnly');
+    expect(String(login.headers['set-cookie'])).toContain('SameSite=Strict');
 
     const me = await t.app.inject({ method: 'GET', url: '/v1/me', headers: { cookie } });
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({
       orgId: t.orgId,
       role: 'owner',
+      via: 'session',
       entitlements: { plan: 'oss' },
     });
     expect(me.json().projects).toEqual([{ id: t.projectId, name: 'Default project' }]);
@@ -127,7 +137,7 @@ describe('THEIRSIDE_ADMIN_TOKEN login', () => {
     ).toBe(401);
   });
 
-  it('rejects forged or expired cookies', async () => {
+  it('rejects unknown, tampered and expired session cookies', async () => {
     const login = await t.app.inject({
       method: 'POST',
       url: '/v1/auth/login',
@@ -136,17 +146,14 @@ describe('THEIRSIDE_ADMIN_TOKEN login', () => {
     const value = decodeURIComponent(
       String(login.headers['set-cookie']).split(';')[0]!.split('=')[1]!,
     );
-    const [uid, exp, sig] = value.split('.');
-    const forged = `theirside_session=${encodeURIComponent(`${uid}.${Number(exp) + 1000}.${sig}`)}`;
-    expect(
-      (await t.app.inject({ method: 'GET', url: '/v1/me', headers: { cookie: forged } }))
-        .statusCode,
-    ).toBe(401);
+    const me = (cookie: string) =>
+      t.app.inject({ method: 'GET', url: '/v1/me', headers: { cookie } });
+    expect((await me(`theirside_session=${value}`)).statusCode).toBe(200);
+    const tampered = value.slice(0, -2) + (value.endsWith('AA') ? 'BB' : 'AA');
+    expect((await me(`theirside_session=${tampered}`)).statusCode).toBe(401);
+    expect((await me('theirside_session=nonsense')).statusCode).toBe(401);
     t.clock.advance(8 * 24 * 3600 * 1000);
-    const stale = `theirside_session=${encodeURIComponent(value)}`;
-    expect(
-      (await t.app.inject({ method: 'GET', url: '/v1/me', headers: { cookie: stale } })).statusCode,
-    ).toBe(401);
+    expect((await me(`theirside_session=${value}`)).statusCode).toBe(401);
   });
 
   it('health endpoints', async () => {

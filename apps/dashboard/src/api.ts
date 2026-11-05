@@ -13,14 +13,21 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
+// CSRF token of the current session (from sign-in and /v1/me), sent on every write
+let csrfToken = '';
+
 export async function api<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
+  const method = init.method ?? 'GET';
+  const headers: Record<string, string> = {};
+  if (init.body !== undefined) headers['content-type'] = 'application/json';
+  if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
   const res = await fetch(path, {
-    method: init.method ?? 'GET',
+    method,
     credentials: 'same-origin',
-    headers: init.body !== undefined ? { 'content-type': 'application/json' } : {},
+    headers,
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
   if (res.status === 401 && !path.startsWith('/v1/auth/')) onUnauthorized();
@@ -31,6 +38,8 @@ export async function api<T>(
     const d = data as { error?: string; detail?: string };
     throw new ApiError(res.status, d.detail ?? d.error ?? `HTTP ${res.status}`);
   }
+  const token = (data as { csrfToken?: unknown }).csrfToken;
+  if (typeof token === 'string') csrfToken = token;
   return data as T;
 }
 

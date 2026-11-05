@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fastify/static": "^10.1.8",
+    "@node-rs/argon2": "^2.2.2",
     "@theirside/shared": "workspace:*",
     "fastify": "^5.12.8",
     "nodemailer": "^10.3.1",
@@ -24,9 +25,9 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@theirside/sdk": "workspace:*",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
-    "@theirside/sdk": "workspace:*",
     "tsx": "^4.23.15"
   },
   "files": [

@@ -41,6 +41,16 @@ async function main() {
   await storage.events.ensurePartitions(ctx.clock.now(), config.partitionsAhead + 1);
 
   const app = await buildApp(ctx, { logger: { level: config.logLevel } });
+  if (!config.publicPathsOnly) {
+    const code = await ctx.accounts.issueSetupCode();
+    if (code) {
+      const where = config.publicUrl ?? `http://localhost:${config.port}`;
+      app.log.warn(
+        `No user accounts yet. Open ${where}/#/setup and create the first admin with setup code ${code} ` +
+          `(valid 24 h, or use THEIRSIDE_ADMIN_TOKEN).`,
+      );
+    }
+  }
   const info = (m: string) => app.log.info(m);
   const scheduler = new Scheduler(
     storage,

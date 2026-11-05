@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
-import nodemailer from 'nodemailer';
 import type { SmtpConfig } from '../../config.js';
 import type { AlertChannelRecord } from '../../storage/types.js';
+import { createMailTransport, SMTP_TIMEOUT_MS } from '../mail/mailer.js';
 import { renderEmail, renderSlack } from './render.js';
 
 /** What every channel receives. Built once per alert, stored on the delivery. */
@@ -60,7 +60,7 @@ export interface ChannelAdapter {
   validate(config: Record<string, unknown>): string | null;
 }
 
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = SMTP_TIMEOUT_MS;
 
 /**
  * Turns a failed delivery into a message an operator can act on: the "Send
@@ -180,24 +180,7 @@ export function signWebhook(secret: string, ts: number, body: string): string {
 
 /** Email over SMTP (THEIRSIDE_SMTP_URL or THEIRSIDE_SMTP_HOST etc.). Config: { to: string[] }. */
 export function emailAdapter(smtp: SmtpConfig | undefined): ChannelAdapter {
-  const timeouts = {
-    connectionTimeout: TIMEOUT_MS,
-    greetingTimeout: TIMEOUT_MS,
-    socketTimeout: TIMEOUT_MS,
-  };
-  const transport = !smtp
-    ? null
-    : smtp.url
-      ? nodemailer.createTransport({ url: smtp.url, requireTLS: smtp.requireTls, ...timeouts })
-      : nodemailer.createTransport({
-          host: smtp.host,
-          port: smtp.port,
-          // true = implicit TLS (port 465); false = plain connection upgraded with STARTTLS
-          secure: smtp.secure,
-          requireTLS: smtp.requireTls,
-          ...(smtp.user ? { auth: { user: smtp.user, pass: smtp.pass ?? '' } } : {}),
-          ...timeouts,
-        });
+  const transport = createMailTransport(smtp);
   return {
     kind: 'email',
     validate: (c) =>

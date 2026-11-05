@@ -4,6 +4,7 @@ import { registerAlertRoutes } from './modules/alerts/routes.js';
 import { registerApiRoutes } from './modules/api/routes.js';
 import { registerApiKeyRoutes } from './modules/auth/key-routes.js';
 import { registerAuthRoutes } from './modules/auth/routes.js';
+import { registerUserRoutes } from './modules/auth/user-routes.js';
 import { registerDashboard } from './modules/dashboard/static.js';
 import { registerDiscoveryAdminRoutes } from './modules/discovery/admin-routes.js';
 import { registerSdkConfigRoute } from './modules/discovery/sdk-config-route.js';
@@ -11,6 +12,7 @@ import { registerIngest } from './modules/ingest/route.js';
 import { registerStatusPageAdminRoutes } from './modules/status-page/admin-routes.js';
 import { registerStatusPage } from './modules/status-page/routes.js';
 import { isStorageUnavailable } from './storage/postgres.js';
+import { HttpProblem } from './util/http-problem.js';
 
 export interface BuildOptions {
   logger?: boolean | { level: string };
@@ -30,7 +32,14 @@ export function isPublicPath(path: string): boolean {
 export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
-    trustProxy: true,
+    // a hop count trusts that many proxies nearest to the collector
+    trustProxy:
+      typeof ctx.config.trustProxy === 'number'
+        ? (
+            (hops: number) => (_addr: string, i: number) =>
+              i < hops
+          )(ctx.config.trustProxy)
+        : ctx.config.trustProxy,
     bodyLimit: 1024 * 1024,
   });
 
@@ -43,6 +52,12 @@ export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promis
   }
 
   app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof HttpProblem) {
+      return reply
+        .code(err.statusCode)
+        .headers(err.headers)
+        .send({ error: err.code, detail: err.message, ...err.extra });
+    }
     if (isStorageUnavailable(err)) {
       return reply.code(503).header('retry-after', '30').send({ error: 'storage unavailable' });
     }
@@ -85,6 +100,7 @@ export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promis
   await registerSdkConfigRoute(app, ctx);
   await registerDiscoveryAdminRoutes(app, ctx);
   await registerAuthRoutes(app, ctx);
+  await registerUserRoutes(app, ctx);
   await registerApiKeyRoutes(app, ctx);
   await registerAlertRoutes(app, ctx);
   await registerApiRoutes(app, ctx);

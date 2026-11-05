@@ -1,9 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { isStorageUnavailable } from '../../storage/postgres.js';
-import { bearerToken } from './api-keys.js';
+import { HttpProblem } from '../../util/http-problem.js';
+import { safeEqual } from '../../util/ids.js';
 import { publicBase } from '../../util/origin.js';
-import { SESSION_COOKIE, type Principal } from './session.js';
+import { bearerToken } from './api-keys.js';
+import {
+  CSRF_HEADER,
+  SESSION_COOKIE,
+  clearedSessionCookie,
+  sessionCookie,
+  type AuthMethod,
+  type Principal,
+} from './session.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -11,26 +20,107 @@ declare module 'fastify' {
   }
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 export function readCookie(req: FastifyRequest, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
   for (const part of header.split(';')) {
     const i = part.indexOf('=');
-    if (i > 0 && part.slice(0, i).trim() === name)
-      return decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0 && part.slice(0, i).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(i + 1).trim());
+      } catch {
+        return undefined;
+      }
+    }
   }
   return undefined;
 }
 
-/** preHandler for dashboard/admin routes: session cookie or Bearer THEIRSIDE_ADMIN_TOKEN. */
+export function body(req: FastifyRequest): Record<string, unknown> {
+  const b = req.body;
+  return b && typeof b === 'object' && !Array.isArray(b) ? (b as Record<string, unknown>) : {};
+}
+
+const isHttps = (ctx: AppContext, req: FastifyRequest) =>
+  publicBase(ctx.config, req).startsWith('https://');
+
+/**
+ * Cross-site requests are refused on every state-changing dashboard route: an `Origin`
+ * (sent by browsers on POST/PATCH/DELETE) must be this collector's, and Fetch Metadata
+ * must not say cross-site. Scripts without these headers are unaffected.
+ */
+export function checkOrigin(ctx: AppContext, req: FastifyRequest): void {
+  if (req.headers['sec-fetch-site'] === 'cross-site')
+    throw new HttpProblem(403, 'cross_site', 'Cross-site request refused.');
+  const origin = req.headers.origin;
+  if (origin === undefined) return;
+  const allowed = [`${req.protocol}://${req.host}`];
+  if (ctx.config.publicUrl) allowed.push(new URL(ctx.config.publicUrl).origin);
+  if (!allowed.includes(origin))
+    throw new HttpProblem(403, 'cross_site', 'Cross-site request refused.');
+}
+
+async function principalFor(
+  ctx: AppContext,
+  userId: string,
+  via: AuthMethod,
+  extra: Pick<Principal, 'sessionIdHash' | 'csrfToken'> = {},
+): Promise<Principal | null> {
+  const memberships = await ctx.storage.config.membershipsForUser(userId);
+  const first = memberships[0];
+  if (!first) return null;
+  return { userId, orgId: first.orgId, role: first.role, memberships, via, ...extra };
+}
+
+/**
+ * Who is calling: `Authorization: Bearer <THEIRSIDE_ADMIN_TOKEN>` (break-glass and
+ * scripts) or the session cookie. Wrong admin tokens count against the address.
+ */
+export async function authenticate(
+  ctx: AppContext,
+  req: FastifyRequest,
+): Promise<Principal | null> {
+  const bearer = bearerToken(req.headers.authorization);
+  if (bearer !== undefined) {
+    await ctx.accounts.checkIp(req.ip);
+    if (!ctx.config.adminToken || !safeEqual(bearer, ctx.config.adminToken)) {
+      await ctx.accounts.failIp(req.ip);
+      return null;
+    }
+    const userId = await ctx.accounts.adminTokenUser();
+    return userId ? principalFor(ctx, userId, 'admin-token') : null;
+  }
+  const session = await ctx.sessions.resolve(readCookie(req, SESSION_COOKIE));
+  if (!session) return null;
+  return principalFor(ctx, session.userId, 'session', {
+    sessionIdHash: session.idHash,
+    csrfToken: await ctx.sessions.csrfFor(session.idHash),
+  });
+}
+
+/**
+ * preHandler for dashboard/admin routes: a signed-in user, or the admin token. State-
+ * changing requests on a cookie session also need the CSRF header and a same-site origin.
+ */
 export function requireAdmin(ctx: AppContext) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const p = await ctx.sessions.resolve(
-        readCookie(req, SESSION_COOKIE),
-        bearerToken(req.headers.authorization),
-      );
+      const p = await authenticate(ctx, req);
       if (!p) return reply.code(401).send({ error: 'login required' });
+      if (!SAFE_METHODS.has(req.method)) {
+        checkOrigin(ctx, req);
+        if (p.csrfToken !== undefined) {
+          const sent = req.headers[CSRF_HEADER];
+          if (typeof sent !== 'string' || !safeEqual(sent, p.csrfToken))
+            throw new HttpProblem(
+              403,
+              'csrf',
+              'Missing or invalid CSRF token. Reload the page and try again.',
+            );
+        }
+      }
       req.principal = p;
     } catch (err) {
       if (isStorageUnavailable(err)) return reply.code(503).send({ error: 'storage unavailable' });
@@ -39,21 +129,109 @@ export function requireAdmin(ctx: AppContext) {
   };
 }
 
+/** Sign the user in on this browser: session cookie + the CSRF token for the dashboard. */
+export async function startSession(
+  ctx: AppContext,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  userId: string,
+): Promise<{ ok: true; csrfToken: string }> {
+  const s = await ctx.sessions.create(userId, {
+    ip: req.ip ?? null,
+    userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+  });
+  await ctx.accounts.signedIn(userId);
+  reply.header('set-cookie', sessionCookie(s.token, ctx.sessions.opts.maxAgeMs, isHttps(ctx, req)));
+  return { ok: true, csrfToken: await ctx.sessions.csrfFor(s.idHash) };
+}
+
+export function endSessionCookie(ctx: AppContext, req: FastifyRequest, reply: FastifyReply) {
+  reply.header('set-cookie', clearedSessionCookie(isHttps(ctx, req)));
+}
+
 export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
+  // what the sign-in page should offer; public
+  app.get('/v1/auth/status', async () => ({
+    setupRequired: await ctx.accounts.setupRequired(),
+    emailEnabled: ctx.accounts.emailEnabled,
+    adminTokenEnabled: !!ctx.config.adminToken,
+  }));
+
+  app.post('/v1/auth/setup', async (req, reply) => {
+    checkOrigin(ctx, req);
+    const b = body(req);
+    const userId = await ctx.accounts.completeSetup({
+      code: b.setupCode,
+      adminToken: b.adminToken,
+      email: b.email,
+      name: b.name,
+      password: b.password,
+      ip: req.ip,
+    });
+    return startSession(ctx, req, reply, userId);
+  });
+
   app.post('/v1/auth/login', async (req, reply) => {
-    const token = (req.body as { token?: unknown } | undefined)?.token;
-    const cookie = typeof token === 'string' ? await ctx.sessions.login(token) : null;
-    if (!cookie) return reply.code(401).send({ error: 'invalid admin token' });
-    const secure = publicBase(ctx.config, req).startsWith('https://') ? '; Secure' : '';
-    reply.header(
-      'set-cookie',
-      `${SESSION_COOKIE}=${encodeURIComponent(cookie)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}${secure}`,
-    );
+    checkOrigin(ctx, req);
+    const b = body(req);
+    // break-glass: THEIRSIDE_ADMIN_TOKEN instead of an account
+    if ('token' in b) {
+      await ctx.accounts.checkIp(req.ip);
+      const token = b.token;
+      if (
+        typeof token !== 'string' ||
+        !ctx.config.adminToken ||
+        !safeEqual(token, ctx.config.adminToken)
+      ) {
+        await ctx.accounts.failIp(req.ip);
+        throw new HttpProblem(401, 'invalid_admin_token', 'That admin token is not valid.');
+      }
+      const userId = await ctx.accounts.adminTokenUser();
+      if (!userId) throw new HttpProblem(409, 'setup_required', 'Complete the setup page first.');
+      return startSession(ctx, req, reply, userId);
+    }
+    const user = await ctx.accounts.passwordLogin(b.email, b.password, req.ip);
+    return startSession(ctx, req, reply, user.id);
+  });
+
+  app.post('/v1/auth/logout', async (req, reply) => {
+    await ctx.sessions.destroy(readCookie(req, SESSION_COOKIE));
+    endSessionCookie(ctx, req, reply);
     return { ok: true };
   });
 
-  app.post('/v1/auth/logout', async (_req, reply) => {
-    reply.header('set-cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  // one-time links: the token travels in the body, never in a URL that could be logged
+  app.post('/v1/auth/invite/info', async (req) => {
+    await ctx.accounts.checkIp(req.ip);
+    return ctx.accounts.inviteInfo(body(req).token).catch(failLink(ctx, req));
+  });
+
+  app.post('/v1/auth/invite/accept', async (req, reply) => {
+    checkOrigin(ctx, req);
+    await ctx.accounts.checkIp(req.ip);
+    const b = body(req);
+    const userId = await ctx.accounts
+      .acceptInvite({ token: b.token, name: b.name, password: b.password })
+      .catch(failLink(ctx, req));
+    return startSession(ctx, req, reply, userId);
+  });
+
+  app.post('/v1/auth/password-reset/request', async (req) => {
+    checkOrigin(ctx, req);
+    await ctx.accounts.requestReset(body(req).email, req.ip, publicBase(ctx.config, req));
+    return { ok: true };
+  });
+
+  app.post('/v1/auth/password-reset/info', async (req) => {
+    await ctx.accounts.checkIp(req.ip);
+    return ctx.accounts.resetInfo(body(req).token).catch(failLink(ctx, req));
+  });
+
+  app.post('/v1/auth/password-reset', async (req) => {
+    checkOrigin(ctx, req);
+    await ctx.accounts.checkIp(req.ip);
+    const b = body(req);
+    await ctx.accounts.resetPassword(b.token, b.password).catch(failLink(ctx, req));
     return { ok: true };
   });
 
@@ -61,6 +239,25 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
     const p = req.principal!;
     const projects = await ctx.storage.config.listProjects(p.orgId);
     const entitlements = await ctx.entitlements.for(p.orgId);
-    return { userId: p.userId, orgId: p.orgId, role: p.role, projects, entitlements };
+    const user = await ctx.storage.auth.getUser(p.userId);
+    return {
+      userId: p.userId,
+      orgId: p.orgId,
+      role: p.role,
+      via: p.via,
+      user: user && { id: user.id, email: user.email, name: user.name },
+      csrfToken: p.csrfToken ?? null,
+      projects,
+      entitlements,
+    };
   });
+}
+
+/** Unknown link tokens count as failures for the address (expired/used ones don't). */
+function failLink(ctx: AppContext, req: FastifyRequest) {
+  return async (err: unknown): Promise<never> => {
+    if (err instanceof HttpProblem && err.code === 'invalid_link')
+      await ctx.accounts.failIp(req.ip);
+    throw err;
+  };
 }

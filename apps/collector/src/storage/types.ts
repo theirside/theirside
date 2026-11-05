@@ -411,6 +411,107 @@ export interface ConfigStore {
   getMeta(key: string): Promise<string | null>;
   setMetaIfAbsent(key: string, value: string): Promise<string>;
   setMeta(key: string, value: string): Promise<void>;
+  deleteMetaPrefix(prefix: string): Promise<void>;
+}
+
+export type AuthSource = 'password' | 'proxy' | 'system';
+
+export interface UserRecord {
+  id: string;
+  email: string | null;
+  name: string;
+  authSource: AuthSource;
+  passwordHash: string | null;
+  createdAt: Date;
+  lastLoginAt: Date | null;
+}
+
+export interface SessionRecord {
+  idHash: string;
+  userId: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export type AuthTokenKind = 'invite' | 'reset' | 'mfa';
+
+export interface AuthTokenRecord {
+  id: string;
+  kind: AuthTokenKind;
+  tokenHash: string;
+  orgId: string;
+  userId: string | null;
+  email: string | null;
+  createdBy: string | null;
+  createdAt: Date;
+  expiresAt: Date;
+  usedAt: Date | null;
+}
+
+export interface ThrottleState {
+  failures: number;
+  windowStart: Date;
+  lockedUntil: Date | null;
+}
+
+/** Users, sessions, one-time tokens and login throttling (modules/auth). */
+export interface AuthStore {
+  /** Users that can sign in (a password or a proxy identity); system users excluded. */
+  countSignInUsers(): Promise<number>;
+  getUser(id: string): Promise<UserRecord | null>;
+  findUserByEmail(email: string): Promise<UserRecord | null>;
+  /** Users with a membership in the org, system users excluded, oldest first. */
+  listUsers(orgId: string): Promise<UserRecord[]>;
+  createUser(u: {
+    id: string;
+    email: string | null;
+    name: string;
+    authSource: AuthSource;
+    passwordHash: string | null;
+  }): Promise<void>;
+  /** Insert a system user if missing (idempotent across replicas). */
+  ensureSystemUser(id: string, name: string): Promise<void>;
+  /** Claim a user without a password (the placeholder admin of older bootstraps). */
+  updateUserProfile(id: string, email: string, name: string): Promise<void>;
+  setPassword(userId: string, hash: string, at: Date): Promise<void>;
+  markLogin(userId: string, at: Date): Promise<void>;
+  deleteUser(id: string): Promise<boolean>;
+
+  createSession(s: SessionRecord): Promise<void>;
+  findSession(idHash: string): Promise<SessionRecord | null>;
+  touchSession(idHash: string, at: Date): Promise<void>;
+  deleteSession(idHash: string): Promise<void>;
+  /** All of a user's sessions, except `keepIdHash`. Returns how many were removed. */
+  deleteUserSessions(userId: string, keepIdHash?: string): Promise<number>;
+  countUserSessions(userId: string, now: Date): Promise<number>;
+  /** Sessions past their expiry or idle since before `idleBefore`. */
+  purgeSessions(now: Date, idleBefore: Date): Promise<void>;
+
+  createToken(t: AuthTokenRecord): Promise<void>;
+  findToken(kind: AuthTokenKind, tokenHash: string): Promise<AuthTokenRecord | null>;
+  /** Marks an unused token used; false if it was already used (one-time). */
+  useToken(id: string, at: Date): Promise<boolean>;
+  /** Unused tokens of a kind for a user (e.g. older reset links). */
+  revokeUserTokens(kind: AuthTokenKind, userId: string): Promise<void>;
+  revokeInvitesForEmail(orgId: string, email: string): Promise<void>;
+  listInvites(orgId: string, now: Date): Promise<AuthTokenRecord[]>;
+  deleteInvite(orgId: string, id: string): Promise<boolean>;
+  purgeTokens(now: Date): Promise<void>;
+
+  getThrottle(keys: string[]): Promise<Map<string, ThrottleState>>;
+  /**
+   * Count a failure for `key` in a window of `windowMs`; at `limit` failures the key
+   * is locked for `lockMs`. Atomic across replicas. Returns the new state.
+   */
+  recordFailure(
+    key: string,
+    now: Date,
+    opts: { windowMs: number; limit: number; lockMs: number },
+  ): Promise<ThrottleState>;
+  clearThrottle(key: string): Promise<void>;
 }
 
 export interface UsageStore {
@@ -430,6 +531,7 @@ export interface Storage {
   incidents: IncidentStore;
   config: ConfigStore;
   usage: UsageStore;
+  auth: AuthStore;
   transaction<T>(fn: (tx: Storage) => Promise<T>): Promise<T>;
   /** Run fn only on the instance that holds the named advisory lock; null if not leader. */
   withLeaderLock<T>(name: string, fn: () => Promise<T>): Promise<T | null>;

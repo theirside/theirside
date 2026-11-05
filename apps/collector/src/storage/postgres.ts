@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { PgAuthStore } from './postgres-auth.js';
 import { COUNTER_COLUMNS, KEY_COLUMNS, SUM_SELECT, rowToRollup } from './columns.js';
 import type {
   AlertChannelInput,
@@ -1252,6 +1253,9 @@ class PgConfigStore implements ConfigStore {
       [key, value],
     );
   }
+  async deleteMetaPrefix(prefix: string) {
+    await this.db.query(`DELETE FROM install_meta WHERE starts_with(key, $1)`, [prefix]);
+  }
 }
 
 // ------------------------------------------------------------------ usage
@@ -1299,6 +1303,7 @@ function bind(db: Queryable, pool: pg.Pool): Storage {
     incidents: new PgIncidentStore(db),
     config: new PgConfigStore(db),
     usage: new PgUsageStore(db),
+    auth: new PgAuthStore(db),
     async transaction<T>(fn: (tx: Storage) => Promise<T>): Promise<T> {
       if (db !== pool) return fn(storage); // already inside a transaction
       const client = await pool.connect();

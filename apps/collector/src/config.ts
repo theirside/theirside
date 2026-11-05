@@ -57,6 +57,25 @@ export interface CollectorConfig {
    * as packages/shared/catalog.json). For demos and tests.
    */
   catalogOverridePath: string | undefined;
+  /** Dashboard sessions: absolute lifetime and idle timeout, hours. */
+  sessionMaxAgeHours: number;
+  sessionIdleHours: number;
+  /**
+   * Which proxies' X-Forwarded-* headers to believe (request IP for login throttling,
+   * https detection for links and Secure cookies): true = any (default), false = none,
+   * a hop count, or comma-separated addresses/CIDRs of the load balancers.
+   */
+  trustProxy: boolean | number | string[];
+}
+
+function trustProxySetting(raw: string | undefined): boolean | number | string[] {
+  if (raw === undefined || raw.trim() === '' || /^(true|1|yes|on)$/i.test(raw)) return true;
+  if (/^(false|0|no|off)$/i.test(raw)) return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function int(env: NodeJS.ProcessEnv, name: string, dflt: number, min = 0): number {
@@ -129,5 +148,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     statusCacheSeconds: int(env, 'THEIRSIDE_STATUS_CACHE_SECONDS', 30, 0),
     publicPathsOnly: bool(env, 'THEIRSIDE_PUBLIC_PATHS_ONLY', false),
     catalogOverridePath: env.THEIRSIDE_CATALOG_OVERRIDE || undefined,
+    sessionMaxAgeHours: int(env, 'THEIRSIDE_SESSION_MAX_AGE_HOURS', 168, 1),
+    sessionIdleHours: int(env, 'THEIRSIDE_SESSION_IDLE_HOURS', 24, 1),
+    trustProxy: trustProxySetting(env.THEIRSIDE_TRUST_PROXY),
   };
 }
