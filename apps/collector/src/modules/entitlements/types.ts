@@ -13,7 +13,7 @@ export interface Entitlements {
   sso: boolean;
   customStatusDomain: boolean;
   pagingIntegrations: boolean;
-  /** Roles and permissions beyond the single admin. */
+  /** Custom and granular roles beyond the free admin and member roles. */
   rbac: boolean;
   auditLog: boolean;
   /** Orgs (teams) on one install; null = unlimited. OSS: 1. */

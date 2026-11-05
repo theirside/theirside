@@ -8,7 +8,7 @@ Code in this directory is public, but it is **not** free to use without a licenc
 
 Paying customers get the same code plus a licence key under separate commercial terms (order form/EULA, to follow).
 
-v1 ships no paid features, so this directory only holds this README. Planned here (see the editions table in `docs/architecture.md` §2): provider SLA reports, network view, SSO/SAML, roles and permissions, audit log, multiple orgs, extra and white-label status pages, custom status domains, paging integrations (PagerDuty, Opsgenie).
+v1 ships no paid features, so this directory only holds this README. Planned here (see the editions table in `docs/architecture.md` §2): provider SLA reports, network view, SSO/SAML, custom and granular roles (beyond the free admin and member), audit log, multiple orgs, extra and white-label status pages, custom status domains, paging integrations (PagerDuty, Opsgenie).
 
 Rules:
 - Core code never imports from `ee/` directly; `ee/` modules plug into interfaces defined in the core (alert channel adapters, `EntitlementsResolver`, …) and are gated by entitlements, never by `THEIRSIDE_DEPLOYMENT_MODE`.

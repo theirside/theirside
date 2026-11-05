@@ -69,8 +69,8 @@ Development: `pnpm install`, `pnpm test` (collector tests need `docker compose -
 
 Everything a single team needs to catch provider problems is free, and stays free.
 
-- **Free (self-hosted):** SDK, collector, scoring, alerts (Slack, email, webhook) with the provider-ready summary, dashboard, health API, one embeddable status page (with a small "Powered by" link), one org with unlimited projects and environments, user accounts (invites, password reset, optional or required 2FA, sign-in through your own identity proxy or AWS ALB), retention you choose.
-- **Paid (licence key or cloud plan):** provider SLA reports, network view, SSO/SAML, roles and permissions, audit log, multiple teams/orgs, more than one status page, custom status domain, no "Powered by" footer, PagerDuty/Opsgenie, and cloud retention/volume plans.
+- **Free (self-hosted):** SDK, collector, scoring, alerts (Slack, email, webhook) with the provider-ready summary, dashboard, health API, one embeddable status page (with a small "Powered by" link), one org with unlimited projects and environments, user accounts with admin and member roles (invites, password reset, optional or required 2FA, sign-in through your own identity proxy or AWS ALB), retention you choose.
+- **Paid (licence key or cloud plan):** provider SLA reports, network view, SSO/SAML, custom and granular roles (beyond admin and member), audit log, multiple teams/orgs, more than one status page, custom status domain, no "Powered by" footer, PagerDuty/Opsgenie, and cloud retention/volume plans.
 
 ## Licence
 

@@ -33,7 +33,7 @@ Every release becomes available under the Apache License 2.0 two years after it 
 
 ## Paid features and buying a licence
 
-Paid features (see "Free vs paid" in the [README](README.md#free-vs-paid)) live in `ee/` and the same code is unlocked by a licence key. Paying customers get a licence key under separate commercial terms.
+Paid features (see "Free vs paid" in the [README](README.md#free-vs-paid)) live in `ee/` and the same code is unlocked by a licence key. User accounts with the admin and member roles are free; custom and granular roles are a paid feature. Paying customers get a licence key under separate commercial terms.
 
 To buy a license or ask about terms: `<CONTACT_EMAIL>`.
 
