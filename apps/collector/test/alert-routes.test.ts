@@ -190,9 +190,14 @@ describe('alert channel admin API', () => {
   });
 });
 
-/** Just enough SMTP to accept messages; `rejectAuth` advertises AUTH and refuses it. */
+/**
+ * Just enough SMTP to accept messages; `rejectAuth` advertises AUTH and refuses it.
+ * It has no TLS, so STARTTLS is refused (454) like a real server without it would:
+ * accepting it would leave the client's TLS handshake waiting on random bytes.
+ */
 async function smtpSink(opts: { rejectAuth?: boolean } = {}) {
   const messages: string[] = [];
+  const commands: string[] = [];
   const server = net.createServer((sock) => {
     let data = false;
     let buf = '';
@@ -210,12 +215,14 @@ async function smtpSink(opts: { rejectAuth?: boolean } = {}) {
           } else messages[messages.length - 1] += line + '\n';
           continue;
         }
-        const cmd = line.slice(0, 4).toUpperCase();
+        const cmd = line.split(' ', 1)[0]!.toUpperCase();
+        commands.push(cmd);
         if (cmd === 'EHLO' || cmd === 'HELO')
           sock.write(
             opts.rejectAuth ? '250-sink\r\n250 AUTH PLAIN LOGIN\r\n' : '250-sink\r\n250 OK\r\n',
           );
         else if (cmd === 'AUTH') sock.write('535 5.7.8 Username and Password not accepted\r\n');
+        else if (cmd === 'STARTTLS') sock.write('454 4.7.0 TLS not available\r\n');
         else if (cmd === 'DATA') {
           data = true;
           messages.push('');
@@ -226,7 +233,12 @@ async function smtpSink(opts: { rejectAuth?: boolean } = {}) {
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
-  return { messages, port: (server.address() as AddressInfo).port, close: () => server.close() };
+  return {
+    messages,
+    commands,
+    port: (server.address() as AddressInfo).port,
+    close: () => server.close(),
+  };
 }
 
 const smtp = (over: Partial<SmtpConfig>): SmtpConfig => ({
@@ -299,7 +311,12 @@ describe('email channel', () => {
       { user: 'u', pass: 'p', requireTls: false },
       /^SMTP authentication failed: 535 5\.7\.8 Username and Password not accepted/,
     ],
-    ['TLS required but not offered', {}, { requireTls: true }, /TLS|STARTTLS/],
+    [
+      'TLS required but not offered',
+      {},
+      { requireTls: true },
+      /^SMTP TLS failed: Error upgrading connection with STARTTLS/,
+    ],
   ])('reports %s clearly', async (_n, sinkOpts, cfg, expected) => {
     const sink = await smtpSink(sinkOpts);
     await expect(
@@ -309,6 +326,9 @@ describe('email channel', () => {
         { deliveryId: 'd' },
       ),
     ).rejects.toThrow(expected);
+    // never sent anything in plain text after TLS was required
+    if (cfg.requireTls) expect(sink.commands).not.toContain('MAIL');
+    expect(sink.messages).toHaveLength(0);
     sink.close();
   });
 
