@@ -293,7 +293,7 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, status page and this key (`tsd_live_` + ≥ 16 chars). The first user comes from the dashboard's setup page. |
 | `THEIRSIDE_ADMIN_TOKEN` | – | Completes the setup page (or use the setup code from the log) and is the break-glass sign-in (and `Bearer` for scripts). Unset to turn it off. |
 | `THEIRSIDE_SECRET_KEY` / `THEIRSIDE_SECRET_KEY_PREVIOUS` | – | Encrypts two-factor secrets (≥ 32 characters, `openssl rand -base64 32`); required for 2FA. Back it up; rotate by moving the old key to `_PREVIOUS` ([security.md](security.md)). |
-| `THEIRSIDE_TRUST_PROXY` | `true` | Which `X-Forwarded-*` to believe (client IP for sign-in lockouts, https detection): the load balancers' CIDRs, a hop count, or `false`. Set it behind an ALB. |
+| `THEIRSIDE_TRUST_PROXY` | private ranges | Which proxies' `X-Forwarded-*` to believe (client IP for sign-in limits, https detection): by default those on private and loopback addresses; or the load balancers' CIDRs, a hop count, `false`, or `true` for any (logged as a warning). |
 | `THEIRSIDE_SESSION_MAX_AGE_HOURS` / `THEIRSIDE_SESSION_IDLE_HOURS` | `168` / `24` | Dashboard session lifetime and idle timeout. |
 | `THEIRSIDE_AUTH_PROXY` (`header`, `alb`), `THEIRSIDE_AUTH_PROXY_TRUSTED_IPS`, `THEIRSIDE_AUTH_PROXY_HEADER`, `THEIRSIDE_AUTH_PROXY_ALB_ARN`, `THEIRSIDE_AUTH_PROXY_AUTO_CREATE` | off | Sign-in through an identity proxy or an ALB with OIDC ([security.md](security.md#sign-in-through-an-identity-proxy)). |
 | `THEIRSIDE_RAW_RETENTION_DAYS` / `THEIRSIDE_ROLLUP_RETENTION_DAYS` | `30` / `90` | |

@@ -65,8 +65,9 @@ export interface CollectorConfig {
   sessionIdleHours: number;
   /**
    * Which proxies' X-Forwarded-* headers to believe (request IP for login throttling,
-   * https detection for links and Secure cookies): true = any (default), false = none,
-   * a hop count, or comma-separated addresses/CIDRs of the load balancers.
+   * https detection for links and Secure cookies): by default proxies on private and
+   * loopback addresses (PRIVATE_PROXY_RANGES); or comma-separated addresses/CIDRs of
+   * the load balancers, a hop count, false = none, true = any (logged as a warning).
    */
   trustProxy: boolean | number | string[];
   /**
@@ -146,9 +147,20 @@ function secretKey(raw: string | undefined, name: string): string | undefined {
   return raw;
 }
 
+/** Default THEIRSIDE_TRUST_PROXY: load balancers on a private network or the same host. */
+export const PRIVATE_PROXY_RANGES = [
+  '10.0.0.0/8',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  '127.0.0.0/8',
+  'fc00::/7',
+  '::1/128',
+];
+
 function trustProxySetting(raw: string | undefined): boolean | number | string[] {
-  if (raw === undefined || raw.trim() === '' || /^(true|1|yes|on)$/i.test(raw)) return true;
-  if (/^(false|0|no|off)$/i.test(raw)) return false;
+  if (raw === undefined || raw.trim() === '') return PRIVATE_PROXY_RANGES;
+  if (/^(true|yes|on)$/i.test(raw.trim())) return true;
+  if (/^(false|0|no|off)$/i.test(raw.trim())) return false;
   if (/^\d+$/.test(raw)) return Number(raw);
   return raw
     .split(',')

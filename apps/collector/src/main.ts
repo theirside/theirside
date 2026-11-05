@@ -41,6 +41,11 @@ async function main() {
   await storage.events.ensurePartitions(ctx.clock.now(), config.partitionsAhead + 1);
 
   const app = await buildApp(ctx, { logger: { level: config.logLevel } });
+  if (config.trustProxy === true)
+    app.log.warn(
+      'THEIRSIDE_TRUST_PROXY=true believes X-Forwarded-For from any address: a client that reaches the ' +
+        "collector directly can pick the IP its sign-in attempts are counted against. Set the load balancers' CIDRs instead.",
+    );
   if (!config.publicPathsOnly) {
     const code = await ctx.accounts.issueSetupCode();
     if (code) {

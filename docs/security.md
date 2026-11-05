@@ -29,7 +29,13 @@ Then name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup p
 - 3 reset emails per address per hour.
 - Counts are kept in Postgres, so they hold across replicas, and are forgotten after a day.
 
-The address is the client IP as the collector sees it. Behind a load balancer, set **`THEIRSIDE_TRUST_PROXY`** to the load balancers' addresses or CIDRs (or the number of proxies in front), so a client can't pick its own IP with a forged `X-Forwarded-For`. The default (`true`) believes any `X-Forwarded-For`, which is only right when every request comes through your proxy.
+The address is the client IP as the collector sees it. **`THEIRSIDE_TRUST_PROXY`** decides whose `X-Forwarded-For` to believe:
+
+- **Default**: proxies on private or loopback addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `fc00::/7`, `::1`), which covers a load balancer or ingress in the same VPC or on the same host. A client connecting from the internet can't pick the address its attempts count against.
+- **CIDRs** (`10.0.12.0/24,10.0.13.0/24`): only these; set your load balancers' subnets to be stricter than the default. If anything else on the private network can reach the collector directly, it could otherwise send its own `X-Forwarded-For`.
+- **A number**: that many proxies nearest the collector, whatever their address.
+- **`false`**: none; the address is always the TCP peer.
+- **`true`**: anyone, which is only right when nothing reaches the collector except through your proxy. The collector logs a warning at start.
 
 ## Cross-site requests (CSRF)
 

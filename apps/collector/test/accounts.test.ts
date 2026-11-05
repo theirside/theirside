@@ -138,15 +138,17 @@ describe('sign-in, sessions and CSRF', () => {
     expect(rows).not.toContain(token);
   });
 
-  it('marks the cookie Secure behind https', async () => {
-    const b = new Browser(t);
-    const res = await b.req(
-      'POST',
-      '/v1/auth/login',
-      { email: 'ada@example.com', password: PASSWORD },
-      { 'x-forwarded-proto': 'https' },
-    );
-    expect(String(res.headers['set-cookie'])).toContain('; Secure');
+  it('marks the cookie Secure behind https (a load balancer on a private address)', async () => {
+    const login = (peer: string) =>
+      new Browser(t, peer).req(
+        'POST',
+        '/v1/auth/login',
+        { email: 'ada@example.com', password: PASSWORD },
+        { 'x-forwarded-proto': 'https' },
+      );
+    expect(String((await login('10.0.0.2')).headers['set-cookie'])).toContain('; Secure');
+    // the header from a client on the internet is not believed
+    expect(String((await login('203.0.113.10')).headers['set-cookie'])).not.toContain('; Secure');
   });
 
   it('gives the same answer for a wrong password and an unknown email', async () => {
