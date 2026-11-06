@@ -602,6 +602,7 @@ class PgIncidentStore implements IncidentStore {
       lastAlertedRate: r.last_alerted_rate === null ? null : Number(r.last_alerted_rate),
       lastAlertedP95Ms: r.last_alerted_p95_ms === null ? null : Number(r.last_alerted_p95_ms),
       lastEvaluatedMinute: (r.last_evaluated_minute as Date | null) ?? null,
+      windowMinutes: Number(r.window_minutes ?? 5),
       alertsMuted: Boolean(r.alerts_muted),
       peakErrorRate: Number(r.peak_error_rate),
       peakP95Ms: r.peak_p95_ms === null ? null : Number(r.peak_p95_ms),
@@ -671,8 +672,9 @@ class PgIncidentStore implements IncidentStore {
     await this.db.query(
       `INSERT INTO incidents (id, org_id, project_id, environment, provider, scope, kind, status, opened_at,
                               resolved_at, last_alerted_rate, last_alerted_p95_ms, last_evaluated_minute,
-                              alerts_muted, peak_error_rate, peak_p95_ms, baseline, summary, sample_request_ids)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+                              alerts_muted, peak_error_rate, peak_p95_ms, baseline, summary, sample_request_ids,
+                              window_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [
         i.id,
         i.orgId,
@@ -693,6 +695,7 @@ class PgIncidentStore implements IncidentStore {
         JSON.stringify(i.baseline),
         i.summary,
         i.sampleRequestIds,
+        i.windowMinutes ?? 5,
       ],
     );
     await this.writeEndpoints(i);
@@ -702,7 +705,8 @@ class PgIncidentStore implements IncidentStore {
     await this.db.query(
       `UPDATE incidents SET scope = $3, kind = $4, status = $5, resolved_at = $6, last_alerted_rate = $7,
               last_alerted_p95_ms = $8, last_evaluated_minute = $9, alerts_muted = $10, peak_error_rate = $11,
-              peak_p95_ms = $12, baseline = $13, summary = $14, sample_request_ids = $15, updated_at = now()
+              peak_p95_ms = $12, baseline = $13, summary = $14, sample_request_ids = $15,
+              window_minutes = $16, updated_at = now()
         WHERE id = $1 AND org_id = $2`,
       [
         i.id,
@@ -720,6 +724,7 @@ class PgIncidentStore implements IncidentStore {
         JSON.stringify(i.baseline),
         i.summary,
         i.sampleRequestIds,
+        i.windowMinutes ?? 5,
       ],
     );
     await this.writeEndpoints(i);

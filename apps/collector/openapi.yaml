@@ -174,6 +174,11 @@ components:
         peakErrorRate: { type: number }
         peakP95Ms: { type: [number, 'null'] }
         alertsMuted: { type: boolean, description: Opened during a cooldown; no alerts were sent }
+        windowMinutes:
+          {
+            type: integer,
+            description: 'Window it was judged over: 5, or 15/30/60 for a low-traffic endpoint',
+          }
         endpoints:
           type: array
           items:

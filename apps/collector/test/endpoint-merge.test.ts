@@ -191,6 +191,7 @@ describe('one call, one row', () => {
       lastAlertedP95Ms: null,
       lastEvaluatedMinute: new Date(NOW - MIN),
       alertsMuted: false,
+      windowMinutes: 5,
       peakErrorRate: 0.25,
       peakP95Ms: null,
       baseline: {},

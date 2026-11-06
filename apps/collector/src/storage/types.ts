@@ -154,6 +154,8 @@ export interface Incident extends Tenant {
   lastEvaluatedMinute: Date | null;
   /** Opened inside a cooldown: tracked, never alerted. */
   alertsMuted: boolean;
+  /** Window it was judged over: 5, or 15/30/60 for a low-traffic endpoint. */
+  windowMinutes: number;
   peakErrorRate: number;
   peakP95Ms: number | null;
   baseline: Record<string, unknown>;

@@ -43,6 +43,8 @@ export interface SimAlert {
   incidentId: string;
   endpoints: string[];
   others: EndpointView[];
+  /** Every endpoint view of the provider at that minute. */
+  views: EndpointView[];
   incident: Incident;
 }
 
@@ -154,7 +156,7 @@ export class Sim {
       this.lastBaselineAt = T + MIN;
     }
     const count = Math.max(t.openAfterMinutes, t.resolveAfterMinutes);
-    const from = T - (count - 1 + t.windowMinutes - 1) * MIN;
+    const from = T - (count - 1 + Math.max(t.windowMinutes, 60) - 1) * MIN;
     const rows: RollupRow[] = [];
     for (const per of this.rows.values()) {
       for (let m = from; m <= T; m += MIN) {
@@ -207,6 +209,7 @@ export class Sim {
           others: views.filter(
             (v) => !active.some((a) => a.endpoint === v.endpoint && a.method === v.method),
           ),
+          views,
           incident: d.incident,
         });
       }

@@ -13,6 +13,8 @@ import type { AlertDispatcher } from '../alerts/dispatcher.js';
 import type { Job } from '../scheduler/scheduler.js';
 import { BASELINE_REFRESH_MS, baselineKeyId, refreshBaselines } from '../scoring/baseline.js';
 import {
+  MAX_WINDOW_MINUTES,
+  LOW_TRAFFIC_WINDOWS,
   defaultBaseline,
   evaluate,
   windowStats,
@@ -59,14 +61,25 @@ export function evaluateKeys(
     const minutes = perKey.get(keyId(key)) ?? new Map<number, RollupRow>();
     const baseline = baselines.get(keyId(key)) ?? defaultBaseline(t);
     const evals: Evaluation[] = [];
-    for (let k = 0; k < count; k++) {
-      const end = T.getTime() - k * MIN;
+    const over = (end: number, n: number) => {
       const window: RollupRow[] = [];
-      for (let i = 0; i < t.windowMinutes; i++) {
+      for (let i = 0; i < n; i++) {
         const r = minutes.get(end - i * MIN);
         if (r) window.push(r);
       }
-      evals.push(evaluate(windowStats(window), baseline, t));
+      return windowStats(window);
+    };
+    for (let k = 0; k < count; k++) {
+      const end = T.getTime() - k * MIN;
+      let n: number = t.windowMinutes;
+      let stats = over(end, n);
+      // low traffic: widen the window until it holds enough calls (docs/scoring.md)
+      for (const w of LOW_TRAFFIC_WINDOWS) {
+        if (stats.calls >= t.minCalls || w <= t.windowMinutes) continue;
+        n = w;
+        stats = over(end, w);
+      }
+      evals.push(evaluate(stats, baseline, t, n));
     }
     out.push({ ...key, baseline, evals });
   }
@@ -110,7 +123,14 @@ function alertTitle(event: AlertEvent, inc: Incident, views: readonly EndpointVi
     }
   }
   const rate = calls > 0 ? errors / calls : 0;
-  const verb = inc.kind === 'latency' ? 'slow' : `failing (${pct(rate)})`;
+  // low volume: counts say more than a percentage of a few calls
+  const low = inc.windowMinutes > 5;
+  const verb =
+    inc.kind === 'latency'
+      ? `slow${low ? ` (low volume, last ${inc.windowMinutes} min)` : ''}`
+      : low
+        ? `failing (${errors} of ${calls} calls, low volume, last ${inc.windowMinutes} min)`
+        : `failing (${pct(rate)})`;
   return `${inc.provider}: ${what} ${verb}${event === 'escalation' ? ', getting worse' : ''}`;
 }
 
@@ -220,7 +240,11 @@ export function incidentJob(
         const keyList = [...keys.values()];
         const countOf = (t: Thresholds) => Math.max(t.openAfterMinutes, t.resolveAfterMinutes);
         const count = Math.max(countOf(projectT), ...keyList.map((k) => countOf(tOf(k.provider))));
-        const from = new Date(T.getTime() - (count - 1 + projectT.windowMinutes - 1) * MIN);
+        // enough minutes for the widest low-traffic window
+        const from = new Date(
+          T.getTime() -
+            (count - 1 + Math.max(projectT.windowMinutes, MAX_WINDOW_MINUTES) - 1) * MIN,
+        );
         const rows = await storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN) });
         const baselines = await baselinesFor(storage, tenant, keyList, now, projectT);
         const byProvider = new Map<string, typeof keyList>();

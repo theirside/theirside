@@ -61,6 +61,7 @@ export function incidentView(i: Incident) {
     peakErrorRate: i.peakErrorRate,
     peakP95Ms: i.peakP95Ms,
     alertsMuted: i.alertsMuted,
+    windowMinutes: i.windowMinutes,
     endpoints: i.endpoints.map((e) => ({
       method: e.method,
       endpoint: e.endpoint,

@@ -85,6 +85,10 @@ export function decide(
     const muted = failing.every(inCooldown);
     const now = current(failing);
     const errorKind = failing.some((v) => v.evals[0]!.errorBreach);
+    const windowMinutes = Math.max(
+      t.windowMinutes,
+      ...failing.map((v) => v.evals[0]!.windowMinutes),
+    );
     const incident: Incident = {
       id: newId('inc'),
       orgId: tenant.orgId,
@@ -100,6 +104,7 @@ export function decide(
       lastAlertedP95Ms: now.p95,
       lastEvaluatedMinute: T,
       alertsMuted: muted,
+      windowMinutes,
       peakErrorRate: now.rate,
       peakP95Ms: now.p95,
       baseline: Object.fromEntries(
@@ -177,6 +182,8 @@ export function decide(
   }
   inc.scope = inc.endpoints.length > 1 ? 'provider' : 'endpoint';
   if (failing.some((v) => v.evals[0]!.errorBreach)) inc.kind = 'errors';
+  for (const v of failing)
+    inc.windowMinutes = Math.max(inc.windowMinutes, v.evals[0]!.windowMinutes);
 
   if (active.length === 0) {
     inc.status = 'resolved';
@@ -199,7 +206,20 @@ export function decide(
     };
     const lastRate = inc.lastAlertedRate ?? 0;
     const lastP95 = inc.lastAlertedP95Ms ?? 0;
-    if (
+    // a low-volume incident's long window keeps filling with failures after the open, so the
+    // rate climbs without anything getting worse: track it quietly until the window has turned over
+    const filling =
+      inc.windowMinutes > t.windowMinutes &&
+      T.getTime() - inc.openedAt.getTime() < inc.windowMinutes * MIN;
+    if (filling) {
+      inc.lastAlertedRate = Math.max(lastRate, now.rate);
+      if (now.p95 !== null) inc.lastAlertedP95Ms = Math.max(lastP95, now.p95);
+    }
+    if (filling && spread) {
+      escalation = 'spread';
+    } else if (filling) {
+      // nothing
+    } else if (
       inc.kind === 'errors' &&
       lastRate > 0 &&
       sustained((k) => current(activeViews, k).rate >= t.escalationFactor * lastRate)

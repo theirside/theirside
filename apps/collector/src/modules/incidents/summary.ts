@@ -130,8 +130,12 @@ export function buildSummary(input: SummaryInput): string {
         lines.push(`${prefix}no traffic in the current window.`);
         continue;
       }
+      const window =
+        (v?.evals[0]?.windowMinutes ?? 5) > 5
+          ? `${s.calls} calls in the last ${v!.evals[0]!.windowMinutes} min (low volume: too few calls in 5 min, so judged over ${v!.evals[0]!.windowMinutes})`
+          : `${s.calls} calls in window`;
       lines.push(
-        `${prefix}Error rate ${pct(s.errorRate)} (normal ${pct(b?.providerErrorRate ?? 0)}${b?.learning ? ', still learning' : ''}), ${s.calls} calls in window. Outcomes: ${outcomeBreakdown(s.outcomes)}.`,
+        `${prefix}Error rate ${pct(s.errorRate)} (normal ${pct(b?.providerErrorRate ?? 0)}${b?.learning ? ', still learning' : ''}), ${window}. Outcomes: ${outcomeBreakdown(s.outcomes)}.`,
       );
       lines.push(`${prefix}p95 latency ${ms(s.p95)} (normal ${ms(b?.p95Ms)}).`);
     }

@@ -93,8 +93,20 @@ export function errorThreshold(baselineRate: number, t: Thresholds): number {
   return Math.max(t.rateMultiplier * baselineRate, baselineRate + t.rateDeltaPp);
 }
 
+/**
+ * Low traffic: when the normal window has fewer than `minCalls` calls, the
+ * window widens to the first of these with enough (else the last), so a quiet
+ * endpoint that starts failing still opens an incident. Every other safeguard
+ * (minimum errors, the threshold, the statistical test, bad minutes in a row)
+ * is the same.
+ */
+export const LOW_TRAFFIC_WINDOWS = [15, 30, 60] as const;
+export const MAX_WINDOW_MINUTES = 60;
+
 export interface Evaluation {
   stats: WindowStats;
+  /** Minutes the window covered: `windowMinutes` (5), or 15/30/60 for low traffic. */
+  windowMinutes: number;
   threshold: number;
   pValue: number;
   errorBreach: boolean;
@@ -104,7 +116,12 @@ export interface Evaluation {
 }
 
 /** Is this window "bad" (incident-worthy) relative to the baseline? */
-export function evaluate(stats: WindowStats, b: BaselineView, t: Thresholds): Evaluation {
+export function evaluate(
+  stats: WindowStats,
+  b: BaselineView,
+  t: Thresholds,
+  windowMinutes = t.windowMinutes,
+): Evaluation {
   const threshold = errorThreshold(b.providerErrorRate, t);
   const enough = stats.calls >= t.minCalls;
   const p0 = Math.max(b.providerErrorRate, t.minBaselineRate);
@@ -122,6 +139,7 @@ export function evaluate(stats: WindowStats, b: BaselineView, t: Thresholds): Ev
     stats.p95 >= b.p95Ms + t.latencyDeltaMs;
   return {
     stats,
+    windowMinutes,
     threshold,
     pValue,
     errorBreach,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { othersStatus } from '../src/modules/incidents/summary.js';
+import { buildPayload } from '../src/modules/incidents/job.js';
+import { buildSummary, othersStatus } from '../src/modules/incidents/summary.js';
 import { DEFAULT_THRESHOLDS, resolveThresholds } from '../src/modules/scoring/thresholds.js';
 import { MIN, Sim, rng } from './sim.js';
 
@@ -232,5 +233,105 @@ describe('incident rules', () => {
       strict.traffic(k2, m, { calls: 60, errorRate: m >= F && m < F + 5 * MIN ? 0.5 : 0.002 }),
     );
     expect(strict.alerts).toEqual([]);
+  });
+});
+
+describe('low traffic: 1–5 calls/min, judged over a longer window', () => {
+  it.each([1, 2, 3])('%i call(s)/min that start failing open an incident, saying so', (calls) => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(20 + calls));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, calls, 0);
+    sim.run(F, F + 40 * MIN, (m) => sim.traffic(k, m, { calls, errors: calls }));
+    const open = sim.alerts.find((a) => a.event === 'open');
+    expect(open, `${calls}/min`).toBeDefined();
+    expect(open!.incident.windowMinutes).toBeGreaterThan(5);
+    // within the first window that holds enough calls, plus the bad minutes in a row
+    expect(open!.minute - F).toBeLessThanOrEqual(open!.incident.windowMinutes * MIN);
+  });
+
+  it('a single failed call never alerts (1 call/min for a day)', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(31));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 1, 0);
+    sim.run(F, F + DAY, (m) => sim.traffic(k, m, { calls: 1, errors: m === F + 60 * MIN ? 1 : 0 }));
+    expect(sim.alerts).toEqual([]);
+  });
+
+  it('two failures within an hour never alert', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(32));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 2, 0);
+    sim.run(F, F + 3 * 60 * MIN, (m) =>
+      sim.traffic(k, m, { calls: 2, errors: m === F + 10 * MIN || m === F + 40 * MIN ? 1 : 0 }),
+    );
+    expect(sim.alerts).toEqual([]);
+  });
+
+  it('rare random failures over three days never alert', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(33));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    sim.run(START, START + 3 * DAY, (m) => sim.traffic(k, m, { calls: 1, errorRate: 0.005 }));
+    expect(sim.alerts).toEqual([]);
+  });
+
+  it('resolves once the long window is clean again', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(34));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 2, 0);
+    sim.run(F, F + 3 * 60 * MIN, (m) =>
+      sim.traffic(k, m, { calls: 2, errors: m < F + 20 * MIN ? 2 : 0 }),
+    );
+    expect(sim.alerts.map((a) => a.event)).toEqual(['open', 'resolve']);
+  });
+
+  it('a provider override of the minimum calls keeps the normal window', () => {
+    const t = resolveThresholds({ minCalls: 5 });
+    const sim = new Sim(t, rng(35));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 2, 0);
+    sim.run(F, F + 20 * MIN, (m) => sim.traffic(k, m, { calls: 2, errors: 2 }));
+    const open = sim.alerts.find((a) => a.event === 'open');
+    expect(open!.incident.windowMinutes).toBe(5); // 10 calls in 5 min ≥ 5
+  });
+
+  it('5 calls/min keep the normal 5-minute window', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(36));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 5, 0);
+    sim.run(F, F + 20 * MIN, (m) => sim.traffic(k, m, { calls: 5, errors: 5 }));
+    expect(sim.alerts.find((a) => a.event === 'open')!.incident.windowMinutes).toBe(5);
+  });
+});
+
+describe('low-traffic alerts say so', () => {
+  it('the title and the summary name the window', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(40));
+    const k = sim.key('/v1/payouts', 'BankCo');
+    const F = START + 2 * DAY;
+    warm(sim, [k], F, 1, 0);
+    sim.run(F, F + 40 * MIN, (m) => sim.traffic(k, m, { calls: 1, errors: 1 }));
+    const open = sim.alerts.find((a) => a.event === 'open')!;
+    const w = open.incident.windowMinutes;
+    const at = new Date(open.minute + MIN);
+    const p = buildPayload('open', open.incident, open.views, undefined, at, null);
+    expect(p.title).toMatch(
+      new RegExp(
+        `^BankCo: POST /v1/payouts failing \\(\\d+ of \\d+ calls, low volume, last ${w} min\\)$`,
+      ),
+    );
+    const summary = buildSummary({
+      incident: open.incident,
+      views: open.views,
+      provider: null,
+      sampleRequestIds: [],
+      now: at,
+    });
+    expect(summary).toContain(`calls in the last ${w} min (low volume: too few calls in 5 min`);
   });
 });

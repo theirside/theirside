@@ -611,6 +611,7 @@ async function seedIncidents(
       lastAlertedP95Ms: Math.round(peakP95),
       lastEvaluatedMinute: resolvedAt,
       alertsMuted: false,
+      windowMinutes: 5,
       peakErrorRate: pi.errorRate,
       peakP95Ms: Math.round(peakP95),
       baseline: {},
