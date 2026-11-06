@@ -130,7 +130,12 @@ export function evaluate(stats: WindowStats, b: BaselineView, t: Thresholds): Ev
   };
 }
 
-export type HealthStatus = 'green' | 'amber' | 'red' | 'unknown';
+/**
+ * green / amber / red: scored over the window. idle: known (called within the
+ * range asked for) but no calls in the window, so neither healthy nor failing.
+ * unknown: never called, or not within the data asked for.
+ */
+export type HealthStatus = 'green' | 'amber' | 'red' | 'idle' | 'unknown';
 
 export interface Score {
   score: number | null;

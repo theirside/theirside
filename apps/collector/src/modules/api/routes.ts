@@ -9,7 +9,7 @@ import { bearerToken } from '../auth/api-keys.js';
 import { adminOnly, requireAdmin } from '../auth/routes.js';
 import { OTHER_PROVIDER } from '../discovery/directory.js';
 import { adminTenant } from '../auth/tenant.js';
-import { computeHealth } from './health.js';
+import { DEFAULT_HEALTH_RANGE, computeHealth } from './health.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
 
 const OPENAPI_PATH = fileURLToPath(new URL('../../../openapi.yaml', import.meta.url));
@@ -64,6 +64,18 @@ export function incidentView(i: Incident) {
   };
 }
 
+const rangeKey = z.enum(Object.keys(RANGES) as [RangeKey, ...RangeKey[]]);
+
+/** Health: `range` = how far back endpoints are listed (idle when quiet in the window). */
+const healthQuery = z.object({
+  environment: z.string().optional(),
+  range: rangeKey.default(DEFAULT_HEALTH_RANGE),
+});
+const healthOpts = (q: z.infer<typeof healthQuery>) => ({
+  range: q.range,
+  ...(q.environment ? { environment: q.environment } : {}),
+});
+
 const incidentQuery = z.object({
   status: z.enum(['open', 'resolved']).optional(),
   provider: z.string().optional(),
@@ -105,14 +117,10 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
   // ---------------------------------------------------------------- health API (API key, read scope)
   const read = { preHandler: requireReadKey(ctx) };
 
-  app.get('/v1/health', read, async (req) => {
-    const env = (req.query as { environment?: string }).environment;
-    return computeHealth(
-      ctx.storage,
-      req.readTenant!,
-      ctx.clock.now(),
-      env ? { environment: env } : {},
-    );
+  app.get('/v1/health', read, async (req, reply) => {
+    const q = healthQuery.safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'invalid query' });
+    return computeHealth(ctx.storage, req.readTenant!, ctx.clock.now(), healthOpts(q.data));
   });
 
   app.get('/v1/incidents', read, async (req, reply) => {
@@ -140,9 +148,13 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
   app.get('/v1/admin/overview', auth, async (req, reply) => {
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
-    const env = (req.query as { environment?: string }).environment;
+    const q = healthQuery.extend({ provider: z.string().min(1).optional() }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'invalid query' });
     const [health, open, envs] = await Promise.all([
-      computeHealth(ctx.storage, tenant, ctx.clock.now(), env ? { environment: env } : {}),
+      computeHealth(ctx.storage, tenant, ctx.clock.now(), {
+        ...healthOpts(q.data),
+        ...(q.data.provider ? { provider: q.data.provider } : {}),
+      }),
       ctx.storage.incidents.list(tenant, { status: 'open' }),
       ctx.storage.config.listSdkInstances(tenant),
     ]);
@@ -178,7 +190,7 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
         endpoint: z.string().optional(),
         method: z.string().optional(),
         environment: z.string().optional(),
-        range: z.enum(Object.keys(RANGES) as [RangeKey, ...RangeKey[]]).default('1h'),
+        range: rangeKey.default('1h'),
       })
       .safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid query' });

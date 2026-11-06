@@ -290,7 +290,7 @@ class PgRollupStore implements RollupStore {
     const params: unknown[] = [];
     const { rows } = await this.db.query(
       `SELECT org_id, project_id, environment, provider, endpoint, method, min(minute) AS minute,
-              count(*)::int AS minutes, ${SUM_SELECT}
+              max(minute) AS last_minute, count(*)::int AS minutes, ${SUM_SELECT}
          FROM rollups_1m WHERE ${rollupWhere(tenant, q, params)}
         GROUP BY org_id, project_id, environment, provider, endpoint, method`,
       params,
@@ -299,6 +299,7 @@ class PgRollupStore implements RollupStore {
       ...rowToRollup(r),
       minutes: Number(r.minutes),
       firstMinute: (r.minute as Date).toISOString(),
+      lastMinute: (r.last_minute as Date).toISOString(),
     }));
   }
 
@@ -689,6 +690,7 @@ function rowToProvider(r: Row): ProviderRecord {
     internal: Boolean(r.internal),
     alertsEnabled: r.alerts_enabled === undefined ? true : Boolean(r.alerts_enabled),
     firstSeenAt: new Date((r.first_seen_at ?? r.created_at) as string),
+    lastCallAt: r.last_call_at ? new Date(r.last_call_at as string) : null,
     displayName: (r.display_name as string | null) ?? null,
     pathPrivacy: (r.path_privacy as ProviderRecord['pathPrivacy'] | undefined) ?? null,
     allowedPathWords: (r.allowed_path_words as string[] | undefined) ?? [],
@@ -976,6 +978,7 @@ class PgConfigStore implements ConfigStore {
          path_privacy = CASE WHEN 'strict' IN (p.path_privacy, src.path_privacy) THEN 'strict'
                              ELSE COALESCE(p.path_privacy, src.path_privacy) END,
          first_seen_at = LEAST(p.first_seen_at, src.first_seen_at),
+         last_call_at = GREATEST(p.last_call_at, src.last_call_at),
          updated_at = now()
        FROM src
        WHERE p.org_id = $1 AND p.project_id = $2 AND p.id = $4
@@ -1016,6 +1019,19 @@ class PgConfigStore implements ConfigStore {
          FROM unnest($3::text[], $4::text[]) AS u(n, h)
        ON CONFLICT (project_id, name) DO NOTHING`,
       [t.orgId, t.projectId, names, names.map((n) => hosts.get(n) ?? '')],
+    );
+  }
+
+  async touchProviders(t: Tenant, lastCalls: Map<string, Date>) {
+    if (lastCalls.size === 0) return;
+    // a row is written at most every 30 s per provider: concurrent batches rarely
+    // contend for it, and "last call" needs no more precision than that
+    await this.db.query(
+      `UPDATE providers p SET last_call_at = u.at
+         FROM unnest($3::text[], $4::timestamptz[]) AS u(name, at)
+        WHERE p.org_id = $1 AND p.project_id = $2 AND p.name = u.name
+          AND (p.last_call_at IS NULL OR p.last_call_at < u.at - interval '30 seconds')`,
+      [t.orgId, t.projectId, [...lastCalls.keys()], [...lastCalls.values()]],
     );
   }
 

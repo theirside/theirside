@@ -449,6 +449,7 @@ export async function seedDemo(
   let calls = 0;
   let events = 0;
   let batch: RollupDelta[] = [];
+  const lastCalls = new Map<string, Date>();
   const flush = async () => {
     if (batch.length === 0) return;
     await storage.rollups.upsert(tenant, batch);
@@ -493,6 +494,7 @@ export async function seedDemo(
         sum += ms;
       }
       calls += total;
+      lastCalls.set(provider.name, minute);
       batch.push({
         ...key,
         minute: minute.toISOString(),
@@ -536,6 +538,7 @@ export async function seedDemo(
     if (batch.length >= 2000) await flush();
   }
   await flush();
+  await storage.config.touchProviders(tenant, lastCalls);
   log(
     `rollups: ${rollupRows} rows, ${calls} calls (${days} days per minute, ${HISTORY_DAYS} days in total)`,
   );

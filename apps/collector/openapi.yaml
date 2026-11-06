@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Theirside collector API
-  version: 0.1.0
+  version: 0.2.1
   description: |
     Public API of the Theirside collector: SDK ingest, the health API
     and incidents. Authenticate with a project API key (`Authorization: Bearer tsd_live_…`);
@@ -25,7 +25,12 @@ components:
         [ok, http_4xx, http_5xx, timeout, conn_reset, conn_refused, dns, tls, aborted, other_error]
     HealthStatus:
       type: string
-      enum: [green, amber, red, unknown]
+      enum: [green, amber, red, idle, unknown]
+      description: |
+        green / amber / red: scored over the 5-minute window. idle: called before (an endpoint
+        within `range`, a provider at any time) but not in the window; never scored, so neither
+        healthy nor failing. unknown: never called (or not in the requested environment).
+        Treat values you don't know as unknown: more may be added.
     CallEvent:
       type: object
       required: [ts, provider, host, method, endpoint, status, durationMs, outcome]
@@ -86,6 +91,19 @@ components:
         learning: { type: boolean }
         inIncident: { type: boolean }
         outcomes: { type: object, additionalProperties: { type: integer } }
+        lastCallAt:
+          {
+            type: string,
+            format: date-time,
+            description: Start of the latest minute with calls within the range,
+          }
+        rangeTotals:
+          type: object
+          description: Totals over the whole range (what the dashboard shows for idle endpoints)
+          properties:
+            calls: { type: integer }
+            errorRate: { type: number }
+            p95Ms: { type: [number, 'null'] }
     ProviderHealth:
       type: object
       properties:
@@ -97,6 +115,12 @@ components:
         category:
           { type: [string, 'null'], description: 'Catalog category, e.g. payments, infrastructure' }
         firstSeenAt: { type: [string, 'null'], format: date-time }
+        lastCallAt:
+          {
+            type: [string, 'null'],
+            format: date-time,
+            description: 'Latest call, whatever the range (with `environment`: the latest in it within the range); null = never',
+          }
         alertsEnabled: { type: boolean }
         status: { $ref: '#/components/schemas/HealthStatus' }
         score: { type: [integer, 'null'] }
@@ -106,7 +130,10 @@ components:
         p95Ms: { type: [number, 'null'] }
         normalP95Ms: { type: [number, 'null'] }
         openIncidentId: { type: [string, 'null'] }
-        endpoints: { type: array, items: { $ref: '#/components/schemas/EndpointHealth' } }
+        endpoints:
+          type: array
+          description: Endpoints called within the range, live ones by calls/min, then idle ones by last call
+          items: { $ref: '#/components/schemas/EndpointHealth' }
     Incident:
       type: object
       properties:
@@ -194,13 +221,22 @@ paths:
   /v1/health:
     get:
       summary: Current health per provider and endpoint
-      description: Scores and rates over the last 5 complete minutes; see docs/scoring.md.
+      description: |
+        Scores and rates over the last 5 complete minutes; see docs/scoring.md. Every provider is
+        listed; endpoints are listed when they had calls within `range`, and those without calls
+        in the window are `idle` (live values 0 or null, with `lastCallAt` and `rangeTotals`).
       parameters:
         - {
             name: environment,
             in: query,
             schema: { type: string },
             description: Only this environment,
+          }
+        - {
+            name: range,
+            in: query,
+            schema: { type: string, enum: [1h, 24h, 7d], default: 24h },
+            description: How far back an endpoint counts as known (listed as idle when quiet),
           }
       responses:
         '200':
@@ -214,8 +250,10 @@ paths:
                   minute:
                     { type: string, format: date-time, description: Last complete minute evaluated }
                   windowMinutes: { type: integer }
+                  range: { type: string, enum: [1h, 24h, 7d] }
                   environment: { type: [string, 'null'] }
                   providers: { type: array, items: { $ref: '#/components/schemas/ProviderHealth' } }
+        '400': { description: Invalid query (e.g. an unknown range) }
         '401': { description: Missing or invalid key, or no read scope }
   /v1/incidents:
     get:

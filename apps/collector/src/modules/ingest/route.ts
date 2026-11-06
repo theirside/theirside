@@ -148,6 +148,7 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
           );
           if (newProviders.length > 0)
             await tx.config.ensureProviders(tenant, newProviders, prepared.providers);
+          await tx.config.touchProviders(tenant, prepared.lastCalls);
         });
         for (const p of newProviders) seen.add(p);
         deps.limiter.recordAccepted(tenant.orgId, prepared.calls);

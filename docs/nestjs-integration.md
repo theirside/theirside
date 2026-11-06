@@ -169,6 +169,8 @@ The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/
 - Sign-in failures delay one email at one address instead of locking the account.
 - Reset links, turning off someone's 2FA, role changes and removals ask for your password (and 2FA code) again; scripts using `Authorization: Bearer <THEIRSIDE_ADMIN_TOKEN>` are not affected.
 
+From 0.2.0 to 0.2.1: endpoints quiet in the 5-minute window stay listed as `idle`. In `/v1/health` they appear with `status: "idle"`, `lastCallAt` and `rangeTotals` (endpoints called within `?range=`, default 24h), and a provider without calls in the window is `idle` instead of `unknown` when it was ever called. A script that reads `status` should treat `idle` like `unknown`.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:

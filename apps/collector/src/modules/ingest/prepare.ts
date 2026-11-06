@@ -19,6 +19,8 @@ export interface PreparedBatch {
   calls: number;
   /** Provider name → a host seen for it, to auto-create provider rows. */
   providers: Map<string, string>;
+  /** Provider name → its latest (clamped) call time in the batch. */
+  lastCalls: Map<string, Date>;
   /** Events dropped: excluded, hidden or internal hosts. */
   dropped: number;
 }
@@ -55,6 +57,7 @@ export function prepareBatch(
   const events: StoredEvent[] = [];
   const deltas = new Map<string, RollupDelta>();
   const providers = new Map<string, string>();
+  const lastCalls = new Map<string, Date>();
   let calls = 0;
   let dropped = 0;
 
@@ -85,6 +88,7 @@ export function prepareBatch(
       providerRequestId: e.providerRequestId ?? null,
     });
     if (!providers.has(provider)) providers.set(provider, e.host);
+    if (ts > (lastCalls.get(provider)?.getTime() ?? 0)) lastCalls.set(provider, new Date(ts));
 
     const minute = new Date(floorMinute(ts)).toISOString();
     const key = `${environment}\u0000${provider}\u0000${e.endpoint}\u0000${method}\u0000${minute}`;
@@ -114,5 +118,5 @@ export function prepareBatch(
     d.latencySumMs += e.durationMs * w;
     calls += w;
   }
-  return { events, deltas: [...deltas.values()], calls, providers, dropped };
+  return { events, deltas: [...deltas.values()], calls, providers, lastCalls, dropped };
 }

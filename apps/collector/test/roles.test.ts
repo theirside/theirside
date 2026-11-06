@@ -446,7 +446,7 @@ describe('migration 007', () => {
          VALUES ('inv_1', 'invite', 'h1', 'org_1', 'new@example.com', now(), now() + interval '1 day'),
                 ('rst_1', 'reset', 'h2', 'org_1', 'usr_m@example.com', now(), now() + interval '1 hour')`,
       );
-      expect(await migrate(pool)).toEqual(['007_roles.sql']);
+      expect((await migrate(pool))[0]).toBe('007_roles.sql');
       const roles = await pool.query(`SELECT DISTINCT role FROM memberships`);
       expect(roles.rows).toEqual([{ role: 'admin' }]);
       const tokens = await pool.query(`SELECT id, role FROM auth_tokens ORDER BY id`);

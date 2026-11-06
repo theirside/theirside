@@ -93,7 +93,7 @@ export interface RollupStore {
   aggregateByKey(
     tenant: Tenant,
     q: RollupQuery,
-  ): Promise<(RollupRow & { minutes: number; firstMinute: string })[]>;
+  ): Promise<(RollupRow & { minutes: number; firstMinute: string; lastMinute: string })[]>;
   /** Rows summed per bucket of `bucketMinutes`, for charts. */
   series(tenant: Tenant, q: RollupQuery & { bucketMinutes: number }): Promise<RollupRow[]>;
   /** Every (tenant, key) with traffic in the range: what the scheduler scores. */
@@ -224,6 +224,8 @@ export interface ProviderRecord extends Tenant {
   internal: boolean;
   alertsEnabled: boolean;
   firstSeenAt: Date;
+  /** Latest call seen at ingest (all environments); null = never called. */
+  lastCallAt: Date | null;
   /** Dashboard rename; `name` stays the storage key. */
   displayName: string | null;
   /** Path privacy set in the dashboard (pushed to the SDK); null = the SDK's own setting. */
@@ -247,7 +249,7 @@ type ProviderDiscoveryFields =
 
 export type ProviderInput = Omit<
   ProviderRecord,
-  'id' | 'orgId' | 'projectId' | ProviderDiscoveryFields
+  'id' | 'orgId' | 'projectId' | 'lastCallAt' | ProviderDiscoveryFields
 > &
   Partial<Pick<ProviderRecord, ProviderDiscoveryFields>>;
 
@@ -351,6 +353,8 @@ export interface ConfigStore {
   deleteProvider(tenant: Tenant, id: string): Promise<boolean>;
   /** Insert providers seen in traffic that have no config row yet. */
   ensureProviders(tenant: Tenant, names: string[], hosts: Map<string, string>): Promise<void>;
+  /** Move `lastCallAt` forward to the latest call per provider name (never back). */
+  touchProviders(tenant: Tenant, lastCalls: Map<string, Date>): Promise<void>;
   /**
    * Auto-discovery: create the provider if needed and add the host to its
    * `hosts` (up to `maxHosts`). Returns the provider after the change.
