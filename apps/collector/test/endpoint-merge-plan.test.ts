@@ -98,7 +98,7 @@ describe('planEndpointMerges', () => {
     expect(merges(keys)).toHaveLength(1);
   });
 
-  it('routes: the literal targets, and doubled-slash variants for SDK 0.1.0 rows', () => {
+  it('routes: the literal targets only (no doubled-slash variants since 0.3.0)', () => {
     const plan = planEndpointMerges(
       post(
         '/_ah/api/orderendpoint/v1/getOrderHistory',
@@ -108,11 +108,7 @@ describe('planEndpointMerges', () => {
       ),
       ALLOWED,
     );
-    expect(plan.routes).toEqual([
-      '/_ah/api//orderendpoint/v1/getOrderHistory',
-      '/_ah/api/orderendpoint//v1/getOrderHistory',
-      '/_ah/api/orderendpoint/v1/getOrderHistory',
-    ]);
+    expect(plan.routes).toEqual(['/_ah/api/orderendpoint/v1/getOrderHistory']);
     // the 0.1.0 row itself is not merged: which :id was the slash can't be told
     expect(plan.merges.map((m) => m.endpoint)).toEqual(['/:id/api/orderendpoint/v1/getOrderHistory']);
   });

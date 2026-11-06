@@ -319,20 +319,16 @@ describe('one call, one row', () => {
     expect(eps.filter((e: string) => e.endsWith('getOrderHistory'))).toEqual([TARGET, GAP_ROW]);
   });
 
-  it('pushes routes so SDKs send the merged template, incl. exact ones for SDK 0.1.0', async () => {
+  it('pushes routes so SDKs send the merged template', async () => {
     const res = await t.app.inject({
       method: 'GET',
       url: '/v1/sdk-config',
       headers: { authorization: `Bearer ${TEST_API_KEY}` },
     });
     const orderCo = res.json().providers.find((p: { name: string }) => p.name === PROVIDER);
-    expect(orderCo.routes).toEqual(
-      expect.arrayContaining([
-        TARGET,
-        '/_ah/api//orderendpoint/v1/getOrderHistory',
-        '/_ah/api/orderendpoint//v1/getOrderHistory',
-      ]),
-    );
+    expect(orderCo.routes).toContain(TARGET);
+    // no doubled-slash routes: SDK 0.1.1+ collapses slashes itself
+    expect(orderCo.routes.filter((r: string) => r.includes('//'))).toEqual([]);
     expect(orderCo.routes).not.toContain('/_ah/api/orderendpoint/v1/:id');
     expect(orderCo.allowedWords).toEqual(['orderendpoint']);
   });
@@ -402,5 +398,50 @@ describe('endpoint merge transaction', () => {
     // and it goes through once the failure is gone
     await mergeEndpoints(t.db.storage, tenant(), new Date(NOW), { provider: other });
     expect((await snapshot()).map((r) => r.endpoint)).toEqual(['/_ah/api/orderendpoint/v1/list']);
+  });
+});
+
+describe('migration 011', () => {
+  it('drops the doubled-slash routes 0.2.2 generated and keeps the rest', async () => {
+    const { default: pg } = await import('pg');
+    const { mkdtemp, cp, readdir, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { MIGRATIONS_DIR, migrate } = await import('../src/storage/migrate.js');
+    const { randomBase62 } = await import('../src/util/ids.js');
+    const { ADMIN_DATABASE_URL } = await import('./helpers.js');
+    const name = `theirside_t_${randomBase62(10).toLowerCase()}`;
+    const root = new pg.Client({ connectionString: ADMIN_DATABASE_URL });
+    await root.connect();
+    await root.query(`CREATE DATABASE ${name}`);
+    const url = new URL(ADMIN_DATABASE_URL);
+    url.pathname = `/${name}`;
+    const pool = new pg.Pool({ connectionString: url.toString() });
+    const before = await mkdtemp(join(tmpdir(), 'theirside-migrations-'));
+    try {
+      for (const f of await readdir(MIGRATIONS_DIR))
+        if (f < '011') await cp(join(MIGRATIONS_DIR, f), join(before, f));
+      await migrate(pool, before);
+      await pool.query(`INSERT INTO orgs (id, name) VALUES ('org_1', 'Org')`);
+      await pool.query(`INSERT INTO projects (id, org_id, name) VALUES ('prj_1', 'org_1', 'P')`);
+      await pool.query(
+        `INSERT INTO providers (id, org_id, project_id, name, explicit_routes) VALUES
+           ('prv_a', 'org_1', 'prj_1', 'OrderCo', ARRAY['/_ah/api/orderCo/v1/x', '/_ah/api//orderCo/v1/x', '/_ah/api/orderCo//v1/x']),
+           ('prv_b', 'org_1', 'prj_1', 'Acme', ARRAY['/v1/users/:id'])`,
+      );
+      expect((await migrate(pool))[0]).toBe('011_drop_doubled_slash_routes.sql');
+      const { rows } = await pool.query(
+        `SELECT name, explicit_routes FROM providers ORDER BY name`,
+      );
+      expect(rows).toEqual([
+        { name: 'Acme', explicit_routes: ['/v1/users/:id'] },
+        { name: 'OrderCo', explicit_routes: ['/_ah/api/orderCo/v1/x'] },
+      ]);
+    } finally {
+      await pool.end();
+      await rm(before, { recursive: true, force: true });
+      await root.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await root.end();
+    }
   });
 });

@@ -27,17 +27,10 @@ import { OTHER_PROVIDER } from './directory.js';
  *   `/users/me`). An `:id` never becomes a word the SDK wouldn't send.
  *
  * Merged templates without `:id` go to the provider's routes, so SDKs send them
- * from then on, plus, for SDK 0.1.0 (which turned the empty segment of `//`
- * into `:id`, one segment too many), the same route with the doubled slash
- * written in, at each place a known longer `:id` row suggests one: those match
- * only that exact raw path. History of such 0.1.0 rows is not merged: which
- * `:id` was the slash can't be told.
- *
- * Limitation: a doubled-slash route needs a clean row (the call templated
- * without the extra segment) to copy. When every caller is on SDK 0.1.0 with a
- * base URL ending in `/`, no clean row ever exists, so no route is made and the
- * `:id` rows keep coming. The fix for those callers is SDK 0.1.1, which
- * collapses the slashes itself.
+ * from then on. Rows SDK 0.1.0 sent for `//` paths (the empty segment already
+ * turned into `:id`) are not merged: which `:id` was the slash can't be told;
+ * SDK 0.1.1 and later collapse repeated slashes themselves, and ingest
+ * collapses `//` that older SDKs still send.
  */
 
 export interface EndpointKey {
@@ -52,7 +45,7 @@ export interface PlannedMerge extends EndpointKey {
 
 export interface MergePlan {
   merges: PlannedMerge[];
-  /** Routes to add for the SDKs (literal templates, and doubled-slash variants for SDK 0.1.0). */
+  /** Routes to add for the SDKs: merged templates without `:id`. */
   routes: string[];
 }
 
@@ -127,20 +120,6 @@ export function planEndpointMerges(
       merges.push({ method, endpoint: join(x), to: join(to), reason: 'specific' });
       if (literal(to)) routes.add(join(to));
     }
-  }
-  // SDK 0.1.0: `/a//b` arrived as `/a/:id/b`; an exact route with the slash doubled
-  // sends the right template. Only where a known longer row fits with one `:id` dropped.
-  for (const [g, list] of groups) {
-    const [method, len] = g.split(' ');
-    const longer = groups.get(`${method} ${Number(len) + 1}`) ?? [];
-    for (const r of longer)
-      for (let p = 0; p < r.length - 1; p++) {
-        if (r[p] !== ID_PLACEHOLDER) continue;
-        const dropped = [...r.slice(0, p), ...r.slice(p + 1)];
-        for (const s of list)
-          if (literal(s) && refines(dropped, s, allowed))
-            routes.add(join([...s.slice(0, p), '', ...s.slice(p)]));
-      }
   }
   return { merges, routes: [...routes].sort() };
 }
