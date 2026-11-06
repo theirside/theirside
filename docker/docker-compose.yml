@@ -1,5 +1,5 @@
 # Self-hosted collector + Postgres, from the released image (ghcr.io/theirside/collector):
-#   THEIRSIDE_VERSION=0.2.3 docker compose -f docker/docker-compose.yml up -d
+#   THEIRSIDE_VERSION=0.2.4 docker compose -f docker/docker-compose.yml up -d
 # A release version is pulled, never built: if the pull fails, or with --build, it stops
 # with an error. THEIRSIDE_VERSION=local (the default; demo, dev, CI) builds the collector
 # from this checkout as ghcr.io/theirside/collector:local, a tag that is never published.
