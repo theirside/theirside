@@ -1,5 +1,7 @@
 import {
   OUTCOMES,
+  addStatus,
+  emptyStatusCounts,
   bucketIndex,
   collapseSlashes,
   emptyHistogram,
@@ -115,6 +117,7 @@ export function prepareBatch(
         ok: 0,
         outcomes: emptyOutcomes(),
         status429: 0,
+        statusCounts: emptyStatusCounts(),
         latencyHistogram: emptyHistogram(),
         latencySumMs: 0,
       };
@@ -125,6 +128,7 @@ export function prepareBatch(
     d.outcomes[e.outcome] += w;
     if (e.outcome === 'ok') d.ok += w;
     if (e.status === 429) d.status429 += w;
+    addStatus(d.statusCounts!, e.status, w);
     d.latencyHistogram[bucketIndex(e.durationMs)]! += w;
     d.latencySumMs += e.durationMs * w;
     calls += w;

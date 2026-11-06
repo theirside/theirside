@@ -2,8 +2,10 @@ import {
   LATENCY_BUCKET_COUNT,
   OUTCOMES,
   emptyHistogram,
+  STATUS_COUNT_KEYS,
   type Outcome,
   type RollupRow,
+  type StatusCounts,
 } from '@theirside/shared';
 
 /** Outcome → rollups_1m column (they share names). */
@@ -15,11 +17,17 @@ export const HIST_COLUMNS: readonly string[] = Array.from(
 );
 
 /** Additive integer counter columns of rollups_1m, in a fixed order. */
+/** StatusCounts key → rollups_1m column (migration 016). */
+export const STATUS_COLUMNS: readonly [keyof StatusCounts, string][] = STATUS_COUNT_KEYS.map(
+  (k) => [k, k === 's3xx' ? 'status_3xx' : `status_${k.slice(1)}`],
+);
+
 export const COUNTER_COLUMNS: readonly string[] = [
   'total',
   ...OUTCOME_COLUMNS,
   'status_429',
   ...HIST_COLUMNS,
+  ...STATUS_COLUMNS.map(([, c]) => c),
 ];
 
 export const KEY_COLUMNS = ['environment', 'provider', 'endpoint', 'method'] as const;
@@ -46,6 +54,9 @@ export function rowToRollup(r: Row): RollupRow {
     ok: num(r.ok),
     outcomes,
     status429: num(r.status_429),
+    statusCounts: Object.fromEntries(
+      STATUS_COLUMNS.map(([k, c]) => [k, num(r[c])]),
+    ) as unknown as StatusCounts,
     latencyHistogram: hist,
     latencySumMs: num(r.latency_sum_ms),
   };

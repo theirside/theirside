@@ -13,6 +13,7 @@ import {
   windowStats,
   type BaselineView,
   type HealthStatus,
+  type IncidentKind,
 } from '../scoring/evaluate.js';
 import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 import { evaluateKeys } from '../incidents/job.js';
@@ -38,6 +39,8 @@ export interface EndpointHealth {
   learning: boolean;
   outcomes: Record<Outcome, number>;
   inIncident: boolean;
+  /** The open incident's kind (errors, auth, not_found…), null when none. */
+  incidentKind: IncidentKind | null;
   /** Start of the latest minute with calls (within the range). */
   lastCallAt: string;
   /** Totals over the whole range, for idle rows. */
@@ -138,8 +141,8 @@ export async function computeHealth(
       (!opts.environment || i.environment === opts.environment) &&
       (!opts.provider || i.provider === opts.provider),
   );
-  const inIncident = (e: RollupKey) =>
-    open.some(
+  const incidentOf = (e: RollupKey) =>
+    open.find(
       (i) =>
         i.environment === e.environment &&
         i.provider === e.provider &&
@@ -148,6 +151,7 @@ export async function computeHealth(
           (x) => !x.recoveredAt && x.endpoint === e.endpoint && x.method === e.method,
         ),
     );
+  const inIncident = (e: RollupKey) => incidentOf(e) !== undefined;
 
   const configured = (await storage.config.listProviders(tenant)).filter(
     (p) => !opts.provider || p.name === opts.provider,
@@ -182,6 +186,7 @@ export async function computeHealth(
         learning: e.baseline.learning,
         outcomes: s.outcomes,
         inIncident: incident,
+        incidentKind: incidentOf(e)?.kind ?? null,
         lastCallAt: r.lastMinute,
         rangeTotals,
       };
@@ -205,6 +210,7 @@ export async function computeHealth(
         learning: b?.learning ?? true,
         outcomes: windowStats([]).outcomes,
         inIncident: inIncident(r),
+        incidentKind: incidentOf(r)?.kind ?? null,
         lastCallAt: r.lastMinute,
         rangeTotals,
       };

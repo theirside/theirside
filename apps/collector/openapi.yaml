@@ -166,7 +166,13 @@ components:
         environment: { type: string }
         provider: { type: string }
         scope: { type: string, enum: [endpoint, provider] }
-        kind: { type: string, enum: [errors, latency] }
+        kind:
+          type: string
+          enum: [errors, latency, auth, not_found, validation, rate_limited, behaviour]
+          description: 'errors: 5xx/network; auth: 401/403; not_found: 404; validation: 400/409/422; rate_limited: 429; behaviour: other change in the status mix'
+        deployHint:
+          type: [string, 'null']
+          description: A restart or deploy of the calling services just before the start, or that there was none
         status: { type: string, enum: [open, resolved] }
         openedAt: { type: string, format: date-time }
         resolvedAt: { type: [string, 'null'], format: date-time }

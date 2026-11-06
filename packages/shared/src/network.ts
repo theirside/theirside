@@ -1,4 +1,4 @@
-import type { Outcome } from './outcomes.js';
+import type { Outcome, StatusCounts } from './outcomes.js';
 import { OUTCOMES } from './outcomes.js';
 
 /**
@@ -18,6 +18,8 @@ export interface RollupRow {
   ok: number;
   outcomes: Record<Outcome, number>;
   status429: number;
+  /** 3xx and the common 4xx one by one (collector 0.3.0+; missing: all 0). */
+  statusCounts?: StatusCounts;
   latencyHistogram: number[];
   latencySumMs: number;
 }

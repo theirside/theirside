@@ -1,6 +1,6 @@
 import { api, type Incident as IncidentData } from '../api';
 import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
-import { ago, ms, pct, when } from '../format';
+import { ago, ms, pct, when, KIND_LABEL } from '../format';
 import { href } from '../router';
 
 export function Incidents() {
@@ -86,7 +86,10 @@ export function Incident({ id }: { id: string }) {
             <span className={`tag ${inc.status === 'open' ? 'red' : ''}`}>{inc.status}</span>
             <div>
               {inc.scope === 'provider' ? 'Provider-wide' : 'Single endpoint'},{' '}
-              {inc.kind === 'latency' ? 'latency' : 'errors'}
+              {KIND_LABEL[inc.kind] ?? inc.kind}
+              {inc.windowMinutes && inc.windowMinutes > 5
+                ? ` (low volume, judged over ${inc.windowMinutes} min)`
+                : ''}
             </div>
             <div>opened {when(inc.openedAt)}</div>
             {inc.resolvedAt && <div>resolved {when(inc.resolvedAt)}</div>}

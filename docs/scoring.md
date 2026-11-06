@@ -29,8 +29,9 @@ Per endpoint, from the last **7 days** of rollups, **excluding the last 15 minut
 
 A window is **bad** if, with at least **20 calls** in it, either:
 
-- **errors**: provider errors ≥ **3**, error rate ≥ **max(5 × baseline, baseline + 5 pp)**, and a one-sided binomial test of the errors against the baseline rate gives **p < 0.001** (the null rate is floored at 0.1% so a 0% baseline doesn't make every error "significant"); or
-- **latency**: p95 ≥ **3 × baseline p95** and p95 ≥ **baseline p95 + 1000 ms**.
+- **errors**: provider errors ≥ **3**, error rate ≥ **max(baseline + 5 pp, min(5 × baseline, halfway from the baseline to 100%))** (for the usual small baselines: max(5 × baseline, baseline + 5 pp); the halfway cap keeps it reachable for groups that are normally frequent), and a one-sided binomial test of the errors against the baseline rate gives **p < 0.001** (the null rate is floored at 0.1% so a 0% baseline doesn't make every error "significant"); or
+- **latency**: p95 ≥ **3 × baseline p95** and p95 ≥ **baseline p95 + 1000 ms**; or
+- **behaviour change** (collector 0.3.0): a status group is far above its own normal share, with the same safeguards (see below).
 
 Then, per provider (one open incident per provider at a time):
 
@@ -38,6 +39,26 @@ Then, per provider (one open incident per provider at a time):
 - **Escalate** (alert) when the combined error rate of the incident's active endpoints is ≥ 2 × the last alerted rate for 3 consecutive windows (latency incidents: p95 ≥ 2 × the last alerted p95), or when another endpoint joins. Requiring 3 windows stops a window that is still filling up after the open from escalating.
 - **Resolve** an endpoint after 10 consecutive healthy (not bad) windows; minutes with no traffic count as healthy. The incident resolves when all its endpoints have. Because windows are 5 minutes long, this is typically ~14 minutes after the failure stops.
 - **Cooldown**: if every failing endpoint recovered from an earlier incident less than 30 minutes ago, the new incident is recorded but **muted** (no open/escalation/resolve alerts). This stops flapping endpoints from paging repeatedly.
+
+### Behaviour change: any status, against its own normal
+
+A provider can answer 401, 404 or 422 where it used to answer 200, with nothing changed on your side. Detection doesn't depend on who is to blame: each endpoint's calls are split into groups, and each group is compared with that endpoint's own normal share, learned over the same 7 days (incident minutes excluded) and stored on the baseline (`status_mix`; rollups count 3xx, 400, 401, 403, 404, 409 and 422 one by one, migration 016):
+
+| group | statuses | incident kind | what the alert says |
+|---|---|---|---|
+| outage | 5xx, timeouts, resets, refused, DNS, TLS | `errors` | failing; outcomes breakdown (as before) |
+| auth | 401, 403 | `auth` | "returns 401 for 62% of calls (normally 0%); credentials may have expired or the provider changed access rules" |
+| not found | 404 | `not_found` | "…; the provider may have changed or removed this endpoint" |
+| validation | 400, 409, 422 | `validation` | "…; the provider may have changed its contract" |
+| rate limited | 429 | `rate_limited` | "…; the provider is limiting the rate of these calls" |
+| other 4xx, or all unsuccessful calls | | `behaviour` | "62% of calls are not successful (normally 3%): the endpoint answers differently than usual" |
+
+A group breaches with the same rule as errors: at least 3 calls in it, its share ≥ max(normal + 5 pp, min(5 × normal, halfway to 100%)), and a binomial test p < 0.001 (null rate floored at 0.1%). An endpoint where 30% 404 is normal stays quiet at 30% and alerts from about 65%. When several groups breach, the kind follows this order: `errors`, `auth`, `not_found`, `validation`, `rate_limited`, `behaviour`, `latency`; an incident takes a stronger kind if one appears later. 4xx groups are judged only once the endpoint's normal is learned (24 h and 500 calls), so a new endpoint's usual 4xx don't alert; its 5xx do, as before. Low-traffic windows, 3 bad minutes in a row, per-provider overrides, cooldown, escalation (the incident's own rate doubling) and resolution work as for errors.
+
+Alerts and summaries also say:
+
+- **Side signals**: call volume ≥ 3× normal ("Call volume 8.8/min, 6× normal (often a retry loop in the caller).") and a median ≤ 30% of the normal median ("Responses are fast (median 113 ms, normally 998 ms): calls fail before doing work."). Only against a learned normal.
+- **Deploy hint**, decided once at the open: from the services that called these endpoints (`service_templates`) and their processes (`sdk_processes`, SDK 0.2.0+), either "Your user-api was restarted or deployed at 13:58 UTC, 4 min before this started: check your recent changes." (a long-running process started in the 15 minutes before or 2 after; for serverless services only a new SDK version counts, since they start processes all the time) or "No deploy or restart of your services calling this (user-api) around this time: likely on the provider's side." Nothing when no calling service reports processes.
 
 **Low traffic.** An endpoint with fewer than 20 calls in 5 minutes (under 4 calls/min) would never have a bad window. For it the window widens to the first of **15, 30 or 60 minutes** that holds 20 calls (else 60); everything else is the same: at least 3 provider errors, the threshold, the binomial test, 3 bad minutes in a row. So a quiet endpoint that starts failing still opens an incident, about as long after the failure starts as its window needs to fill (at 1 call/min, failing every call: ~25–30 min), while one or two failed calls never do. Per-provider overrides apply (a provider with a lower minimum keeps the 5-minute window more often). Such incidents are stored with their window (`incidents.window_minutes`), alerts say so (`failing (5 of 30 calls, low volume, last 30 min)`, and in the summary `… calls in the last 30 min (low volume: too few calls in 5 min, so judged over 30)`), and they resolve once the long window holds no bad minutes for 10 minutes, so up to an hour after the failure stops. While the long window is still filling after the open, a rising rate isn't reported as "getting worse".
 
@@ -84,7 +105,7 @@ Computed over the same 5-minute window, for the dashboard, health API and status
 
 | penalty | weight | full penalty when |
 |---|---|---|
-| provider errors | 60 | error rate reaches the incident threshold: `(rate − baseline) / (threshold − baseline)` |
+| failures | 60 | the worst group (provider errors; once the normal is learned also 401/403, 404, 400/409/422, 429, other 4xx and all unsuccessful calls) reaches its incident threshold: `(share − normal) / (threshold − normal)`. An endpoint answering 401 to every call scores like one answering 503 |
 | latency | 25 | p95 is 3 × baseline **and** +1000 ms: `clamp((p95/baseline − 1.5) / 1.5) × clamp((p95 − baseline) / 1000 ms)` |
 | 4xx | 10 | 4xx rate is 20 pp above its baseline |
 | 429 | 5 | 429 rate is 10 pp above its baseline |

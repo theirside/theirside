@@ -119,9 +119,17 @@ describe('evaluate (incident rule)', () => {
       null,
     ],
     [
-      '4xx and aborts never count',
+      // since 0.3.0 any status counts against its own normal: 50% 4xx where 0% is normal
+      'a 4xx surge against a 0% normal is a behaviour change',
       counts({ ok: 50, http_4xx: 50, aborted: 100 }),
       base(),
+      true,
+      null,
+    ],
+    [
+      "aborts never count, and a learning endpoint's 4xx aren't judged yet",
+      counts({ ok: 50, http_4xx: 50, aborted: 100 }),
+      base({ learning: true }),
       false,
       null,
     ],
@@ -159,7 +167,9 @@ describe('evaluate (incident rule)', () => {
     [0.01, 0.06],
     [0.0125, 0.0625],
     [0.03, 0.15],
-    [0.2, 1],
+    // a normally frequent group: halfway from its normal to 100%
+    [0.2, 0.6],
+    [0.3, 0.65],
   ])('threshold for baseline %s is %s', (b, t) => {
     expect(errorThreshold(b, T)).toBeCloseTo(t);
   });
@@ -179,8 +189,16 @@ describe('scoreWindow', () => {
       75,
       'amber',
     ],
-    ['4xx surge', counts({ ok: 70, http_4xx: 30 }), base(), 90, 'green'],
-    ['429 surge', counts({ ok: 80, http_4xx: 20, s429: 20 }), base(), 95, 'green'],
+    // any failure group far above its normal counts like provider errors (0.3.0)
+    ['4xx surge', counts({ ok: 70, http_4xx: 30 }), base(), 30, 'red'],
+    ['429 surge', counts({ ok: 80, http_4xx: 20, s429: 20 }), base(), 35, 'red'],
+    [
+      '4xx surge while learning',
+      counts({ ok: 70, http_4xx: 30 }),
+      base({ learning: true }),
+      90,
+      'green',
+    ],
     ['errors and latency', counts({ http_5xx: 100, latencyMs: 9000 }), base(), 15, 'red'],
     ['one failure on a quiet endpoint', counts({ ok: 1, http_5xx: 1 }), base(), 94, 'green'],
   ])('%s -> %i %s', (_n, window, b, score, status) => {

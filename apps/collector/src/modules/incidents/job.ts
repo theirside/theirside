@@ -17,13 +17,24 @@ import {
   LOW_TRAFFIC_WINDOWS,
   defaultBaseline,
   evaluate,
+  failureCount,
+  failureRate,
+  normalRate,
   windowStats,
   type BaselineView,
   type Evaluation,
 } from '../scoring/evaluate.js';
 import { resolveThresholds, thresholdsFor, type Thresholds } from '../scoring/thresholds.js';
 import { decide, type AlertEvent, type Decision, type EndpointView } from './engine.js';
-import { buildSummary, minutesBetween, othersStatus, pct } from './summary.js';
+import {
+  buildSummary,
+  hhmm,
+  minutesBetween,
+  othersStatus,
+  pct,
+  sideSignals,
+  statusCodes,
+} from './summary.js';
 
 const MIN = 60_000;
 
@@ -115,22 +126,30 @@ function alertTitle(event: AlertEvent, inc: Incident, views: readonly EndpointVi
   const byKey = new Map(views.map((v) => [`${v.method} ${v.endpoint}`, v]));
   let calls = 0;
   let errors = 0;
+  let codes = '';
   for (const e of active) {
     const s = byKey.get(`${e.method} ${e.endpoint}`)?.evals[0]?.stats;
     if (s) {
       calls += s.calls;
-      errors += s.providerErrors;
+      errors += failureCount(s, inc.kind);
+      codes ||= statusCodes(s, inc.kind);
     }
   }
   const rate = calls > 0 ? errors / calls : 0;
   // low volume: counts say more than a percentage of a few calls
   const low = inc.windowMinutes > 5;
+  const how =
+    inc.kind === 'errors'
+      ? 'failing'
+      : inc.kind === 'behaviour'
+        ? 'answering differently'
+        : `answering ${codes || statusCodes(emptyStats, inc.kind)}`;
   const verb =
     inc.kind === 'latency'
       ? `slow${low ? ` (low volume, last ${inc.windowMinutes} min)` : ''}`
       : low
-        ? `failing (${errors} of ${calls} calls, low volume, last ${inc.windowMinutes} min)`
-        : `failing (${pct(rate)})`;
+        ? `${how} (${errors} of ${calls} calls, low volume, last ${inc.windowMinutes} min)`
+        : `${how} (${pct(rate)})`;
   return `${inc.provider}: ${what} ${verb}${event === 'escalation' ? ', getting worse' : ''}`;
 }
 
@@ -156,11 +175,12 @@ export function buildPayload(
       .filter((e) => event === 'resolve' || !e.recoveredAt)
       .map((e) => {
         const v = byKey.get(`${e.method} ${e.endpoint}`);
+        const s = v?.evals[0]?.stats;
         return {
           method: e.method,
           endpoint: e.endpoint,
-          errorRate: v?.evals[0]?.stats.errorRate ?? null,
-          normalErrorRate: v?.baseline.providerErrorRate ?? null,
+          errorRate: s ? failureRate(s, inc.kind) : null,
+          normalErrorRate: v ? normalRate(v.baseline, inc.kind) : null,
           p95Ms: v?.evals[0]?.stats.p95 ?? null,
           normalP95Ms: v?.baseline.p95Ms ?? null,
         };
@@ -179,7 +199,78 @@ export function buildPayload(
         ? { email: provider.supportEmail, url: provider.supportUrl }
         : null,
     ...(escalation ? { escalation } : {}),
+    deployHint: inc.deployHint ?? null,
+    signals: [
+      ...new Set(
+        inc.endpoints
+          .filter((e) => !e.recoveredAt)
+          .flatMap((e) => {
+            const v = byKey.get(`${e.method} ${e.endpoint}`);
+            const s = v?.evals[0]?.stats;
+            return s ? sideSignals(s, v.baseline, v.evals[0]!.windowMinutes, inc.kind) : [];
+          }),
+      ),
+    ],
   };
+}
+
+const emptyStats = windowStats([]);
+
+const MIN_MS = 60_000;
+/** A restart this long before the start (or 2 minutes after) counts as "around this time". */
+export const DEPLOY_HINT_BEFORE_MIN = 15;
+
+/**
+ * Was there a deploy or restart of the services that call these endpoints
+ * just before the failure started? From `service_templates` (who calls them)
+ * and `sdk_processes` (SDK 0.2.0+: process start times and versions).
+ * Long-running services: a process started in the 15 minutes before (or 2
+ * after). Serverless ones start processes all the time, so only a new SDK
+ * version counts. Null when no calling service reports processes.
+ */
+export async function deployHint(
+  storage: Storage,
+  tenant: Tenant,
+  inc: Incident,
+): Promise<string | null> {
+  const from = inc.openedAt.getTime() - DEPLOY_HINT_BEFORE_MIN * MIN_MS;
+  const to = inc.openedAt.getTime() + 2 * MIN_MS;
+  const services = await storage.config.listServicesCalling(
+    tenant,
+    inc.environment,
+    inc.provider,
+    inc.endpoints.map((e) => ({ method: e.method, endpoint: e.endpoint })),
+    new Date(from - 7 * 24 * 60 * MIN_MS),
+  );
+  if (services.length === 0) return null;
+  const procs = (
+    await storage.config.listSdkProcesses(tenant, new Date(from - 24 * 60 * MIN_MS))
+  ).filter((p) => p.environment === inc.environment && services.includes(p.service));
+  if (procs.length === 0) return null;
+  const restarted = new Map<string, Date>();
+  for (const svc of services) {
+    const mine = procs.filter((p) => p.service === svc);
+    const inWindow = mine.filter(
+      (p) => p.startedAt.getTime() >= from && p.startedAt.getTime() <= to,
+    );
+    const before = mine.filter((p) => p.startedAt.getTime() < from);
+    const serverless = mine.some((p) => p.serverless);
+    const hit = inWindow.find(
+      (p) =>
+        !serverless || (before.length > 0 && before.every((b) => b.sdkVersion !== p.sdkVersion)),
+    );
+    if (hit) restarted.set(svc, hit.startedAt);
+  }
+  const reporting = [...new Set(procs.map((p) => p.service))];
+  if (restarted.size > 0) {
+    const [first] = [...restarted.entries()].sort((a, b) => a[1].getTime() - b[1].getTime());
+    const names = [...restarted.keys()];
+    const lead = Math.max(0, Math.round((inc.openedAt.getTime() - first![1].getTime()) / MIN_MS));
+    return `Your ${names.join(' and ')} ${names.length > 1 ? 'were' : 'was'} restarted or deployed at ${hhmm(first![1])}, ${lead} min before this started: check your recent changes.`;
+  }
+  if (reporting.some((svc) => procs.some((p) => p.service === svc && !p.serverless)))
+    return `No deploy or restart of your services calling this (${reporting.join(', ')}) around this time: likely on the provider's side.`;
+  return null;
 }
 
 export interface IncidentJobOptions {
@@ -294,6 +385,8 @@ export function incidentJob(
           const decision = decide({ ...tenant, environment, provider }, open ?? null, views, T, t);
           const inc = decision.incident;
           if (!inc) continue;
+          // who calls this, and did they just restart or deploy? (said once, at the open)
+          if (decision.created) inc.deployHint = await deployHint(storage, tenant, inc);
           // alerts off for this provider (infrastructure by default, or switched off in the
           // dashboard): the incident is tracked and shown, but muted like a cooldown one
           if (providers.get(provider)?.alertsEnabled === false) {

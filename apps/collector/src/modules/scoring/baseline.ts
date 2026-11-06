@@ -1,4 +1,9 @@
-import { OUTCOMES, histogramQuantile } from '@theirside/shared';
+import {
+  OUTCOMES,
+  STATUS_COUNT_KEYS,
+  emptyStatusCounts,
+  histogramQuantile,
+} from '@theirside/shared';
 import type { Baseline, RollupKey, Storage, Tenant } from '../../storage/types.js';
 import { windowStats, type RollupCounts } from './evaluate.js';
 import type { Thresholds } from './thresholds.js';
@@ -10,9 +15,13 @@ export const BASELINE_REFRESH_MS = 10 * MIN;
 function subtract(a: RollupCounts, b: RollupCounts): RollupCounts {
   const outcomes = { ...a.outcomes };
   for (const o of OUTCOMES) outcomes[o] = Math.max(0, (outcomes[o] ?? 0) - (b.outcomes[o] ?? 0));
+  const statusCounts = emptyStatusCounts();
+  for (const k of STATUS_COUNT_KEYS)
+    statusCounts[k] = Math.max(0, (a.statusCounts?.[k] ?? 0) - (b.statusCounts?.[k] ?? 0));
   return {
     total: Math.max(0, a.total - b.total),
     status429: Math.max(0, a.status429 - b.status429),
+    statusCounts,
     outcomes,
     latencyHistogram: a.latencyHistogram.map((v, i) =>
       Math.max(0, v - (b.latencyHistogram[i] ?? 0)),
@@ -42,6 +51,22 @@ export function baselineFrom(
     rate429: s.rate429,
     p50Ms: histogramQuantile(s.histogram, 0.5),
     p95Ms: histogramQuantile(s.histogram, 0.95),
+    // the normal status mix (behaviour-change detection) and call volume (side signals)
+    statusMix:
+      s.calls > 0
+        ? {
+            auth: s.groups.auth / s.calls,
+            not_found: s.groups.not_found / s.calls,
+            validation: s.groups.validation / s.calls,
+            client_other: s.groups.client_other / s.calls,
+            nonSuccess: s.nonSuccess / s.calls,
+          }
+        : {},
+    // over the span the counts cover (the last baselineGapMinutes aren't in them)
+    callsPerMin:
+      historyMinutes - t.baselineGapMinutes > 0
+        ? s.calls / (historyMinutes - t.baselineGapMinutes)
+        : null,
     sampleSize: s.calls,
     historyMinutes,
     learning,

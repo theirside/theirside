@@ -1,3 +1,4 @@
+import type { IncidentKind } from '../scoring/evaluate.js';
 import { createHmac } from 'node:crypto';
 import type { SmtpConfig } from '../../config.js';
 import type { AlertChannelRecord } from '../../storage/types.js';
@@ -13,12 +14,17 @@ export interface AlertPayload {
   provider: string;
   environment: string;
   status: 'open' | 'resolved' | 'test';
-  /** null for test alerts. */
-  kind?: 'errors' | 'latency' | null;
+  /**
+   * null for test alerts. errors (5xx/network), latency, auth (401/403),
+   * not_found (404), validation (400/409/422), rate_limited (429), behaviour.
+   */
+  kind?: IncidentKind | null;
   endpoints: {
     method: string;
     endpoint: string;
+    /** Share of calls failing the incident's way (5xx/network errors, 401/403, 404…). */
     errorRate: number | null;
+    /** The normal share of that. */
     normalErrorRate: number | null;
     p95Ms?: number | null;
     normalP95Ms?: number | null;
@@ -45,6 +51,10 @@ export interface AlertPayload {
     alertsEnabled: boolean;
   }[];
   escalation?: 'rate' | 'latency' | 'spread';
+  /** A restart or deploy of the calling services around the start, or that there was none. */
+  deployHint?: string | null;
+  /** Side signals: call volume far above normal, failures far faster than normal responses. */
+  signals?: string[];
 }
 
 /** Channel adapters plug in here (ee/ adds paging integrations the same way). */

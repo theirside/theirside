@@ -29,3 +29,24 @@ export function when(iso: string | null): string {
   const d = new Date(iso);
   return `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC`;
 }
+
+/** Incident kinds as people say them (collector: scoring/evaluate.ts). */
+export const KIND_LABEL: Record<string, string> = {
+  errors: 'outage',
+  latency: 'slowness',
+  auth: 'auth errors',
+  not_found: 'not found',
+  validation: 'validation errors',
+  rate_limited: 'rate limited',
+  behaviour: 'behaviour change',
+};
+
+/** Failure groups of the status-mix chart. */
+export const GROUP_LABEL: Record<string, string> = {
+  outage: '5xx / network',
+  auth: '401/403',
+  not_found: '404',
+  validation: '400/409/422',
+  rate_limited: '429',
+  client_other: 'other 4xx',
+};

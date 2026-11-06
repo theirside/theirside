@@ -64,6 +64,8 @@ export interface EndpointHealth {
   normalP95Ms: number | null;
   learning: boolean;
   inIncident: boolean;
+  /** errors, latency, auth, not_found, validation, rate_limited, behaviour; null: none open. */
+  incidentKind: string | null;
   outcomes: Record<string, number>;
   /** Start of the latest minute with calls within the range. */
   lastCallAt: string;
@@ -101,7 +103,9 @@ export interface Incident {
   environment: string;
   provider: string;
   scope: 'endpoint' | 'provider';
-  kind: 'errors' | 'latency';
+  kind: 'errors' | 'latency' | 'auth' | 'not_found' | 'validation' | 'rate_limited' | 'behaviour';
+  windowMinutes?: number;
+  deployHint?: string | null;
   status: 'open' | 'resolved';
   openedAt: string;
   resolvedAt: string | null;
@@ -141,6 +145,7 @@ export interface SeriesPoint {
   callsPerMin: number;
   errorRate: number;
   outcomeRates: Record<string, number>;
+  statusMix: Record<string, number>;
   p50Ms: number | null;
   p95Ms: number | null;
 }
@@ -154,6 +159,7 @@ export interface Series {
     errorThreshold: number;
     p95Ms: number | null;
     learning: boolean;
+    statusMix: Record<string, number>;
   } | null;
 }
 

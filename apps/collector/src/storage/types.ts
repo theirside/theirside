@@ -1,3 +1,4 @@
+import type { FailureGroup, IncidentKind } from '../modules/scoring/evaluate.js';
 import type { Outcome, RollupRow } from '@theirside/shared';
 
 /**
@@ -125,6 +126,10 @@ export interface Baseline extends RollupKey {
   rate429: number;
   p50Ms: number | null;
   p95Ms: number | null;
+  /** Normal share per failure group and of all non-successful calls (migration 016). */
+  statusMix: Partial<Record<FailureGroup | 'nonSuccess', number>>;
+  /** Calls per minute over the history (null: no history). Derived, not stored. */
+  callsPerMin: number | null;
   sampleSize: number;
   historyMinutes: number;
   learning: boolean;
@@ -144,7 +149,8 @@ export interface Incident extends Tenant {
   environment: string;
   provider: string;
   scope: 'endpoint' | 'provider';
-  kind: 'errors' | 'latency';
+  /** errors (5xx/network), latency, auth (401/403), not_found, validation (400/409/422), rate_limited, behaviour. */
+  kind: IncidentKind;
   status: 'open' | 'resolved';
   openedAt: Date;
   resolvedAt: Date | null;
@@ -156,6 +162,8 @@ export interface Incident extends Tenant {
   alertsMuted: boolean;
   /** Window it was judged over: 5, or 15/30/60 for a low-traffic endpoint. */
   windowMinutes: number;
+  /** A restart/deploy of the calling services around the start, or its absence (null: unknown). */
+  deployHint?: string | null;
   peakErrorRate: number;
   peakP95Ms: number | null;
   baseline: Record<string, unknown>;
@@ -495,6 +503,14 @@ export interface ConfigStore {
   ): Promise<ServiceTemplate[]>;
   /** Drop templates last seen before `before` (all tenants). */
   pruneServiceTemplates(before: Date): Promise<number>;
+  /** Services that called any of these endpoints of a provider since `since`. */
+  listServicesCalling(
+    tenant: Tenant,
+    environment: string,
+    provider: string,
+    endpoints: { method: string; endpoint: string }[],
+    since: Date,
+  ): Promise<string[]>;
 
   // install metadata
   getMeta(key: string): Promise<string | null>;

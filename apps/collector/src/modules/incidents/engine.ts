@@ -1,6 +1,14 @@
 import type { Incident, IncidentEndpoint, Tenant } from '../../storage/types.js';
 import { newId } from '../../util/ids.js';
-import type { BaselineView, Evaluation } from '../scoring/evaluate.js';
+import {
+  failureCount,
+  failureRate,
+  kindOutranks,
+  normalRate,
+  type BaselineView,
+  type Evaluation,
+  type IncidentKind,
+} from '../scoring/evaluate.js';
 import type { Thresholds } from '../scoring/thresholds.js';
 
 const MIN = 60_000;
@@ -43,19 +51,32 @@ function isRecovered(v: EndpointView | undefined, t: Thresholds): boolean {
   return true;
 }
 
-/** Combined error rate and worst p95 across endpoints for the window ending at T − k. */
-function current(views: readonly EndpointView[], k = 0) {
+/**
+ * Combined failure rate (of the incident's kind: provider errors, 401/403, 404…)
+ * and worst p95 across endpoints for the window ending at T − k.
+ */
+function current(views: readonly EndpointView[], kind: IncidentKind, k = 0) {
   let calls = 0;
-  let errors = 0;
+  let failed = 0;
   let p95: number | null = null;
   for (const v of views) {
     const s = v.evals[k]?.stats;
     if (!s) continue;
     calls += s.calls;
-    errors += s.providerErrors;
+    failed += failureCount(s, kind);
     if (s.p95 !== null) p95 = Math.max(p95 ?? 0, s.p95);
   }
-  return { rate: calls > 0 ? errors / calls : 0, p95 };
+  return { rate: calls > 0 ? failed / calls : 0, p95 };
+}
+
+/** The highest-priority kind among the failing endpoints' latest windows. */
+function strongestKind(failing: readonly EndpointView[]): IncidentKind {
+  let kind: IncidentKind = 'latency';
+  for (const v of failing) {
+    const k = v.evals[0]?.kind;
+    if (k && kindOutranks(k, kind)) kind = k;
+  }
+  return kind;
 }
 
 /**
@@ -83,8 +104,8 @@ export function decide(
       v.lastRecoveredAt !== null &&
       T.getTime() - v.lastRecoveredAt.getTime() < t.cooldownMinutes * MIN;
     const muted = failing.every(inCooldown);
-    const now = current(failing);
-    const errorKind = failing.some((v) => v.evals[0]!.errorBreach);
+    const kind = strongestKind(failing);
+    const now = current(failing, kind);
     const windowMinutes = Math.max(
       t.windowMinutes,
       ...failing.map((v) => v.evals[0]!.windowMinutes),
@@ -96,7 +117,7 @@ export function decide(
       environment: tenant.environment,
       provider: tenant.provider,
       scope: failing.length > 1 ? 'provider' : 'endpoint',
-      kind: errorKind ? 'errors' : 'latency',
+      kind,
       status: 'open',
       openedAt: since,
       resolvedAt: null,
@@ -111,7 +132,7 @@ export function decide(
         failing.map((v) => [
           epKey(v),
           {
-            errorRate: v.baseline.providerErrorRate,
+            errorRate: normalRate(v.baseline, kind),
             p95Ms: v.baseline.p95Ms,
             learning: v.baseline.learning,
           },
@@ -124,7 +145,7 @@ export function decide(
         method: v.method,
         firstSeenAt: since,
         recoveredAt: null,
-        peakErrorRate: v.evals[0]!.stats.errorRate,
+        peakErrorRate: failureRate(v.evals[0]!.stats, kind),
       })),
     };
     return { incident, created: true, alerts: muted ? [] : ['open'] };
@@ -153,10 +174,10 @@ export function decide(
         method: v.method,
         firstSeenAt: new Date(T.getTime() - (t.openAfterMinutes - 1) * MIN),
         recoveredAt: null,
-        peakErrorRate: v.evals[0]!.stats.errorRate,
+        peakErrorRate: failureRate(v.evals[0]!.stats, inc.kind),
       });
       inc.baseline[epKey(v)] = {
-        errorRate: v.baseline.providerErrorRate,
+        errorRate: normalRate(v.baseline, inc.kind),
         p95Ms: v.baseline.p95Ms,
         learning: v.baseline.learning,
       };
@@ -176,12 +197,14 @@ export function decide(
       e.recoveredAt = T;
     } else {
       active.push(e);
-      const rate = v?.evals[0]?.stats.errorRate ?? 0;
-      e.peakErrorRate = Math.max(e.peakErrorRate, rate);
+      const s = v?.evals[0]?.stats;
+      e.peakErrorRate = Math.max(e.peakErrorRate, s ? failureRate(s, inc.kind) : 0);
     }
   }
   inc.scope = inc.endpoints.length > 1 ? 'provider' : 'endpoint';
-  if (failing.some((v) => v.evals[0]!.errorBreach)) inc.kind = 'errors';
+  // a stronger kind takes over (an auth incident that starts returning 5xx is an outage)
+  const stronger = strongestKind(failing);
+  if (failing.length > 0 && kindOutranks(stronger, inc.kind)) inc.kind = stronger;
   for (const v of failing)
     inc.windowMinutes = Math.max(inc.windowMinutes, v.evals[0]!.windowMinutes);
 
@@ -193,7 +216,7 @@ export function decide(
   }
 
   const activeViews = active.map((e) => byKey.get(epKey(e))).filter((v): v is EndpointView => !!v);
-  const now = current(activeViews);
+  const now = current(activeViews, inc.kind);
   inc.peakErrorRate = Math.max(inc.peakErrorRate, now.rate);
   if (now.p95 !== null) inc.peakP95Ms = Math.max(inc.peakP95Ms ?? 0, now.p95);
 
@@ -220,15 +243,15 @@ export function decide(
     } else if (filling) {
       // nothing
     } else if (
-      inc.kind === 'errors' &&
+      inc.kind !== 'latency' &&
       lastRate > 0 &&
-      sustained((k) => current(activeViews, k).rate >= t.escalationFactor * lastRate)
+      sustained((k) => current(activeViews, inc.kind, k).rate >= t.escalationFactor * lastRate)
     ) {
       escalation = 'rate';
     } else if (
       inc.kind === 'latency' &&
       lastP95 > 0 &&
-      sustained((k) => (current(activeViews, k).p95 ?? 0) >= t.escalationFactor * lastP95)
+      sustained((k) => (current(activeViews, inc.kind, k).p95 ?? 0) >= t.escalationFactor * lastP95)
     ) {
       escalation = 'latency';
     } else if (spread) {

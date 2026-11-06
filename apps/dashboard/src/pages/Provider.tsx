@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { api, type EndpointHealth, type Overview, type Range, type Series } from '../api';
 import { Chart, type ChartSeries } from '../components/Chart';
 import { Card, ErrorBox, Segmented, StatusDot, usePoll } from '../components/ui';
-import { ago, ms, num, pct } from '../format';
+import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
 
 const OUTCOME_COLORS: Record<string, string> = {
@@ -15,6 +15,16 @@ const OUTCOME_COLORS: Record<string, string> = {
   http_4xx: '#d98b06',
   other_error: '#7f8c8d',
 };
+
+const GROUP_COLORS: Record<string, string> = {
+  outage: '#d64545',
+  auth: '#8e44ad',
+  not_found: '#d98b06',
+  validation: '#16a085',
+  rate_limited: '#2c3e50',
+  client_other: '#7f8c8d',
+};
+const PALETTE = ['#3b82f6', '#9b59b6', '#e67e22'];
 
 function EndpointCharts({
   provider,
@@ -65,6 +75,33 @@ function EndpointCharts({
         dash: true,
       });
     }
+    // status mix: each failure group present, with its normal share dashed
+    const groups = [
+      ...new Set([
+        ...series.points.flatMap((p) => Object.keys(p.statusMix ?? {})),
+        ...Object.keys(b?.statusMix ?? {}).filter((g) => (b?.statusMix[g] ?? 0) > 0),
+      ]),
+    ];
+    const mix: ChartSeries[] = groups.flatMap((g, i) => {
+      const color = GROUP_COLORS[g] ?? PALETTE[i % PALETTE.length]!;
+      const line: ChartSeries = {
+        label: GROUP_LABEL[g] ?? g,
+        values: series.points.map((p) => (p.calls > 0 ? (p.statusMix?.[g] ?? 0) : null)),
+        color,
+      };
+      const normal = b?.statusMix?.[g];
+      return normal && normal > 0
+        ? [
+            line,
+            {
+              label: `normal ${GROUP_LABEL[g] ?? g}`,
+              values: times.map(() => normal),
+              color,
+              dash: true,
+            },
+          ]
+        : [line];
+    });
     const latency: ChartSeries[] = [
       { label: 'p50', values: series.points.map((p) => p.p50Ms), color: '#3b82f6' },
       { label: 'p95', values: series.points.map((p) => p.p95Ms), color: '#9b59b6' },
@@ -87,6 +124,7 @@ function EndpointCharts({
         },
       ],
       errors: errorSeries,
+      mix,
       latency,
     };
   }, [series]);
@@ -105,6 +143,14 @@ function EndpointCharts({
               {series?.baseline?.learning ? <span className="tag">learning</span> : null}
             </h3>
             <Chart times={charts.times} series={charts.errors} format={(v) => pct(v)} />
+          </div>
+          <div data-testid="status-mix">
+            <h3>Status mix (share of calls, dashed: normal)</h3>
+            {charts.mix.length > 0 ? (
+              <Chart times={charts.times} series={charts.mix} format={(v) => pct(v)} />
+            ) : (
+              <div className="empty">Every call succeeded in this range.</div>
+            )}
           </div>
           <div>
             <h3>Latency p50 / p95</h3>
@@ -262,6 +308,11 @@ function FragmentRow({
           <StatusDot status={e.status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
           {idle && <span className="tag">idle</span>}
           {e.learning && !idle && <span className="tag">learning</span>}
+          {e.incidentKind && (
+            <span className="tag red" data-testid="incident-kind">
+              {KIND_LABEL[e.incidentKind] ?? e.incidentKind}
+            </span>
+          )}
           {e.inIncident && idle && <span className="tag red">open incident</span>}
           {e.environment !== 'production' && <span className="tag">{e.environment}</span>}
           {idle && <span className="muted last-call"> last call {ago(e.lastCallAt)}</span>}

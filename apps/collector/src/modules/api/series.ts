@@ -1,7 +1,7 @@
 import { OUTCOMES, histogramQuantile, type Outcome } from '@theirside/shared';
 import type { Storage, Tenant } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
-import { windowStats } from '../scoring/evaluate.js';
+import { FAILURE_GROUPS, windowStats, type FailureGroup } from '../scoring/evaluate.js';
 import { errorThreshold } from '../scoring/evaluate.js';
 import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 
@@ -21,6 +21,8 @@ export interface SeriesPoint {
   errorRate: number;
   /** Share of calls per outcome (ok excluded). */
   outcomeRates: Partial<Record<Outcome, number>>;
+  /** Share of calls per failure group (outage, auth, not_found…), non-zero ones only. */
+  statusMix: Partial<Record<FailureGroup, number>>;
   p50Ms: number | null;
   p95Ms: number | null;
 }
@@ -37,6 +39,8 @@ export interface Series {
     errorThreshold: number;
     p95Ms: number | null;
     learning: boolean;
+    /** Normal share per failure group (the chart's normal band). */
+    statusMix: Partial<Record<FailureGroup, number>>;
   } | null;
 }
 
@@ -89,6 +93,12 @@ export async function computeSeries(
       callsPerMin: Math.round((s.calls / minutesCovered) * 10) / 10,
       errorRate: s.errorRate,
       outcomeRates,
+      statusMix:
+        s.calls > 0
+          ? Object.fromEntries(
+              FAILURE_GROUPS.filter((g) => s.groups[g] > 0).map((g) => [g, s.groups[g] / s.calls]),
+            )
+          : {},
       p50Ms: histogramQuantile(s.histogram, 0.5),
       p95Ms: histogramQuantile(s.histogram, 0.95),
     });
@@ -113,6 +123,13 @@ export async function computeSeries(
         errorThreshold: errorThreshold(b.providerErrorRate, t),
         p95Ms: b.p95Ms,
         learning: b.learning,
+        statusMix: {
+          outage: b.providerErrorRate,
+          rate_limited: b.rate429,
+          ...Object.fromEntries(
+            Object.entries(b.statusMix ?? {}).filter(([k]) => k !== 'nonSuccess'),
+          ),
+        },
       };
     }
   }

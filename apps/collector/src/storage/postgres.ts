@@ -1,6 +1,12 @@
 import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
-import { COUNTER_COLUMNS, KEY_COLUMNS, SUM_SELECT, rowToRollup } from './columns.js';
+import {
+  COUNTER_COLUMNS,
+  KEY_COLUMNS,
+  STATUS_COLUMNS,
+  SUM_SELECT,
+  rowToRollup,
+} from './columns.js';
 import type {
   ServiceTemplate,
   SdkProcessRecord,
@@ -263,6 +269,7 @@ class PgRollupStore implements RollupStore {
         ...Object.values(pickOutcomes(d)),
         d.status429,
         ...d.latencyHistogram,
+        ...STATUS_COLUMNS.map(([k]) => d.statusCounts?.[k] ?? 0),
         d.latencySumMs,
       ];
       values.forEach((v, i) => arrays[i]!.push(v));
@@ -442,6 +449,9 @@ function rowToBaseline(r: Row): Baseline {
     rate429: Number(r.rate_429),
     p50Ms: r.p50_ms === null ? null : Number(r.p50_ms),
     p95Ms: r.p95_ms === null ? null : Number(r.p95_ms),
+    statusMix: (r.status_mix as Baseline['statusMix'] | null) ?? {},
+    callsPerMin:
+      Number(r.history_minutes) > 0 ? Number(r.sample_size) / Number(r.history_minutes) : null,
     sampleSize: Number(r.sample_size),
     historyMinutes: Number(r.history_minutes),
     learning: Boolean(r.learning),
@@ -518,12 +528,14 @@ class PgIncidentStore implements IncidentStore {
     for (const b of baselines) {
       await this.db.query(
         `INSERT INTO baselines (org_id, project_id, environment, provider, endpoint, method, provider_error_rate,
-                                rate_4xx, rate_429, p50_ms, p95_ms, sample_size, history_minutes, learning, computed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                                rate_4xx, rate_429, p50_ms, p95_ms, sample_size, history_minutes, learning, computed_at,
+                                status_mix)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          ON CONFLICT (org_id, project_id, environment, provider, endpoint, method) DO UPDATE SET
            provider_error_rate = EXCLUDED.provider_error_rate, rate_4xx = EXCLUDED.rate_4xx,
            rate_429 = EXCLUDED.rate_429, p50_ms = EXCLUDED.p50_ms, p95_ms = EXCLUDED.p95_ms,
            sample_size = EXCLUDED.sample_size, history_minutes = EXCLUDED.history_minutes,
+           status_mix = EXCLUDED.status_mix,
            learning = EXCLUDED.learning, computed_at = EXCLUDED.computed_at`,
         [
           tenant.orgId,
@@ -541,6 +553,7 @@ class PgIncidentStore implements IncidentStore {
           b.historyMinutes,
           b.learning,
           b.computedAt,
+          JSON.stringify(b.statusMix ?? {}),
         ],
       );
     }
@@ -603,6 +616,7 @@ class PgIncidentStore implements IncidentStore {
       lastAlertedP95Ms: r.last_alerted_p95_ms === null ? null : Number(r.last_alerted_p95_ms),
       lastEvaluatedMinute: (r.last_evaluated_minute as Date | null) ?? null,
       windowMinutes: Number(r.window_minutes ?? 5),
+      deployHint: (r.deploy_hint as string | null) ?? null,
       alertsMuted: Boolean(r.alerts_muted),
       peakErrorRate: Number(r.peak_error_rate),
       peakP95Ms: r.peak_p95_ms === null ? null : Number(r.peak_p95_ms),
@@ -673,8 +687,8 @@ class PgIncidentStore implements IncidentStore {
       `INSERT INTO incidents (id, org_id, project_id, environment, provider, scope, kind, status, opened_at,
                               resolved_at, last_alerted_rate, last_alerted_p95_ms, last_evaluated_minute,
                               alerts_muted, peak_error_rate, peak_p95_ms, baseline, summary, sample_request_ids,
-                              window_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+                              window_minutes, deploy_hint)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         i.id,
         i.orgId,
@@ -696,6 +710,7 @@ class PgIncidentStore implements IncidentStore {
         i.summary,
         i.sampleRequestIds,
         i.windowMinutes ?? 5,
+        i.deployHint ?? null,
       ],
     );
     await this.writeEndpoints(i);
@@ -706,7 +721,7 @@ class PgIncidentStore implements IncidentStore {
       `UPDATE incidents SET scope = $3, kind = $4, status = $5, resolved_at = $6, last_alerted_rate = $7,
               last_alerted_p95_ms = $8, last_evaluated_minute = $9, alerts_muted = $10, peak_error_rate = $11,
               peak_p95_ms = $12, baseline = $13, summary = $14, sample_request_ids = $15,
-              window_minutes = $16, updated_at = now()
+              window_minutes = $16, deploy_hint = $17, updated_at = now()
         WHERE id = $1 AND org_id = $2`,
       [
         i.id,
@@ -725,6 +740,7 @@ class PgIncidentStore implements IncidentStore {
         i.summary,
         i.sampleRequestIds,
         i.windowMinutes ?? 5,
+        i.deployHint ?? null,
       ],
     );
     await this.writeEndpoints(i);
@@ -1439,6 +1455,32 @@ class PgConfigStore implements ConfigStore {
       [t.orgId, t.projectId, service, environment, since],
     );
     return rows as ServiceTemplate[];
+  }
+  async listServicesCalling(
+    t: Tenant,
+    environment: string,
+    provider: string,
+    endpoints: { method: string; endpoint: string }[],
+    since: Date,
+  ) {
+    if (endpoints.length === 0) return [];
+    const { rows } = await this.db.query(
+      `SELECT DISTINCT service FROM service_templates
+        WHERE org_id = $1 AND project_id = $2 AND environment = $3 AND provider = $4
+          AND (method, endpoint) IN (SELECT * FROM unnest($5::text[], $6::text[]))
+          AND last_seen_at >= $7
+        ORDER BY service`,
+      [
+        t.orgId,
+        t.projectId,
+        environment,
+        provider,
+        endpoints.map((e) => e.method),
+        endpoints.map((e) => e.endpoint),
+        since,
+      ],
+    );
+    return rows.map((r: Row) => r.service as string);
   }
   async pruneServiceTemplates(before: Date) {
     const { rowCount } = await this.db.query(

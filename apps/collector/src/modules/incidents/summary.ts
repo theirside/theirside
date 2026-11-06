@@ -1,5 +1,12 @@
 import { PROVIDER_ERROR_OUTCOMES, type Outcome } from '@theirside/shared';
 import type { Incident, ProviderRecord } from '../../storage/types.js';
+import {
+  failureRate,
+  normalRate,
+  type BaselineView,
+  type IncidentKind,
+  type WindowStats,
+} from '../scoring/evaluate.js';
 import type { EndpointView } from './engine.js';
 
 /** Formatting helpers shared by summaries, alerts and the dashboard. */
@@ -80,6 +87,81 @@ export function othersStatus(
   };
 }
 
+/**
+ * What each kind says, never assigning blame: the status seen, and what it
+ * usually means.
+ */
+const KIND_HINT: Partial<Record<IncidentKind, string>> = {
+  auth: 'credentials may have expired or the provider changed access rules',
+  not_found: 'the provider may have changed or removed this endpoint',
+  validation: 'the provider may have changed its contract',
+  rate_limited: 'the provider is limiting the rate of these calls',
+  behaviour: 'the endpoint answers differently than usual',
+};
+
+const KIND_CODES: Partial<
+  Record<IncidentKind, [keyof WindowStats['statusCounts'] | 's429', string][]>
+> = {
+  auth: [
+    ['s401', '401'],
+    ['s403', '403'],
+  ],
+  not_found: [['s404', '404']],
+  validation: [
+    ['s400', '400'],
+    ['s422', '422'],
+    ['s409', '409'],
+  ],
+  rate_limited: [['s429', '429']],
+};
+
+/** `401`, `401/403`: the statuses behind a 4xx incident, most frequent first. */
+export function statusCodes(s: WindowStats, kind: IncidentKind): string {
+  const codes = KIND_CODES[kind];
+  if (!codes) return '';
+  const count = (k: string) => (k === 's429' ? s.throttled : (s.statusCounts[k as 's401'] ?? 0));
+  const seen = codes.filter(([k]) => count(k) > 0).sort((a, b) => count(b[0]) - count(a[0]));
+  return (seen.length ? seen : codes.slice(0, 1)).map(([, c]) => c).join('/');
+}
+
+/** "returns 401 for 62% of calls" / "62% of calls fail" for one endpoint's window. */
+export function kindLine(s: WindowStats, b: BaselineView | null, kind: IncidentKind): string {
+  const rate = pct(failureRate(s, kind));
+  const normal = pct(b ? normalRate(b, kind) : 0);
+  if (kind === 'behaviour')
+    return `${rate} of calls are not successful (normally ${normal}): ${KIND_HINT.behaviour}`;
+  return `returns ${statusCodes(s, kind)} for ${rate} of calls (normally ${normal}); ${KIND_HINT[kind]}`;
+}
+
+/** Calls far above normal volume (a retry loop?) and failures far faster than normal responses. */
+export function sideSignals(
+  s: WindowStats,
+  b: BaselineView | null,
+  windowMinutes: number,
+  kind: IncidentKind,
+): string[] {
+  const out: string[] = [];
+  // only against a learned normal: a young baseline's volume and latency aren't "normal" yet
+  if (!b || b.learning || s.calls === 0) return out;
+  const perMin = s.calls / Math.max(1, windowMinutes);
+  if (b.callsPerMin && b.callsPerMin > 0 && perMin >= 3 * b.callsPerMin && perMin >= 1)
+    out.push(
+      `Call volume ${Math.round(perMin * 10) / 10}/min, ${Math.round(perMin / b.callsPerMin)}× normal (often a retry loop in the caller).`,
+    );
+  // the median: right after a change the window still holds slower calls from before it
+  if (
+    kind !== 'latency' &&
+    b.p50Ms !== null &&
+    b.p50Ms >= 100 &&
+    s.p50 !== null &&
+    s.p50 <= 0.3 * b.p50Ms
+  )
+    out.push(
+      `Responses are fast (median ${ms(s.p50)}, normally ${ms(b.p50Ms)}): calls fail before doing work.`,
+    );
+  return out;
+}
+
 export interface SummaryInput {
   incident: Incident;
   views: readonly EndpointView[];
@@ -109,14 +191,25 @@ export function buildSummary(input: SummaryInput): string {
     endpoints.length === 1
       ? `${endpoints[0]!.method} ${endpoints[0]!.endpoint}`
       : `${endpoints.length} endpoints`;
-  const verb = inc.kind === 'latency' ? 'slow' : 'failing';
+  const verb =
+    inc.kind === 'latency'
+      ? 'slow'
+      : inc.kind === 'errors'
+        ? 'failing'
+        : inc.kind === 'behaviour'
+          ? 'answering differently'
+          : `answering ${KIND_CODES[inc.kind]!.map(([, c]) => c).join('/')}`;
   if (inc.status === 'resolved' && inc.resolvedAt) {
     lines.push(
       `${name} — ${what} recovered at ${hhmm(inc.resolvedAt)} after ${minutesBetween(inc.openedAt, inc.resolvedAt)} min (${verb} since ${hhmm(inc.openedAt)})`,
     );
-    lines.push(
-      `Peak error rate ${pct(inc.peakErrorRate)}${inc.peakP95Ms ? `, peak p95 latency ${ms(inc.peakP95Ms)}` : ''}.`,
-    );
+    const peak =
+      inc.kind === 'errors' || inc.kind === 'latency'
+        ? `Peak error rate ${pct(inc.peakErrorRate)}`
+        : inc.kind === 'behaviour'
+          ? `Peak share of unsuccessful calls ${pct(inc.peakErrorRate)}`
+          : `Peak share of ${KIND_CODES[inc.kind]!.map(([, c]) => c).join('/')} ${pct(inc.peakErrorRate)}`;
+    lines.push(`${peak}${inc.peakP95Ms ? `, peak p95 latency ${ms(inc.peakP95Ms)}` : ''}.`);
   } else {
     lines.push(
       `${name} — ${what} ${verb} since ${hhmm(inc.openedAt)} (${minutesBetween(inc.openedAt, now)} min)`,
@@ -134,13 +227,21 @@ export function buildSummary(input: SummaryInput): string {
         (v?.evals[0]?.windowMinutes ?? 5) > 5
           ? `${s.calls} calls in the last ${v!.evals[0]!.windowMinutes} min (low volume: too few calls in 5 min, so judged over ${v!.evals[0]!.windowMinutes})`
           : `${s.calls} calls in window`;
-      lines.push(
-        `${prefix}Error rate ${pct(s.errorRate)} (normal ${pct(b?.providerErrorRate ?? 0)}${b?.learning ? ', still learning' : ''}), ${window}. Outcomes: ${outcomeBreakdown(s.outcomes)}.`,
-      );
+      if (inc.kind === 'errors' || inc.kind === 'latency') {
+        lines.push(
+          `${prefix}Error rate ${pct(s.errorRate)} (normal ${pct(b?.providerErrorRate ?? 0)}${b?.learning ? ', still learning' : ''}), ${window}. Outcomes: ${outcomeBreakdown(s.outcomes)}.`,
+        );
+      } else {
+        const line = kindLine(s, b, inc.kind);
+        lines.push(`${prefix}${line[0]!.toUpperCase()}${line.slice(1)}; ${window}.`);
+      }
       lines.push(`${prefix}p95 latency ${ms(s.p95)} (normal ${ms(b?.p95Ms)}).`);
+      for (const sig of sideSignals(s, b, v?.evals[0]?.windowMinutes ?? 5, inc.kind))
+        lines.push(`${prefix}${sig}`);
     }
     lines[lines.length - 1] += ` ${othersStatus(name, inc, views).text}`;
   }
+  if (inc.deployHint) lines.push(inc.deployHint);
   if (sampleRequestIds.length > 0)
     lines.push(`Sample provider request IDs: ${sampleRequestIds.join(', ')}`);
   const support = [provider?.supportEmail, provider?.supportUrl].filter(Boolean).join(', ');

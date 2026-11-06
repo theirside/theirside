@@ -62,6 +62,7 @@ export function incidentView(i: Incident) {
     peakP95Ms: i.peakP95Ms,
     alertsMuted: i.alertsMuted,
     windowMinutes: i.windowMinutes,
+    deployHint: i.deployHint ?? null,
     endpoints: i.endpoints.map((e) => ({
       method: e.method,
       endpoint: e.endpoint,

@@ -1,8 +1,11 @@
 import {
   LATENCY_BUCKET_COUNT,
   OUTCOMES,
+  STATUS_COUNT_KEYS,
+  addStatus,
   bucketIndex,
   emptyHistogram,
+  emptyStatusCounts,
   type Outcome,
   type RollupRow,
 } from '@theirside/shared';
@@ -35,6 +38,8 @@ export interface MinuteTraffic {
   errors?: number;
   errorOutcome?: Outcome;
   latencyMs?: number;
+  /** Calls answered with these statuses (4xx), on top of `errors`: `{ 401: 30 }`. */
+  statuses?: Record<number, number>;
 }
 
 export interface SimAlert {
@@ -88,7 +93,17 @@ export class Sim {
     errors = Math.min(errors, m.calls);
     const outcomes = {} as Record<Outcome, number>;
     for (const o of OUTCOMES) outcomes[o] = 0;
-    outcomes.ok = m.calls - errors;
+    const statusCounts = emptyStatusCounts();
+    let s4xx = 0;
+    let s429 = 0;
+    for (const [code, n] of Object.entries(m.statuses ?? {})) {
+      const c = Math.min(n, m.calls - errors - s4xx);
+      s4xx += c;
+      if (Number(code) === 429) s429 += c;
+      addStatus(statusCounts, Number(code), c);
+    }
+    outcomes.ok = m.calls - errors - s4xx;
+    outcomes.http_4xx = s4xx;
     outcomes[m.errorOutcome ?? 'http_5xx'] += errors;
     const h = emptyHistogram();
     h[bucketIndex(m.latencyMs ?? 120)] = m.calls;
@@ -101,7 +116,8 @@ export class Sim {
       total: m.calls,
       ok: outcomes.ok,
       outcomes,
-      status429: 0,
+      status429: s429,
+      statusCounts,
       latencyHistogram: h,
       latencySumMs: (m.latencyMs ?? 120) * m.calls,
     });
@@ -128,6 +144,7 @@ export class Sim {
       const c: RollupCounts = {
         total: 0,
         status429: 0,
+        statusCounts: emptyStatusCounts(),
         outcomes: {} as Record<Outcome, number>,
         latencyHistogram: emptyHistogram(),
       };
@@ -138,6 +155,8 @@ export class Sim {
         if (windows.some((w) => minute >= w.from && minute <= w.to)) continue;
         first = Math.min(first, minute);
         c.total += r.total;
+        c.status429 += r.status429;
+        for (const k of STATUS_COUNT_KEYS) c.statusCounts![k] += r.statusCounts?.[k] ?? 0;
         for (const o of OUTCOMES) c.outcomes[o] += r.outcomes[o];
         for (let i = 0; i < LATENCY_BUCKET_COUNT; i++)
           c.latencyHistogram[i]! += r.latencyHistogram[i]!;
