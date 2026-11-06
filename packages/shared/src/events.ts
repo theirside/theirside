@@ -45,5 +45,23 @@ export interface IngestBatch {
    * collector weights `ok` events by 1 / sampleRate. Optional, defaults to 1.
    */
   sampleRate?: number;
+  /**
+   * This process (optional, since SDK 0.2.0): a random id made at startup and
+   * the start time. Lets the collector count a service's processes and see
+   * restarts; carries nothing about the host.
+   */
+  instance?: { id: string; startedAt: number };
+  /** Where the SDK runs (optional, since SDK 0.2.0). */
+  runtime?: {
+    /** `node`, or `fetch` for the fetch-only build (Workers, Deno, Bun). */
+    name: string;
+    version?: string;
+    /** Detected platform (`aws-lambda`, `cloudflare-workers`…), if any. */
+    platform?: string | null;
+    serverless?: boolean;
+  };
+  /** The SDK's own counters (optional, since SDK 0.2.0). */
+  stats?: { queued: number; sent: number; failedFlushes: number };
+  /** No events: a heartbeat from an idle process (empty `events`). */
   events: CallEvent[];
 }

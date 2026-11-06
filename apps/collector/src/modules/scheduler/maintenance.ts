@@ -29,6 +29,9 @@ export function partitionJob(
   };
 }
 
+/** SDK process rows are kept this long after a process was last seen. */
+export const SDK_PROCESS_DAYS = 7;
+
 /**
  * Delete rollups older than THEIRSIDE_ROLLUP_RETENTION_DAYS, capped per org by the
  * `retentionDays` entitlement (cloud plans) when that is lower.
@@ -53,6 +56,8 @@ export function rollupRetentionJob(
           await storage.rollups.deleteBefore(cutoff, { orgId: org.id, projectId: p.id });
         }
       }
+      // SDK process rows (restarts, serverless cold starts) are only needed for a week
+      await storage.config.pruneSdkProcesses(new Date(today - SDK_PROCESS_DAYS * DAY_MS));
     },
   };
 }

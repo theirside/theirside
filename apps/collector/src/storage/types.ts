@@ -326,9 +326,30 @@ export interface SdkInstanceRecord extends Tenant {
   sdkName: string;
   sdkVersion: string;
   firstSeenAt: Date;
+  /** Any batch, heartbeats included. */
   lastSeenAt: Date;
+  /** Last batch that carried calls (null: only heartbeats so far). */
+  lastEventAt: Date | null;
   droppedEvents: number;
   lastFlushError: string | null;
+  serverless: boolean;
+  platform: string | null;
+}
+
+/** One SDK process (SDK 0.2.0+: a random instance id and its start time). */
+export interface SdkProcessRecord extends Tenant {
+  service: string;
+  environment: string;
+  instanceId: string;
+  startedAt: Date;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  lastEventAt: Date | null;
+  sdkVersion: string;
+  runtime: string | null;
+  runtimeVersion: string | null;
+  platform: string | null;
+  serverless: boolean;
 }
 
 export interface SdkHeartbeat {
@@ -338,6 +359,10 @@ export interface SdkHeartbeat {
   sdkVersion: string;
   dropped: number;
   lastFlushError: string | null;
+  /** The batch carried calls (false: a heartbeat). */
+  hasEvents?: boolean;
+  instance?: { id: string; startedAt: Date };
+  runtime?: { name: string; version: string | null; platform: string | null; serverless: boolean };
 }
 
 export interface MembershipRecord {
@@ -439,6 +464,10 @@ export interface ConfigStore {
   // sdk health
   recordSdkHeartbeat(tenant: Tenant, hb: SdkHeartbeat, at: Date): Promise<void>;
   listSdkInstances(tenant: Tenant): Promise<SdkInstanceRecord[]>;
+  /** Processes seen since `since`, newest first. */
+  listSdkProcesses(tenant: Tenant, since: Date): Promise<SdkProcessRecord[]>;
+  /** Drop process rows last seen before `before` (all tenants). Returns how many. */
+  pruneSdkProcesses(before: Date): Promise<number>;
 
   // install metadata
   getMeta(key: string): Promise<string | null>;

@@ -44,6 +44,28 @@ export const ingestBatchSchema = z.object({
   dropped: z.number().int().nonnegative().default(0),
   lastFlushError: z.string().max(200).optional(),
   sampleRate: z.number().gt(0).max(1).optional(),
+  instance: z
+    .object({
+      id: z.string().min(1).max(64),
+      startedAt: z.number().int().nonnegative(),
+    })
+    .optional(),
+  runtime: z
+    .object({
+      name: z.string().min(1).max(16),
+      version: z.string().max(32).optional(),
+      platform: z.string().max(32).nullable().optional(),
+      serverless: z.boolean().optional(),
+    })
+    .optional(),
+  stats: z
+    .object({
+      queued: z.number().int().nonnegative(),
+      sent: z.number().int().nonnegative(),
+      failedFlushes: z.number().int().nonnegative(),
+    })
+    .optional(),
+  // empty: a heartbeat
   events: z.array(callEventSchema).max(MAX_BATCH_EVENTS),
 });
 

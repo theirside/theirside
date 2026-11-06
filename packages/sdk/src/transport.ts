@@ -42,6 +42,8 @@ export class Transport {
   private failedFlushes = 0;
   private lastFlushError: string | undefined;
   private stopped = false;
+  /** When the last batch (events or heartbeat) was posted, ms. */
+  lastPostAt = Date.now();
   /** Reported in each batch so the collector can weight ok events. */
   sampleRate: number;
   /** Extra header fields for every batch (instance, runtime); set by the client. */
@@ -184,8 +186,10 @@ export class Transport {
       ...(this.lastFlushError ? { lastFlushError: this.lastFlushError } : {}),
       ...(this.sampleRate < 1 ? { sampleRate: this.sampleRate } : {}),
       ...this.header,
+      stats: { queued: this.queue.length, sent: this.sent, failedFlushes: this.failedFlushes },
       events,
     };
+    this.lastPostAt = Date.now();
     const result = await this.post(batch);
     const status = 'status' in result ? result.status : 0;
 

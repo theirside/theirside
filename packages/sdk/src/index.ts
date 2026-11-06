@@ -30,6 +30,7 @@ export const nodeRuntime: Runtime = {
   isUntracked,
   timers: () => true,
   processHooks: true,
+  version: () => process.versions?.node,
 };
 
 const api = createApi(nodeRuntime);

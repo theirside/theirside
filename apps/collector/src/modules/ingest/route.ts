@@ -153,6 +153,28 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
               sdkVersion: parsed.data.sdk.version,
               dropped: parsed.data.dropped,
               lastFlushError: parsed.data.lastFlushError ?? null,
+              // an empty batch is the SDK's heartbeat: alive, but no calls
+              hasEvents: parsed.data.events.length > 0,
+              ...(parsed.data.instance
+                ? {
+                    instance: {
+                      id: parsed.data.instance.id,
+                      startedAt: new Date(
+                        Math.min(parsed.data.instance.startedAt, receivedAt.getTime()),
+                      ),
+                    },
+                  }
+                : {}),
+              ...(parsed.data.runtime
+                ? {
+                    runtime: {
+                      name: parsed.data.runtime.name,
+                      version: parsed.data.runtime.version ?? null,
+                      platform: parsed.data.runtime.platform ?? null,
+                      serverless: parsed.data.runtime.serverless ?? false,
+                    },
+                  }
+                : {}),
             },
             receivedAt,
           );

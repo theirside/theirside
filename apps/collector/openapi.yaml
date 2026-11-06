@@ -71,7 +71,32 @@ components:
           }
         lastFlushError: { type: string }
         sampleRate: { type: number, exclusiveMinimum: 0, maximum: 1 }
-        events: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/CallEvent' } }
+        instance:
+          type: object
+          description: This process (SDK 0.2.0+). A random id made at startup and the start time (epoch ms).
+          required: [id, startedAt]
+          properties: { id: { type: string, maxLength: 64 }, startedAt: { type: integer } }
+        runtime:
+          type: object
+          description: Where the SDK runs (SDK 0.2.0+)
+          required: [name]
+          properties:
+            name: { type: string, description: 'node, or fetch (Workers, Deno, Bun)' }
+            version: { type: string }
+            platform: { type: [string, 'null'], description: 'aws-lambda, cloudflare-workers…' }
+            serverless: { type: boolean }
+        stats:
+          type: object
+          description: The SDK's own counters (SDK 0.2.0+)
+          properties:
+            queued: { type: integer }
+            sent: { type: integer }
+            failedFlushes: { type: integer }
+        events:
+          type: array
+          maxItems: 5000
+          description: Empty = a heartbeat from an idle process
+          items: { $ref: '#/components/schemas/CallEvent' }
     EndpointHealth:
       type: object
       properties:

@@ -43,6 +43,15 @@ export const edgeRuntime: Runtime = {
   // Workers: no timers outside a request; events go out on flush()
   timers: () => !isCloudflareWorkers() && typeof setInterval === 'function',
   processHooks: false,
+  version: () => {
+    const g = globalThis as {
+      Bun?: { version?: string };
+      Deno?: { version?: { deno?: string } };
+    };
+    if (g.Bun?.version) return `bun ${g.Bun.version}`;
+    if (g.Deno?.version?.deno) return `deno ${g.Deno.version.deno}`;
+    return undefined;
+  },
 };
 
 const api = createApi(edgeRuntime);

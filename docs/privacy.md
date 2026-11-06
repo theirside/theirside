@@ -24,7 +24,9 @@ This is the customer-facing statement of exactly what Theirside collects. It mus
 | `correlationId` | `req-7f3a` | Only if you pass `getCorrelationId`. Whatever your function returns, as a string, control characters removed, max 128 chars. Don't return personal data from it. |
 | `providerRequestId` | `req_8f2KdL3x` | The **value** of the first response header from the allowlist `x-request-id`, `request-id`, `x-amzn-requestid`, `cf-ray` (configurable via `requestIdHeaders`; `[]` turns it off). Control characters removed, max 128 chars. No other header is read. |
 
-Each batch also carries, once: protocol version, SDK name and version, `service`, `environment`, the number of events the SDK dropped since its last accepted batch, the last flush error code (e.g. `ECONNREFUSED`, `http_503`) and the success sampling rate if below 1.
+Each batch also carries, once: protocol version, SDK name and version, `service`, `environment`, the number of events the SDK dropped since its last accepted batch, the last flush error code (e.g. `ECONNREFUSED`, `http_503`) and the success sampling rate if below 1. Since SDK 0.2.0 also: a random **instance id** made when the process starts (16 letters and digits, nothing derived from the host) and the process start time, so the collector can count a service's processes and see restarts; the **runtime** (`node` or `fetch`, its version, a detected platform such as `aws-lambda` and whether it runs in serverless mode); and the SDK's own counters (events queued, sent, failed flushes).
+
+**Heartbeat.** A long-running process that has sent nothing for 5 minutes sends a batch with no events: exactly the header above, nothing about calls. It lets SDK health tell an idle service from one that isn't running. Serverless processes never send one.
 
 ### Which calls are recorded
 

@@ -2,6 +2,7 @@ import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
 import { COUNTER_COLUMNS, KEY_COLUMNS, SUM_SELECT, rowToRollup } from './columns.js';
 import type {
+  SdkProcessRecord,
   EndpointMove,
   AlertChannelInput,
   AlertChannelRecord,
@@ -1308,15 +1309,20 @@ class PgConfigStore implements ConfigStore {
   }
 
   async recordSdkHeartbeat(t: Tenant, hb: SdkHeartbeat, at: Date) {
+    const eventAt = hb.hasEvents === false ? null : at;
     await this.db.query(
       `INSERT INTO sdk_instances (org_id, project_id, service, environment, sdk_name, sdk_version, first_seen_at,
-                                  last_seen_at, dropped_events, last_flush_error)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9)
+                                  last_seen_at, last_event_at, dropped_events, last_flush_error, serverless, platform)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$10,$8,$9,$11,$12)
        ON CONFLICT (org_id, project_id, service, environment) DO UPDATE SET
          sdk_name = EXCLUDED.sdk_name, sdk_version = EXCLUDED.sdk_version,
          last_seen_at = GREATEST(sdk_instances.last_seen_at, EXCLUDED.last_seen_at),
+         last_event_at = GREATEST(sdk_instances.last_event_at, EXCLUDED.last_event_at),
          dropped_events = sdk_instances.dropped_events + EXCLUDED.dropped_events,
-         last_flush_error = EXCLUDED.last_flush_error`,
+         last_flush_error = EXCLUDED.last_flush_error,
+         -- older SDKs don't say: keep what a newer one reported
+         serverless = CASE WHEN $13 THEN EXCLUDED.serverless ELSE sdk_instances.serverless END,
+         platform = CASE WHEN $13 THEN EXCLUDED.platform ELSE sdk_instances.platform END`,
       [
         t.orgId,
         t.projectId,
@@ -1327,8 +1333,66 @@ class PgConfigStore implements ConfigStore {
         at,
         hb.dropped,
         hb.lastFlushError,
+        eventAt,
+        hb.runtime?.serverless ?? false,
+        hb.runtime?.platform ?? null,
+        hb.runtime !== undefined,
       ],
     );
+    if (!hb.instance) return;
+    await this.db.query(
+      `INSERT INTO sdk_processes (org_id, project_id, service, environment, instance_id, started_at,
+                                  first_seen_at, last_seen_at, last_event_at, sdk_version, runtime,
+                                  runtime_version, platform, serverless)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (org_id, project_id, service, environment, instance_id) DO UPDATE SET
+         last_seen_at = GREATEST(sdk_processes.last_seen_at, EXCLUDED.last_seen_at),
+         last_event_at = GREATEST(sdk_processes.last_event_at, EXCLUDED.last_event_at)`,
+      [
+        t.orgId,
+        t.projectId,
+        hb.service,
+        hb.environment,
+        hb.instance.id,
+        hb.instance.startedAt,
+        at,
+        eventAt,
+        hb.sdkVersion,
+        hb.runtime?.name ?? null,
+        hb.runtime?.version ?? null,
+        hb.runtime?.platform ?? null,
+        hb.runtime?.serverless ?? false,
+      ],
+    );
+  }
+  async listSdkProcesses(t: Tenant, since: Date): Promise<SdkProcessRecord[]> {
+    const { rows } = await this.db.query(
+      `SELECT * FROM sdk_processes WHERE org_id = $1 AND project_id = $2 AND last_seen_at >= $3
+        ORDER BY last_seen_at DESC LIMIT 5000`,
+      [t.orgId, t.projectId, since],
+    );
+    return rows.map((r: Row) => ({
+      orgId: r.org_id as string,
+      projectId: r.project_id as string,
+      service: r.service as string,
+      environment: r.environment as string,
+      instanceId: r.instance_id as string,
+      startedAt: r.started_at as Date,
+      firstSeenAt: r.first_seen_at as Date,
+      lastSeenAt: r.last_seen_at as Date,
+      lastEventAt: (r.last_event_at as Date | null) ?? null,
+      sdkVersion: r.sdk_version as string,
+      runtime: (r.runtime as string | null) ?? null,
+      runtimeVersion: (r.runtime_version as string | null) ?? null,
+      platform: (r.platform as string | null) ?? null,
+      serverless: Boolean(r.serverless),
+    }));
+  }
+  async pruneSdkProcesses(before: Date) {
+    const { rowCount } = await this.db.query(`DELETE FROM sdk_processes WHERE last_seen_at < $1`, [
+      before,
+    ]);
+    return rowCount ?? 0;
   }
   async listSdkInstances(t: Tenant): Promise<SdkInstanceRecord[]> {
     const { rows } = await this.db.query(
@@ -1344,8 +1408,11 @@ class PgConfigStore implements ConfigStore {
       sdkVersion: r.sdk_version as string,
       firstSeenAt: r.first_seen_at as Date,
       lastSeenAt: r.last_seen_at as Date,
+      lastEventAt: (r.last_event_at as Date | null) ?? null,
       droppedEvents: Number(r.dropped_events),
       lastFlushError: (r.last_flush_error as string | null) ?? null,
+      serverless: Boolean(r.serverless),
+      platform: (r.platform as string | null) ?? null,
     }));
   }
 

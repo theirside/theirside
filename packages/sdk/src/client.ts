@@ -4,6 +4,7 @@ import { createLogger, safely, warn, type Logger } from './log.js';
 import { RingBuffer } from './queue.js';
 import { Recorder, type ManualCall } from './recorder.js';
 import { RemoteConfigClient } from './remote-config.js';
+import { unrefTimer } from './platform.js';
 import type { Sender } from './sender.js';
 import { Transport, type TransportStats } from './transport.js';
 
@@ -14,6 +15,18 @@ export interface ClientInternals {
   remoteConfigIntervalMs?: number;
   /** Test hook: sightings before a literal path segment is sent as-is (default 5). */
   minPathSightings?: number;
+  /** Test hook: idle time before a heartbeat (default 5 min). */
+  heartbeatMs?: number;
+}
+
+/** An idle process says it's alive this often (not in serverless mode). */
+export const HEARTBEAT_MS = 5 * 60_000;
+
+/** Random id for this process: counts processes and restarts; nothing about the host. */
+function instanceId(): string {
+  let id = '';
+  for (let i = 0; i < 16; i++) id += Math.floor(Math.random() * 36).toString(36);
+  return id;
 }
 
 export interface Instrumentation {
@@ -40,6 +53,8 @@ export interface Runtime {
   timers(): boolean;
   /** Process exit hooks exist (`process.on('beforeExit')`). */
   processHooks: boolean;
+  /** Runtime version for the batch header (`node 24.13.0`, `bun 1.4.4`…). */
+  version(): string | undefined;
 }
 
 export class Client {
@@ -53,6 +68,8 @@ export class Client {
   private shutdownPromise: Promise<void> | undefined;
   private exitHooked = false;
   private readonly timers: boolean;
+  private heartbeatTimer: unknown;
+  private readonly heartbeatMs: number;
 
   constructor(
     cfg: ResolvedConfig,
@@ -65,6 +82,17 @@ export class Client {
     this.queue = new RingBuffer<CallEvent>(cfg.maxQueue);
     const sender = runtime.sender(cfg);
     this.transport = new Transport(cfg, this.queue, this.log, sender, this.timers);
+    const version = runtime.version();
+    this.transport.header = {
+      instance: { id: instanceId(), startedAt: Date.now() },
+      runtime: {
+        name: runtime.name,
+        ...(version ? { version } : {}),
+        platform: cfg.platform,
+        serverless: cfg.serverless,
+      },
+    };
+    this.heartbeatMs = internals.heartbeatMs ?? HEARTBEAT_MS;
     this.recorder = new Recorder(
       cfg,
       this.queue,
@@ -109,6 +137,19 @@ export class Client {
     for (const c of this.capture) c.enable();
     this.transport.start();
     this.remote?.start();
+    // idle long-running processes say they're alive (SDK health: idle vs not running);
+    // a serverless process is frozen between invocations, so it never does
+    if (this.timers && !this.cfg.serverless) {
+      this.heartbeatTimer = setInterval(
+        () => {
+          if (this.shutdownPromise || !this.transport.idle()) return;
+          if (Date.now() - this.transport.lastPostAt >= this.heartbeatMs)
+            void this.transport.heartbeat();
+        },
+        Math.min(60_000, this.heartbeatMs),
+      );
+      unrefTimer(this.heartbeatTimer);
+    }
     if (this.cfg.handleProcessExit && this.runtime.processHooks) this.hookProcessExit();
   }
 
@@ -146,6 +187,7 @@ export class Client {
   shutdown(timeoutMs = this.cfg.shutdownTimeoutMs): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.unhookProcessExit();
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer as ReturnType<typeof setInterval>);
     for (const c of this.capture) c.disable();
     this.remote?.stop();
     this.transport.stop();
