@@ -1,6 +1,6 @@
 {
   "name": "@theirside/collector",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "description": "Theirside collector: ingest, rollups, scoring, alerts, API, dashboard and status page.",

@@ -37,6 +37,8 @@ pnpm workspaces (pnpm 12, via corepack). Keep this list accurate:
 - build: `pnpm build` (SDK via tsup to `packages/sdk/dist`)
 - SDK compatibility smoke on any Node ≥ 18.18 (after build; CI: 18.18.0, 18, 24.13.0, and 20/22/24 in the test job): `node packages/sdk/test-compat/run.cjs`
 - SDK overhead benchmark: `pnpm --filter @theirside/sdk bench`
+- SDK flush per invocation (serverless): `pnpm --filter @theirside/sdk bench:flush`
+- SDK on other runtimes (after build): `pnpm --filter @theirside/sdk test:runtimes` (export conditions + Cloudflare Workers via Miniflare/workerd) and `pnpm --filter @theirside/sdk test:bun` (needs Bun 1.4+; or `cd packages/sdk && pnpm dlx bun@1.4.4 test-runtime/bun.mjs`)
 - SDK collector-down benchmark (queue bound, app latency): `pnpm --filter @theirside/sdk bench:collector-down -- --minutes 10`
 - SDK memory soak (built SDK; `pnpm --filter @theirside/sdk build` first): `pnpm --filter @theirside/soak soak -- --minutes 60 --collector up|down|cycle` (5-minute CI gate: `pnpm --filter @theirside/soak soak:ci -- --collector up`; snapshot diff: `pnpm --filter @theirside/soak diff a.heapsnapshot b.heapsnapshot`)
 - SDK overnight soak, three variants in parallel with SUMMARY.md (collector stack and built SDK first): `tools/soak/overnight.sh --hours 8` (results in `tools/soak/results/<date>/`, git-ignored)
@@ -52,7 +54,7 @@ pnpm workspaces (pnpm 12, via corepack). Keep this list accurate:
 - demo data by hand (empty demo database only; refuses anything else): `DATABASE_URL=… pnpm demo:seed`
 - rebuild the path-word vocabulary (`packages/shared/src/vocabulary-words.ts`; see `tools/vocabulary/README.md`): `cd tools/vocabulary && node src/fetch.mjs && node src/build.mjs`
 - SDK tarball for installing into another service: `cd packages/sdk && pnpm pack`
-- collector image release (maintainer; CI builds and pushes `ghcr.io/theirside/collector`, amd64 + arm64, after the collector tests): `git tag v0.2.4 && git push origin v0.2.4`, or run the "Release collector image" workflow with a version. Compose pulls a release with `THEIRSIDE_VERSION=0.2.4` (pull failure = error, never a source build); `THEIRSIDE_VERSION=local`, the default, builds from source.
+- collector image release (maintainer; CI builds and pushes `ghcr.io/theirside/collector`, amd64 + arm64, after the collector tests): `git tag v0.3.0 && git push origin v0.3.0`, or run the "Release collector image" workflow with a version. Compose pulls a release with `THEIRSIDE_VERSION=0.3.0` (pull failure = error, never a source build); `THEIRSIDE_VERSION=local`, the default, builds from source.
 - SDK publish (maintainer): `cd packages/sdk && pnpm publish` (pnpm, not npm: it applies `publishConfig.exports`; `prepublishOnly` builds, runs the SDK tests and the compat smoke). `@theirside/shared` is private, bundled into the SDK.
 
 ## Editions

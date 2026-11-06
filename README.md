@@ -11,11 +11,11 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.2.4` on port 4318, amd64 and arm64):
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3.0` on port 4318, amd64 and arm64):
 
 ```sh
 git clone <this repo> theirside && cd theirside
-THEIRSIDE_VERSION=0.2.4 THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16) THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 24) \
+THEIRSIDE_VERSION=0.3.0 THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16) THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 24) \
   docker compose -f docker/docker-compose.yml up -d
 ```
 

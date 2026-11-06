@@ -218,6 +218,13 @@ Things to know:
 - **Pooled learning:** with collector 0.3.0+, a function's cold start fetches what all processes of its service learned (positions that turned out to be IDs) and applies it before its first calls are recorded, if the fetch lands first; it never blocks startup.
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
 
+## Upgrading to 0.2.0
+
+- New: `flush(timeoutMs)`, `wrap()`, `wrapFetch()` and the fetch-only build for Cloudflare Workers, Deno, Bun and edge runtimes (picked automatically through the package's export conditions). `flush()` without an argument behaves as before.
+- On AWS Lambda, Google Cloud Functions, Azure Functions, Vercel, Netlify and Deno Deploy (detected from their environment variables) the SDK runs in serverless mode: no exit hooks, no heartbeat, and `service` defaults to the function name. Set `service`, `serverless` or `handleProcessExit` to keep the old behaviour.
+- An idle long-running process sends a heartbeat (an empty batch) every 5 minutes, and every batch carries a random process id, the runtime and the SDK's counters (docs/privacy.md lists them).
+- Pooled learning needs collector 0.3.0; with an older collector the SDK works as before.
+
 ## How it captures
 
 - **fetch / undici:** Node's `diagnostics_channel` (`undici:request:create`, `:headers`, `:error`). No patching. In the fetch-only build (Workers, Deno, Bun), `globalThis.fetch` is wrapped instead: the wrapper returns what fetch returns and rethrows its errors.

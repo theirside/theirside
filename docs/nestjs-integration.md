@@ -160,7 +160,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.2.4`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.2.4 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.3.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -181,12 +181,22 @@ Allowed path words now match whole camelCase segments: an allowed word `getLates
 
 From 0.2.3 to 0.2.4: Settings → Providers is a searchable table; click a provider (or "manage" on its page) for its settings. Admins can override thresholds per provider there (minimum calls, bad minutes to open, error-rate and latency rules); everything without an override keeps the project's values, so nothing changes on upgrade. Scripts reading `GET /v1/admin/settings/thresholds` get an extra `effective` field.
 
+From 0.2.4 to 0.3.0 (deploy it before your services move to SDK 0.2.0; older SDKs keep working, and SDK 0.2.0 works with older collectors, without pooled learning):
+
+- **Any status change opens an incident now**, not only 5xx and network errors: 401/403 (`auth`), 404 (`not_found`), 400/409/422 (`validation`), 429 (`rate_limited`) and other shifts (`behaviour`), each against what is normal for that endpoint ([scoring](scoring.md#behaviour-change-any-status-against-its-own-normal)). It starts a day after the upgrade: older rollups don't count statuses one by one, so the normal status mix is learned from the upgrade on. Scores count these too, so an endpoint answering 401 to every call turns red where it showed green. Alerts name the status and what it usually means, and add a deploy hint (did one of your services calling it restart just before?) and side signals (volume far above normal, fast failures).
+- **Webhook payloads**: `kind` gains `auth`, `not_found`, `validation`, `rate_limited` and `behaviour`; new fields `deployHint` and `signals`. Treat a `kind` you don't know like `errors`.
+- **Low-traffic endpoints** (under 4 calls/min) open incidents too, judged over 15, 30 or 60 minutes; such alerts say "low volume" and give counts.
+- **SDK health** groups a service's processes and no longer marks functions and other short-lived services stale between invocations ([SDK health](../packages/sdk/README.md#serverless-and-short-lived-processes)).
+- **Settings → Thresholds** edits the project's thresholds and lists the providers that override them.
+- The doubled-slash routes 0.2.2 added for SDK 0.1.0 are removed (migration 011); ingest still collapses `//` from old SDKs.
+- Migrations 011–016 run on the first start: new columns (fast, no table rewrite), two small tables (`sdk_processes`, `service_templates`), the route cleanup.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.2.4
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.3.0
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -203,8 +213,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.2.4 .
-docker push <registry>/theirside-collector:0.2.4
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.3.0 .
+docker push <registry>/theirside-collector:0.3.0
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -227,7 +237,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.2.4` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.3.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -245,7 +255,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.2.4",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.3.0",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [
