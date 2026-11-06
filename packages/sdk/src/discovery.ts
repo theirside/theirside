@@ -13,6 +13,7 @@ import {
   type SdkRemoteConfig,
 } from '@theirside/shared/core';
 import type { ResolvedConfig, ResolvedProvider } from './config.js';
+import { readEnv } from './platform.js';
 
 /** What to do with a call to one host. */
 export interface HostResolution {
@@ -42,7 +43,9 @@ const EMPTY: RemoteState = { hidden: [], internal: [], providers: [] };
 const MAX_CACHED = 2000;
 
 /** Hostnames of endpoints the app sends its own telemetry to (OTel exporters, Sentry DSN). */
-export function telemetryHostsFromEnv(env: NodeJS.ProcessEnv = process.env): Set<string> {
+export function telemetryHostsFromEnv(
+  env: Record<string, string | undefined> = readEnv(),
+): Set<string> {
   const out = new Set<string>();
   for (const [k, v] of Object.entries(env)) {
     if (!v) continue;
@@ -74,7 +77,7 @@ export class HostPolicy {
 
   constructor(
     private readonly cfg: ResolvedConfig,
-    env: NodeJS.ProcessEnv = process.env,
+    env: Record<string, string | undefined> = readEnv(),
   ) {
     this.collectorHost = cfg.endpoint.hostname.toLowerCase();
     this.telemetryHosts = telemetryHostsFromEnv(env);

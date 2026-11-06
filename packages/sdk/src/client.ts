@@ -1,20 +1,45 @@
 import type { CallEvent } from '@theirside/shared/core';
 import { resolveConfig, type InitOptions, type ResolvedConfig } from './config.js';
-import { HttpInstrumentation, defaultHttpMode, type HttpMode } from './instrument/http.js';
-import { UndiciInstrumentation } from './instrument/undici.js';
 import { createLogger, safely, warn, type Logger } from './log.js';
 import { RingBuffer } from './queue.js';
 import { Recorder, type ManualCall } from './recorder.js';
 import { RemoteConfigClient } from './remote-config.js';
+import type { Sender } from './sender.js';
 import { Transport, type TransportStats } from './transport.js';
 
 export interface ClientInternals {
-  /** Test hook: force the http capture mode. */
-  httpMode?: HttpMode;
+  /** Test hook (Node): force the http capture mode. */
+  httpMode?: 'channel' | 'wrap';
   /** Test hook: remote config poll interval (default 60 s). */
   remoteConfigIntervalMs?: number;
   /** Test hook: sightings before a literal path segment is sent as-is (default 5). */
   minPathSightings?: number;
+}
+
+export interface Instrumentation {
+  enable(): void;
+  disable(): void;
+}
+
+/**
+ * What differs between Node and fetch runtimes (Workers, Deno, Bun): how
+ * calls are captured, how the collector is reached, whether timers and exit
+ * hooks exist. Everything else is shared.
+ */
+export interface Runtime {
+  name: 'node' | 'fetch';
+  sender(cfg: ResolvedConfig): Sender;
+  instrumentations(
+    recorder: Recorder,
+    log: Logger,
+    sender: Sender,
+    internals: ClientInternals,
+  ): Instrumentation[];
+  isUntracked(): boolean;
+  /** Background timers may be used (not on Cloudflare Workers outside a request). */
+  timers(): boolean;
+  /** Process exit hooks exist (`process.on('beforeExit')`). */
+  processHooks: boolean;
 }
 
 export class Client {
@@ -23,31 +48,32 @@ export class Client {
   readonly queue: RingBuffer<CallEvent>;
   readonly recorder: Recorder;
   readonly transport: Transport;
-  private readonly http: HttpInstrumentation;
-  private readonly undici: UndiciInstrumentation;
+  private readonly capture: Instrumentation[];
   readonly remote: RemoteConfigClient | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private exitHooked = false;
+  private readonly timers: boolean;
 
-  constructor(cfg: ResolvedConfig, internals: ClientInternals = {}) {
+  constructor(
+    cfg: ResolvedConfig,
+    private readonly runtime: Runtime,
+    internals: ClientInternals = {},
+  ) {
     this.cfg = cfg;
     this.log = createLogger(cfg.debug);
+    this.timers = runtime.timers();
     this.queue = new RingBuffer<CallEvent>(cfg.maxQueue);
-    this.transport = new Transport(cfg, this.queue, this.log);
+    const sender = runtime.sender(cfg);
+    this.transport = new Transport(cfg, this.queue, this.log, sender, this.timers);
     this.recorder = new Recorder(
       cfg,
       this.queue,
       this.log,
       () => this.transport.notify(),
       internals.minPathSightings,
+      () => runtime.isUntracked(),
     );
-    this.http = new HttpInstrumentation(
-      this.recorder,
-      this.log,
-      internals.httpMode ?? defaultHttpMode(),
-      this.transport.agent,
-    );
-    this.undici = new UndiciInstrumentation(this.recorder, this.log);
+    this.capture = runtime.instrumentations(this.recorder, this.log, sender, internals);
     this.remote = cfg.remoteConfig
       ? new RemoteConfigClient(
           this.transport,
@@ -74,16 +100,16 @@ export class Client {
                 'the collector has no /v1/sdk-config (it predates auto-discovery): auto-discovery is off for this process; listed providers are still recorded. Upgrade the collector to turn it on.',
               );
             }),
+          this.timers,
         )
       : undefined;
   }
 
   start(): void {
-    this.http.enable();
-    this.undici.enable();
+    for (const c of this.capture) c.enable();
     this.transport.start();
     this.remote?.start();
-    if (this.cfg.handleProcessExit) this.hookProcessExit();
+    if (this.cfg.handleProcessExit && this.runtime.processHooks) this.hookProcessExit();
   }
 
   track(call: ManualCall): void {
@@ -91,8 +117,25 @@ export class Client {
     safely(this.log, 'track', () => this.recorder.track(call));
   }
 
-  flush(): Promise<void> {
-    return this.transport.flush(true).catch(() => {});
+  /**
+   * Without a timeout: one send attempt, as before. With one: send everything
+   * queued, resolving within the timeout whatever the collector does. Where
+   * timers can't run in the background (Workers), this is also when the remote
+   * config is refreshed. Never rejects.
+   */
+  flush(timeoutMs?: number): Promise<void> {
+    const remote = this.timers ? undefined : this.remote?.pollIfDue();
+    const send =
+      typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
+        ? this.transport.flushWithin(timeoutMs)
+        : this.transport.flush(true).catch(() => {});
+    if (!remote) return send;
+    const cap = typeof timeoutMs === 'number' ? timeoutMs : undefined;
+    const bounded =
+      cap === undefined
+        ? remote
+        : Promise.race([remote, new Promise<void>((r) => setTimeout(r, Math.max(0, cap)))]);
+    return Promise.all([send, bounded.catch(() => {})]).then(() => {});
   }
 
   stats(): TransportStats {
@@ -103,20 +146,12 @@ export class Client {
   shutdown(timeoutMs = this.cfg.shutdownTimeoutMs): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.unhookProcessExit();
-    this.http.disable();
-    this.undici.disable();
+    for (const c of this.capture) c.disable();
     this.remote?.stop();
     this.transport.stop();
-    const deadline = Date.now() + timeoutMs;
-    let timer: NodeJS.Timeout | undefined;
-    const cap = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, timeoutMs);
-    });
-    this.shutdownPromise = Promise.race([this.transport.drain(deadline).catch(() => {}), cap])
-      .then(() => {
-        if (timer) clearTimeout(timer);
-        this.transport.destroy();
-      })
+    this.shutdownPromise = this.transport
+      .flushWithin(timeoutMs)
+      .then(() => this.transport.destroy())
       .catch(() => {});
     return this.shutdownPromise;
   }
@@ -155,8 +190,12 @@ export class Client {
   }
 }
 
-export function createClient(opts: InitOptions, internals?: ClientInternals): Client | string {
+export function createClient(
+  opts: InitOptions,
+  runtime: Runtime,
+  internals?: ClientInternals,
+): Client | string {
   const cfg = resolveConfig(opts);
   if (typeof cfg === 'string') return cfg;
-  return new Client(cfg, internals);
+  return new Client(cfg, runtime, internals);
 }

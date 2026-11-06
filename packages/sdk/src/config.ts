@@ -9,6 +9,7 @@ import {
   type HostMatcher,
   type PathPrivacy,
 } from '@theirside/shared/core';
+import { detectPlatform, type Platform, type PlatformInfo } from './platform.js';
 
 export interface ProviderConfig {
   /** Display name used in alerts and the dashboard, e.g. `Acme Cards`. */
@@ -23,7 +24,10 @@ export interface InitOptions {
   apiKey?: string | undefined;
   /** Collector base URL, e.g. `http://collector:4318`. */
   endpoint?: string | undefined;
-  /** Name of the host app. */
+  /**
+   * Name of the host app. Default: the function name on AWS Lambda, Google
+   * Cloud Functions and Azure Functions, else `unknown-service`.
+   */
   service?: string | undefined;
   environment?: string | undefined;
   /** Optional: names, hosts and routes for providers you want to set explicitly. */
@@ -62,8 +66,16 @@ export interface InitOptions {
   enabled?: boolean;
   /** Cap for the flush done by shutdown() and on process exit. Default 2000 ms. */
   shutdownTimeoutMs?: number;
-  /** Flush on beforeExit / SIGTERM. Default true. */
+  /** Flush on beforeExit / SIGTERM. Default true (false in serverless mode: no exit to hook). */
   handleProcessExit?: boolean;
+  /**
+   * Short-lived or frozen processes (functions, edge, cron, CLI): no exit
+   * hooks, no heartbeat, no keep-alive sockets; send with `flush()` or `wrap()`
+   * at the end of each invocation. Default: detected from the platform's
+   * environment variables (AWS Lambda, Google Cloud Functions, Azure
+   * Functions, Vercel, Netlify, Deno Deploy, Cloudflare Workers).
+   */
+  serverless?: boolean;
 }
 
 export interface ResolvedProvider {
@@ -93,6 +105,9 @@ export interface ResolvedConfig {
   debug: boolean;
   shutdownTimeoutMs: number;
   handleProcessExit: boolean;
+  serverless: boolean;
+  /** Detected platform, if any (reported in SDK health). */
+  platform: Platform | null;
 }
 
 function clampInt(v: unknown, min: number, max: number, dflt: number): number {
@@ -106,7 +121,10 @@ function shortName(v: unknown, dflt: string): string {
 }
 
 /** Returns a resolved config, or a reason string when the SDK should stay off. */
-export function resolveConfig(opts: InitOptions): ResolvedConfig | string {
+export function resolveConfig(
+  opts: InitOptions,
+  platform: PlatformInfo = detectPlatform(),
+): ResolvedConfig | string {
   if (opts.enabled === false) return 'disabled (enabled: false)';
   if (!opts.apiKey) return 'disabled: no apiKey';
   if (!opts.endpoint) return 'disabled: no endpoint';
@@ -135,10 +153,11 @@ export function resolveConfig(opts: InitOptions): ResolvedConfig | string {
       ? opts.sampleRate
       : 1;
 
+  const serverless = typeof opts.serverless === 'boolean' ? opts.serverless : platform.serverless;
   return {
     apiKey: opts.apiKey,
     endpoint,
-    service: shortName(opts.service, 'unknown-service'),
+    service: shortName(opts.service, platform.functionName ?? 'unknown-service'),
     environment: shortName(opts.environment, 'production'),
     providers,
     // explicit autoDiscover wins; else the deprecated alias; else on
@@ -168,6 +187,9 @@ export function resolveConfig(opts: InitOptions): ResolvedConfig | string {
     maxQueue: clampInt(opts.maxQueue, 1, 1_000_000, 10_000),
     debug: opts.debug === true,
     shutdownTimeoutMs: clampInt(opts.shutdownTimeoutMs, 0, 30_000, 2000),
-    handleProcessExit: opts.handleProcessExit !== false,
+    handleProcessExit:
+      typeof opts.handleProcessExit === 'boolean' ? opts.handleProcessExit : !serverless,
+    serverless,
+    platform: platform.platform,
   };
 }

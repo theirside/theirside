@@ -1,7 +1,7 @@
 {
   "name": "@theirside/sdk",
   "version": "0.1.2",
-  "description": "Drop-in Node SDK that records outgoing calls to your third-party providers and tells you when one of their endpoints starts failing.",
+  "description": "Drop-in SDK (Node, serverless, Cloudflare Workers, Deno, Bun) that records outgoing calls to your third-party providers and tells you when one of their endpoints starts failing.",
   "license": "MIT",
   "type": "module",
   "sideEffects": true,
@@ -11,6 +11,26 @@
   "exports": {
     ".": {
       "@theirside/source": "./src/index.ts",
+      "workerd": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
+      "worker": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
+      "deno": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
+      "bun": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
+      "edge-light": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
@@ -19,6 +39,11 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./edge": {
+      "@theirside/source": "./src/edge.ts",
+      "types": "./dist/edge.d.ts",
+      "default": "./dist/edge.js"
     }
   },
   "files": [
@@ -44,17 +69,21 @@
     "bench": "node --import tsx --conditions=@theirside/source bench/overhead.ts",
     "bench:collector-down": "node --expose-gc --import tsx --conditions=@theirside/source bench/collector-down.ts",
     "compat": "node test-compat/run.cjs",
-    "prepublishOnly": "pnpm run build && vitest run && node test-compat/run.cjs"
+    "prepublishOnly": "pnpm run build && vitest run && node test-compat/run.cjs",
+    "bench:flush": "node --import tsx --conditions=@theirside/source bench/flush.ts",
+    "test:runtimes": "node test-runtime/conditions.mjs && node test-runtime/workerd.mjs",
+    "test:bun": "bun test-runtime/bun.mjs"
   },
   "devDependencies": {
-    "@theirside/shared": "workspace:*",
     "@opentelemetry/api": "~1.9.1",
     "@opentelemetry/instrumentation": "0.223.0",
     "@opentelemetry/instrumentation-http": "0.223.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
+    "@theirside/shared": "workspace:*",
     "aws-xray-sdk-core": "^3.12.0",
     "axios": "^1.21.0",
+    "miniflare": "^4.20260730.0",
     "nock": "^14.0.17",
     "selfsigned": "^5.5.0",
     "tsup": "^9.0.0",
@@ -64,6 +93,26 @@
     "access": "public",
     "exports": {
       ".": {
+        "workerd": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "worker": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "deno": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "bun": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "edge-light": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
         "import": {
           "types": "./dist/index.d.ts",
           "default": "./dist/index.js"
@@ -72,6 +121,10 @@
           "types": "./dist/index.d.cts",
           "default": "./dist/index.cjs"
         }
+      },
+      "./edge": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
       }
     }
   }

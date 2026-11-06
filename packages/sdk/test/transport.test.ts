@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Client, createClient } from '../src/client.js';
+import { nodeRuntime } from '../src/index.js';
 import type { InitOptions } from '../src/config.js';
 import { RingBuffer } from '../src/queue.js';
 import {
@@ -31,14 +32,17 @@ afterEach(async () => {
 });
 
 function client(opts: Partial<InitOptions> = {}): Client {
-  const c = createClient({
-    apiKey: 'k',
-    endpoint: collector.url,
-    flushIntervalMs: 60_000,
-    providers: [{ name: 'Local', hosts: ['localhost'] }],
-    handleProcessExit: false,
-    ...opts,
-  });
+  const c = createClient(
+    {
+      apiKey: 'k',
+      endpoint: collector.url,
+      flushIntervalMs: 60_000,
+      providers: [{ name: 'Local', hosts: ['localhost'] }],
+      handleProcessExit: false,
+      ...opts,
+    },
+    nodeRuntime,
+  );
   if (typeof c === 'string') throw new Error(c);
   c.start();
   clients.push(c);

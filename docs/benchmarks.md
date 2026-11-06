@@ -71,6 +71,23 @@ Not settled: with this traffic RSS rises steadily in every run, the SDK-off cont
 
 CI runs a 5-minute version (`soak:ci`, collector up and down as two jobs): 1-minute warm-up, slope projected to 55 minutes, fails at ≥ 5 MB with R² ≥ 0.5. Checked against an injected leak (`--leak-bytes 16`, a retained string per call, ~110 bytes of heap each): +112 MB projected, R² 1.00, exit 1. At 300 calls/s the 5 MB threshold corresponds to a leak of about 5 bytes per call.
 
+## Flush per invocation (serverless)
+
+Target: a function pays little for `wrap()`'s flush with a reachable collector, and at most the cap (300 ms by default) when it isn't.
+
+Script: `pnpm --filter @theirside/sdk bench:flush` (`packages/sdk/bench/flush.ts`): 200 invocations of a wrapped handler that records 10 calls each, against a local collector (serverless mode: a new connection per flush; and long-running mode with keep-alive), a closed port and a collector that never answers (20 invocations each).
+
+2026-11-07, Node v24.13.0, macOS x64, time added to each invocation:
+
+| collector | median | p95 | max |
+|---|---|---|---|
+| up, serverless (new connection per flush) | 0.84 ms | 1.38 ms | 19.10 ms |
+| up, long-running (keep-alive) | 0.53 ms | 0.75 ms | 1.69 ms |
+| unreachable (closed port) | 0.73 ms | 2.51 ms | 2.51 ms |
+| never answers (cap 300 ms) | 300.86 ms | 301.47 ms | 301.47 ms |
+
+A refused connection fails fast; a collector that accepts and hangs costs the full cap, so keep `flushTimeoutMs` small where every millisecond is billed. A real collector across a network adds its round trip (one TLS handshake per invocation in serverless mode).
+
 ## SDK with the collector unreachable
 
 Target: memory stays bounded and the app is unaffected when the collector is down for 10 minutes.

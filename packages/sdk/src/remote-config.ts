@@ -6,15 +6,19 @@ import {
 } from '@theirside/shared/core';
 import { parseRemoteConfig } from './discovery.js';
 import type { Logger } from './log.js';
+import { unrefTimer } from './platform.js';
 import type { Transport } from './transport.js';
 
 /**
  * Polls `GET /v1/sdk-config` every 60 s with ETag (304 when unchanged). Never
  * blocks startup or a request: the first fetch runs in the background right
- * after init, and on any failure the last good config stays in force.
+ * after init, and on any failure the last good config stays in force. Where
+ * background timers can't run (Cloudflare Workers), it is fetched during
+ * `flush()` instead, at most once per interval.
  */
 export class RemoteConfigClient {
-  private timer: NodeJS.Timeout | undefined;
+  private timer: unknown;
+  private lastPollAt = 0;
   private etag: string | undefined;
   private inFlight = false;
   private stopped = false;
@@ -30,18 +34,26 @@ export class RemoteConfigClient {
     private readonly intervalMs = SDK_CONFIG_POLL_MS,
     /** Called once, on the first 404: the collector predates remote config. */
     private readonly onMissing: () => void = () => {},
+    private readonly timers = true,
   ) {}
 
   start(): void {
-    const first = setTimeout(() => void this.poll(), 0);
-    first.unref();
+    if (!this.timers) return;
+    unrefTimer(setTimeout(() => void this.poll(), 0));
     this.timer = setInterval(() => void this.poll(), this.intervalMs);
-    this.timer.unref();
+    unrefTimer(this.timer);
+  }
+
+  /** Without timers: a poll when none ran within the interval (else undefined). */
+  pollIfDue(): Promise<void> | undefined {
+    if (this.stopped || this.inFlight) return undefined;
+    if (this.lastPollAt && Date.now() - this.lastPollAt < this.intervalMs) return undefined;
+    return this.poll();
   }
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearInterval(this.timer as ReturnType<typeof setInterval>);
     this.timer = undefined;
   }
 
@@ -49,6 +61,7 @@ export class RemoteConfigClient {
   async poll(): Promise<void> {
     if (this.inFlight || this.stopped) return;
     this.inFlight = true;
+    this.lastPollAt = Date.now();
     try {
       const r = await this.transport.get(
         SDK_CONFIG_PATH,

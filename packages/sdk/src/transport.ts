@@ -1,8 +1,4 @@
-import http from 'node:http';
-import https from 'node:https';
-import { gzip } from 'node:zlib';
 import {
-  INGEST_PATH,
   PROTOCOL_VERSION,
   SDK_PACKAGE_NAME,
   type CallEvent,
@@ -10,22 +6,13 @@ import {
 } from '@theirside/shared/core';
 import type { ResolvedConfig } from './config.js';
 import type { Logger } from './log.js';
+import { unrefTimer } from './platform.js';
 import type { RingBuffer } from './queue.js';
+import type { GetResult, SendResult, Sender } from './sender.js';
 import { SDK_VERSION } from './version.js';
-
-/**
- * Captured when the SDK module loads, before most instrumentation is applied.
- * Constructing ClientRequest directly also bypasses http.request/get wrappers
- * (X-Ray, OTel, nock's request patch), so the SDK never records itself.
- */
-const OriginalClientRequest = http.ClientRequest;
-
-/** Marks requests created by the SDK; instrumentation skips them. */
-export const OWN_REQUEST = Symbol.for('theirside.own-request');
 
 const MAX_BACKOFF_MS = 60_000;
 const BASE_BACKOFF_MS = 1000;
-const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface TransportStats {
   queued: number;
@@ -35,11 +22,14 @@ export interface TransportStats {
   lastFlushError: string | undefined;
 }
 
-type SendResult = { status: number } | { error: string };
-
+/**
+ * Batching, retry and backoff for the event queue, the same on every runtime;
+ * the bytes go out through a `Sender` (Node http, or fetch). `timers: false`
+ * (Cloudflare Workers: no timers outside a request) means no periodic flush:
+ * events go out on `flush()` only.
+ */
 export class Transport {
-  readonly agent: http.Agent;
-  private timer: NodeJS.Timeout | undefined;
+  private timer: unknown;
   private inFlight: Promise<void> | undefined;
   private retryBatch: CallEvent[] | undefined;
   private failures = 0;
@@ -51,36 +41,39 @@ export class Transport {
   private sent = 0;
   private failedFlushes = 0;
   private lastFlushError: string | undefined;
-  private refSockets = false;
   private stopped = false;
   /** Reported in each batch so the collector can weight ok events. */
   sampleRate: number;
+  /** Extra header fields for every batch (instance, runtime); set by the client. */
+  header: Partial<IngestBatch> = {};
 
   constructor(
     private readonly cfg: ResolvedConfig,
     private readonly queue: RingBuffer<CallEvent>,
     private readonly log: Logger,
+    readonly sender: Sender,
+    private readonly timers = true,
   ) {
     this.sampleRate = cfg.sampleRate;
-    const isHttps = cfg.endpoint.protocol === 'https:';
-    this.agent = isHttps
-      ? new https.Agent({ keepAlive: true, maxSockets: 2 })
-      : new http.Agent({ keepAlive: true, maxSockets: 2 });
   }
 
   start(): void {
+    if (!this.timers) return;
     this.timer = setInterval(() => void this.flush(), this.cfg.flushIntervalMs);
-    this.timer.unref();
+    unrefTimer(this.timer);
   }
 
   /** Called after each enqueue; schedules an early flush once a full batch is waiting. */
   notify(): void {
-    if (this.soonScheduled || this.stopped || this.queue.length < this.cfg.maxBatch) return;
+    if (!this.timers || this.soonScheduled || this.stopped) return;
+    if (this.queue.length < this.cfg.maxBatch) return;
     this.soonScheduled = true;
-    setTimeout(() => {
-      this.soonScheduled = false;
-      void this.flush();
-    }, 0).unref();
+    unrefTimer(
+      setTimeout(() => {
+        this.soonScheduled = false;
+        void this.flush();
+      }, 0),
+    );
   }
 
   stats(): TransportStats {
@@ -91,6 +84,11 @@ export class Transport {
       failedFlushes: this.failedFlushes,
       lastFlushError: this.lastFlushError,
     };
+  }
+
+  /** Nothing queued, retrying or in flight. */
+  idle(): boolean {
+    return this.queue.length === 0 && !this.retryBatch && !this.inFlight;
   }
 
   /** Drop queued (and retry-pending) events matching pred; they count as dropped. */
@@ -127,29 +125,52 @@ export class Transport {
     return this.inFlight;
   }
 
-  /** Flush everything within the deadline, keeping sockets referenced so exit waits for it. */
+  /** Flush everything within the deadline, keeping the process alive for it. */
   async drain(deadline: number): Promise<void> {
-    this.refSockets = true;
-    while (Date.now() < deadline && (this.queue.length > 0 || this.retryBatch || this.inFlight)) {
-      const before = this.failures;
-      await this.flush(true);
-      if (this.failures > before) break; // collector unhappy: give up rather than spin
+    this.sender.setKeepProcessAlive(true);
+    try {
+      while (Date.now() < deadline && !this.idle()) {
+        const before = this.failures;
+        await this.flush(true);
+        if (this.failures > before) break; // collector unhappy: give up rather than spin
+      }
+    } finally {
+      if (!this.stopped) this.sender.setKeepProcessAlive(false);
     }
+  }
+
+  /**
+   * Send what is queued now, resolving within `timeoutMs` whatever the
+   * collector does (an unreachable collector costs at most the timeout). Never
+   * rejects. Events not sent stay queued for the next flush.
+   */
+  flushWithin(timeoutMs: number): Promise<void> {
+    const ms = Math.max(0, Math.floor(timeoutMs));
+    if (this.idle() || ms === 0) return Promise.resolve();
+    let timer: unknown;
+    const cap = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    });
+    return Promise.race([this.drain(Date.now() + ms).catch(() => {}), cap]).then(() => {
+      clearTimeout(timer as ReturnType<typeof setTimeout>);
+    });
   }
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearInterval(this.timer as ReturnType<typeof setInterval>);
     this.timer = undefined;
   }
 
   destroy(): void {
     this.stop();
-    try {
-      this.agent.destroy();
-    } catch {
-      // ignore
-    }
+    this.sender.destroy();
+  }
+
+  /** A batch without events: the SDK heartbeat (service, version, stats). */
+  async heartbeat(): Promise<void> {
+    if (!this.idle()) return;
+    await this.sendBatch([]).catch(() => {});
   }
 
   private async sendBatch(events: CallEvent[]): Promise<void> {
@@ -162,6 +183,7 @@ export class Transport {
       dropped,
       ...(this.lastFlushError ? { lastFlushError: this.lastFlushError } : {}),
       ...(this.sampleRate < 1 ? { sampleRate: this.sampleRate } : {}),
+      ...this.header,
       events,
     };
     const result = await this.post(batch);
@@ -179,11 +201,13 @@ export class Transport {
     this.failedFlushes++;
     this.lastFlushError = 'error' in result ? result.error : `http_${status}`;
     const retryable = status === 0 || status === 408 || status === 429 || status >= 500;
-    if (retryable) {
-      // keep at most one batch for retry; anything older was already dropped
-      this.retryBatch = events;
-    } else {
-      this.droppedBatchEvents += events.length;
+    if (events.length > 0) {
+      if (retryable) {
+        // keep at most one batch for retry; anything older was already dropped
+        this.retryBatch = events;
+      } else {
+        this.droppedBatchEvents += events.length;
+      }
     }
     this.failures++;
     const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (this.failures - 1));
@@ -191,128 +215,12 @@ export class Transport {
     this.log(`flush failed (${this.lastFlushError}); retrying in ~${Math.round(backoff / 1000)}s`);
   }
 
-  /**
-   * GET a small JSON document from the collector (remote config) on the SDK's
-   * own agent, never recorded. Bodies over `maxBytes` are discarded. Never rejects.
-   */
-  get(
-    path: string,
-    headers: Record<string, string>,
-    maxBytes: number,
-  ): Promise<{ status: number; etag?: string; body?: string } | { error: string }> {
-    return new Promise((resolve) => {
-      let settled = false;
-      const done = (r: { status: number; etag?: string; body?: string } | { error: string }) => {
-        if (!settled) {
-          settled = true;
-          resolve(r);
-        }
-      };
-      try {
-        const url = new URL(path, this.cfg.endpoint);
-        const req = new OriginalClientRequest({
-          protocol: url.protocol,
-          hostname: url.hostname,
-          port: url.port,
-          path: url.pathname,
-          method: 'GET',
-          agent: this.agent,
-          timeout: REQUEST_TIMEOUT_MS,
-          headers: {
-            authorization: `Bearer ${this.cfg.apiKey}`,
-            'user-agent': `theirside-sdk-node/${SDK_VERSION}`,
-            ...headers,
-          },
-        });
-        (req as unknown as Record<symbol, boolean>)[OWN_REQUEST] = true;
-        req.on('socket', (s) => s.unref());
-        req.on('response', (res) => {
-          const etag = typeof res.headers.etag === 'string' ? res.headers.etag : undefined;
-          if (res.statusCode !== 200) {
-            res.resume();
-            return done({ status: res.statusCode ?? 0, ...(etag ? { etag } : {}) });
-          }
-          const chunks: Buffer[] = [];
-          let size = 0;
-          res.on('data', (c: Buffer) => {
-            size += c.length;
-            if (size > maxBytes) {
-              res.destroy();
-              return done({ error: 'too_large' });
-            }
-            chunks.push(c);
-          });
-          res.on('end', () =>
-            done({
-              status: 200,
-              body: Buffer.concat(chunks).toString('utf8'),
-              ...(etag ? { etag } : {}),
-            }),
-          );
-          res.on('error', () => done({ error: 'response_error' }));
-        });
-        req.on('timeout', () =>
-          req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })),
-        );
-        req.on('error', (err: NodeJS.ErrnoException) =>
-          done({ error: err.code ?? 'request_error' }),
-        );
-        req.end();
-      } catch (err) {
-        done({ error: (err as NodeJS.ErrnoException)?.code ?? 'request_error' });
-      }
-    });
+  /** GET a small JSON document from the collector (remote config). Never rejects. */
+  get(path: string, headers: Record<string, string>, maxBytes: number): Promise<GetResult> {
+    return this.sender.get(path, headers, maxBytes);
   }
 
   private post(batch: IngestBatch): Promise<SendResult> {
-    return new Promise<SendResult>((resolve) => {
-      gzip(JSON.stringify(batch), (zerr, body) => {
-        if (zerr) return resolve({ error: 'gzip' });
-        let settled = false;
-        const done = (r: SendResult) => {
-          if (!settled) {
-            settled = true;
-            resolve(r);
-          }
-        };
-        try {
-          const url = new URL(INGEST_PATH, this.cfg.endpoint);
-          const req = new OriginalClientRequest({
-            protocol: url.protocol,
-            hostname: url.hostname,
-            port: url.port,
-            path: url.pathname,
-            method: 'POST',
-            agent: this.agent,
-            timeout: REQUEST_TIMEOUT_MS,
-            headers: {
-              'content-type': 'application/json',
-              'content-encoding': 'gzip',
-              'content-length': body.length,
-              authorization: `Bearer ${this.cfg.apiKey}`,
-              'user-agent': `theirside-sdk-node/${SDK_VERSION}`,
-            },
-          });
-          (req as unknown as Record<symbol, boolean>)[OWN_REQUEST] = true;
-          req.on('socket', (s) => {
-            if (this.refSockets) s.ref();
-            else s.unref();
-          });
-          req.on('response', (res) => {
-            res.resume();
-            done({ status: res.statusCode ?? 0 });
-          });
-          req.on('timeout', () =>
-            req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })),
-          );
-          req.on('error', (err: NodeJS.ErrnoException) =>
-            done({ error: err.code ?? 'request_error' }),
-          );
-          req.end(body);
-        } catch (err) {
-          done({ error: (err as NodeJS.ErrnoException)?.code ?? 'request_error' });
-        }
-      });
-    });
+    return this.sender.post(batch);
   }
 }

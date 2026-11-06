@@ -6,3 +6,5 @@ packages:
 
 allowBuilds:
   esbuild: true
+  # Miniflare's Workers runtime (SDK runtime tests): its postinstall checks the platform binary
+  workerd: true

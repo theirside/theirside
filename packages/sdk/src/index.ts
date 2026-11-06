@@ -1,85 +1,60 @@
-import { createClient, type Client, type ClientInternals } from './client.js';
-import type { InitOptions } from './config.js';
-import type { ManualCall } from './recorder.js';
-import type { TransportStats } from './transport.js';
+import { createApi } from './api.js';
+import type { Runtime } from './client.js';
+import { HttpInstrumentation, defaultHttpMode } from './instrument/http.js';
+import { UndiciInstrumentation } from './instrument/undici.js';
+import { NodeSender } from './node-sender.js';
 import { SDK_VERSION } from './version.js';
+import { isUntracked } from './untracked.js';
 
 export type { InitOptions, ProviderConfig } from './config.js';
 export type { ManualCall } from './recorder.js';
 export type { TransportStats as SdkStats } from './transport.js';
+export type { WrapFetchOptions, WrapOptions } from './api.js';
 export type { CallEvent, Outcome } from '@theirside/shared/core';
 export { SDK_VERSION };
 export { untracked } from './untracked.js';
 
-let client: Client | undefined;
+/** Node: http/https via diagnostics channels (or patching), fetch/undici via diagnostics channels. */
+export const nodeRuntime: Runtime = {
+  name: 'node',
+  sender: (cfg) => new NodeSender(cfg),
+  instrumentations: (recorder, log, sender, internals) => [
+    new HttpInstrumentation(
+      recorder,
+      log,
+      internals.httpMode ?? defaultHttpMode(),
+      (sender as NodeSender).agent,
+    ),
+    new UndiciInstrumentation(recorder, log),
+  ],
+  isUntracked,
+  timers: () => true,
+  processHooks: true,
+};
+
+const api = createApi(nodeRuntime);
 
 /**
  * Start recording outgoing calls. Call once, as early as possible (top of
  * main.ts, before NestFactory.create). Never throws; a bad config leaves the
  * SDK disabled and, with `debug: true`, says why.
  */
-export function init(options: InitOptions, internals?: ClientInternals): void {
-  try {
-    if (client) {
-      if (options?.debug) console.warn('[theirside] init() called twice; ignoring');
-      return;
-    }
-    const created = createClient(options ?? {}, internals);
-    if (typeof created === 'string') {
-      if (options?.debug) console.warn(`[theirside] ${created}`);
-      return;
-    }
-    client = created;
-    client.start();
-    client.log(
-      `started (sdk ${SDK_VERSION}, ${client.cfg.providers.length} providers, endpoint ${client.cfg.endpoint.origin})`,
-    );
-  } catch (err) {
-    try {
-      if (options?.debug) console.warn(`[theirside] init failed: ${String(err)}`);
-    } catch {
-      // ignore
-    }
-  }
-}
-
+export const init = api.init;
 /** Record a call made through a client the SDK doesn't instrument. */
-export function track(call: ManualCall): void {
-  try {
-    client?.track(call);
-  } catch {
-    // never throw into user code
-  }
-}
-
-/** Send queued events now. Resolves when the attempt finishes; never rejects. */
-export function flush(): Promise<void> {
-  try {
-    return client ? client.flush() : Promise.resolve();
-  } catch {
-    return Promise.resolve();
-  }
-}
-
+export const track = api.track;
+/**
+ * Send queued events now. `flush()`: one attempt. `flush(timeoutMs)`:
+ * everything queued, resolving within the timeout. Never rejects.
+ */
+export const flush = api.flush;
 /**
  * Stop recording and flush what is queued, capped at `timeoutMs` (default 2 s).
  * Never rejects. After shutdown, init() may be called again.
  */
-export function shutdown(timeoutMs?: number): Promise<void> {
-  try {
-    const c = client;
-    client = undefined;
-    return c ? c.shutdown(timeoutMs) : Promise.resolve();
-  } catch {
-    return Promise.resolve();
-  }
-}
-
+export const shutdown = api.shutdown;
 /** Local SDK health: queued, dropped and sent events, last flush error. */
-export function getStats(): TransportStats | undefined {
-  try {
-    return client?.stats();
-  } catch {
-    return undefined;
-  }
-}
+export const getStats = api.getStats;
+/** Run a handler and always flush afterwards (serverless, cron, CLI). See docs. */
+export const wrap = api.wrap;
+/** Fetch handlers with `waitUntil`: respond first, send afterwards. See docs. */
+export const wrapFetch = api.wrapFetch;

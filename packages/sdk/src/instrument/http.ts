@@ -5,7 +5,7 @@ import { outcomeForStatus, type Outcome } from '@theirside/shared/core';
 import { classifyError } from '../classify.js';
 import { safely, type Logger } from '../log.js';
 import type { HeaderLookup, Recorder } from '../recorder.js';
-import { OWN_REQUEST } from '../transport.js';
+import { OWN_REQUEST } from '../node-sender.js';
 
 /** Set on every ClientRequest we have seen, so one call is never counted twice. */
 export const TRACKED = Symbol.for('theirside.tracked');

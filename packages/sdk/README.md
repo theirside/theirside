@@ -12,6 +12,7 @@ This package is the Node SDK: it records your app's outgoing HTTP calls (endpoin
 - **Never gets in your way.** Never throws into your code, never waits on the network in your request path, bounded memory. If the collector is down, events are dropped and counted; your app doesn't notice.
 - **Private by design.** No bodies, headers, query strings or raw paths ever leave your process (details below).
 - **Zero runtime dependencies.** Node 18.18+ (tested on 18, 20, 22 and 24). CommonJS and ESM. TypeScript types included.
+- **Serverless and edge too.** AWS Lambda, Google Cloud Functions, Azure Functions, Netlify, Vercel, Cloudflare Workers, Deno and Bun, plus cron jobs and CLI scripts (see [Serverless and short-lived processes](#serverless-and-short-lived-processes)).
 
 ## Install
 
@@ -121,7 +122,7 @@ Paths are turned into templates inside your process, before anything is queued:
 | ------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `apiKey`            | required                                                    | Project API key (`tsd_live_…`) with the `ingest` scope. Without it the SDK stays off.                                                                                                                                    |
 | `endpoint`          | required                                                    | Collector base URL.                                                                                                                                                                                                      |
-| `service`           | `unknown-service`                                           | Name of this app.                                                                                                                                                                                                        |
+| `service`           | the function name, else `unknown-service`                   | Name of this app. On AWS Lambda, Google Cloud Functions and Azure Functions the default is the function's name.                                                                                                       |
 | `environment`       | `production`                                                | e.g. `production`, `staging`.                                                                                                                                                                                            |
 | `providers`         | `[]`                                                        | Optional: `{ name, hosts, routes? }`. Host patterns: `api.x.com`, `*.x.io` (any subdomain, not the apex), `localhost:4010`.                                                                                              |
 | `autoDiscover`      | `true`                                                      | Record every third-party host (the collector names and groups them). `false` = only `providers`. Infrastructure, the collector, telemetry hosts, `internalHosts` and hosts hidden in the dashboard are never recorded. |
@@ -135,7 +136,8 @@ Paths are turned into templates inside your process, before anything is queued:
 | `maxBatch`          | `500`                                                       | Events per request (max 5000).                                                                                                                                                                                           |
 | `maxQueue`          | `10000`                                                     | In-memory ring buffer; when full the oldest events are dropped and counted.                                                                                                                                              |
 | `shutdownTimeoutMs` | `2000`                                                      | Cap for the flush in `shutdown()` and on process exit.                                                                                                                                                                   |
-| `handleProcessExit` | `true`                                                      | Flush on `beforeExit` and `SIGTERM` (the default `SIGTERM` exit is preserved).                                                                                                                                           |
+| `handleProcessExit` | `true` (`false` in serverless mode)                          | Flush on `beforeExit` and `SIGTERM` (the default `SIGTERM` exit is preserved).                                                                                                                                           |
+| `serverless`        | detected                                                    | Short-lived or frozen processes: no exit hooks, no heartbeat, no keep-alive sockets; send with `flush()`/`wrap()`. Detected from AWS Lambda, Google Cloud Functions, Azure Functions, Vercel, Netlify, Deno Deploy and Cloudflare Workers environment variables. |
 | `debug`             | `false`                                                     | Log SDK problems (bad config, flush failures, template overflow) with `console.warn`.                                                                                                                                    |
 | `enabled`           | `true`                                                      | `false` makes `init` a no-op.                                                                                                                                                                                            |
 
@@ -143,16 +145,81 @@ Paths are turned into templates inside your process, before anything is queued:
 
 - `init(options)`: start recording. Calling it twice is ignored.
 - `shutdown(timeoutMs?)`: stop recording and flush, capped (default 2 s). Never rejects.
-- `flush()`: send queued events now. Never rejects.
+- `flush(timeoutMs?)`: send queued events now. Without an argument, one attempt; with `timeoutMs`, everything queued, resolving within that time whatever the collector does. Never rejects.
+- `wrap(handler, { flushTimeoutMs = 300 })`: run `handler`, then always flush (success or error) and return its result or rethrow its error unchanged. For functions, cron jobs and scripts.
+- `wrapFetch(handler, { waitUntil?, flushTimeoutMs })`: for fetch handlers with `waitUntil` (Cloudflare Workers, Netlify Edge, Deno Deploy; Vercel with `waitUntil` from `@vercel/functions`): returns the response first and sends afterwards.
 - `untracked(fn)`: run `fn` with capture off for every HTTP call it makes, sync or async (see above). `track()` calls inside it are still recorded.
 - `track(call)`: record a call made through something the SDK can't see: `track({ url, method, status, durationMs })`, or with `host` + `path`; optional `outcome`, `errorCode`, `provider`.
 - `getStats()`: `{ queued, dropped, sent, failedFlushes, lastFlushError }` for health checks, or `undefined` while the SDK is off (not initialised, or no `apiKey`/`endpoint`).
 
 Outcomes: `ok`, `http_4xx` (429 keeps its status), `http_5xx`, `timeout` (including your client's own timeout firing), `conn_reset`, `conn_refused`, `dns`, `tls`, `aborted` (you cancelled it; not counted against the provider), `other_error`.
 
+## Serverless and short-lived processes
+
+A function's process may be frozen right after it returns and killed later without warning, so the SDK can't rely on its background timer or on exit hooks there. Send at the end of each invocation instead. The API is the same on every platform; the SDK only reads the platform's environment variables to pick defaults (`serverless: true`, the function name as `service`).
+
+**AWS Lambda, Google Cloud Functions, Azure Functions, Netlify Functions:** wrap the handler. The flush is capped at 300 ms, and on Lambda never runs past the invocation's deadline (`context.getRemainingTimeInMillis()` minus 50 ms).
+
+```ts
+import { init, wrap } from '@theirside/sdk';
+
+init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: process.env.THEIRSIDE_ENDPOINT });
+
+export const handler = wrap(async (event, context) => {
+  // … your code, calling providers as usual
+});
+```
+
+If your handler already has a `finally`, flush there instead:
+
+```ts
+import { flush } from '@theirside/sdk';
+
+export const handler = async (event) => {
+  try {
+    return await chargeCard(event);
+  } finally {
+    await flush(300); // sends what this invocation recorded; resolves within 300 ms, never throws
+  }
+};
+```
+
+**Cloudflare Workers, Netlify Edge, Deno Deploy, Vercel:** respond first, send afterwards with `waitUntil`, so the user doesn't wait for the upload. `init()` at the top level is fine: it sets nothing up that needs a request.
+
+```ts
+import { init, wrapFetch } from '@theirside/sdk'; // Workers, Deno and Bun get the fetch-only build
+
+init({ apiKey: env.THEIRSIDE_API_KEY, endpoint: 'https://collector.example.com' });
+
+export default {
+  fetch: wrapFetch(async (request, env, ctx) => {
+    const res = await fetch('https://api.acme.com/v1/charges', { method: 'POST' });
+    return new Response(String(res.status));
+  }), // calls ctx.waitUntil(flush()) for you; or call it yourself
+};
+```
+
+On Vercel, pass its `waitUntil`: `wrapFetch(handler, { waitUntil })` with `import { waitUntil } from '@vercel/functions'`, or call `waitUntil(flush())` in your route.
+
+**Cron jobs and CLI scripts:** wrap the main function (or `await flush(1000)` before exiting); the process ends right after with its events sent.
+
+```ts
+await wrap(async () => {
+  await syncInvoices();
+}, { flushTimeoutMs: 1000 })();
+```
+
+**Runtimes without Node's `http` (Cloudflare Workers, Deno, Bun, Vercel Edge):** the package's conditional exports (`workerd`, `worker`, `deno`, `bun`, `edge-light`) give them a fetch-only build (`@theirside/sdk/edge`, also importable directly) that captures `fetch` by wrapping it, sends with the original `fetch` and imports no Node module. There, `untracked()` covers the fetch calls it starts synchronously (no AsyncLocalStorage), and on Workers events go out only on `flush()` (no timers outside a request; the remote config is refreshed during `flush()` too, at most once a minute).
+
+Things to know:
+
+- **Network:** the function must reach the collector (a VPC function needs a route to it, an edge function a public URL). An unreachable collector costs at most the flush cap per invocation; the events are kept for the next one and dropped beyond `maxQueue`.
+- **Path privacy:** keep the default, `strict`. `balanced` needs 5 sightings per process, which a short-lived process rarely reaches, so its endpoints stay `:id`.
+- **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
+
 ## How it captures
 
-- **fetch / undici:** Node's `diagnostics_channel` (`undici:request:create`, `:headers`, `:error`). No patching.
+- **fetch / undici:** Node's `diagnostics_channel` (`undici:request:create`, `:headers`, `:error`). No patching. In the fetch-only build (Workers, Deno, Bun), `globalThis.fetch` is wrapped instead: the wrapper returns what fetch returns and rethrows its errors.
 - **http / https:** the `http.client.request.start` channel hands over each request; the SDK observes that request's events without adding listeners, so your error handling is unchanged. Runtimes without the channel fall back to wrapping `http(s).request/get`.
 - A call is recorded when response headers arrive, or when it fails before that. Each request is counted once, also when AWS X-Ray, OpenTelemetry or nock wrap the same functions.
 - The SDK's own uploads use a dedicated agent, so they are never recorded and aren't seen by X-Ray or OpenTelemetry wrappers.

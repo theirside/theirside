@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks';
 import {
   EndpointTemplater,
   MAX_ERROR_CODE_LENGTH,
@@ -16,7 +15,6 @@ import type { ResolvedConfig, ResolvedProvider } from './config.js';
 import { HostPolicy } from './discovery.js';
 import type { Logger } from './log.js';
 import type { RingBuffer } from './queue.js';
-import { isUntracked } from './untracked.js';
 
 /** State kept between the start and the end of one call. */
 export interface Pending {
@@ -80,6 +78,8 @@ export class Recorder {
     private readonly log: Logger,
     private readonly onEnqueue: () => void,
     minPathSightings?: number,
+    /** True inside `untracked()` (Node: AsyncLocalStorage; fetch runtimes: synchronous scope). */
+    private readonly isUntracked: () => boolean = () => false,
   ) {
     this.providerMatchers = cfg.providers.map((p) => ({ value: p, matchers: p.matchers }));
     this.policy = new HostPolicy(cfg);
@@ -118,7 +118,7 @@ export class Recorder {
     method: string,
     path: string,
   ): Pending | undefined {
-    if (isUntracked()) return undefined; // inside untracked(): not a provider call
+    if (this.isUntracked()) return undefined; // inside untracked(): not a provider call
     const host = hostname.toLowerCase();
     const resolved = this.policy.resolve(host, port, this.lookupProvider(host, port));
     if (!resolved) return undefined;
