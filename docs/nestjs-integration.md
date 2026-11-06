@@ -160,7 +160,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.2.2`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.2.2 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.2.3`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.2.3 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -175,12 +175,16 @@ From 0.2.1 to 0.2.2: one call shows as one row. Ingest collapses repeated slashe
 
 **Don't rely on the doubled-slash routes.** One is made only when a clean row of the same call already exists, i.e. some caller sends it without the extra segment. If every caller of an endpoint uses SDK 0.1.0 with a base URL ending in `/`, no clean row ever exists, no route is made, and the call keeps arriving as an `:id` row (`/_ah/api/:id/orderendpoint/v1/x`). The fix is SDK 0.1.1 (`@theirside/sdk@0.1.1`), which collapses repeated slashes before templating; upgrade those services.
 
+From 0.2.2 to 0.2.3: Slack messages show endpoint templates and hosts as inline code (no more 🆔 for `:id:`). The catalog gives the big clouds' end-user APIs their own providers with alerts on: Google Maps Platform (`places`, `addressvalidation`, `routes`, `roads`… `.googleapis.com`), Gemini and Cloud AI APIs, Amazon SES, Bedrock, Cognito, Azure OpenAI, Cloudflare Turnstile and others; storage, pub/sub and other cloud services stay infrastructure with alerts off. On the first start, hosts that were grouped under Google Cloud, AWS, Microsoft Azure or Cloudflare move to these providers, but only out of providers nobody edited (renamed, alerts switched, hidden, support contact, routes…). If all of a provider's hosts move, its history moves with it; otherwise only new traffic goes to the new provider. The log lists each move (`catalog 0.2.3-cloud-end-user-apis: …`).
+
+Allowed path words now match whole camelCase segments: an allowed word `getLatestOrdSumStatus` lets `/v1/getLatestOrdSumStatus` through instead of `:id` (before, only segments whose camelCase parts were all known words passed). The dashboard stores words lower-case with `_ - .` removed (`_ah` → `ah`) and shows that form; segments are compared the same way. The SDK side needs `@theirside/sdk@0.1.2`; with collector 0.2.3 alone, rows that older SDKs send as `:id` merge into the named template when one exists.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.2.2
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.2.3
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -197,8 +201,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.2.2 .
-docker push <registry>/theirside-collector:0.2.2
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.2.3 .
+docker push <registry>/theirside-collector:0.2.3
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -221,7 +225,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.2.2` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.2.3` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -239,7 +243,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.2.2",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.2.3",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [
