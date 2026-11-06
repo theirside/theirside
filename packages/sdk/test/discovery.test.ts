@@ -549,3 +549,16 @@ describe('RemoteConfigClient', () => {
     expect(rc.lastError).toBe('http_404');
   });
 });
+
+describe('repeated slashes', () => {
+  it('a base URL ending in "/" sends the same template as one without', async () => {
+    start();
+    const base = '/_ah/api/';
+    expect(await getAs('cards.example.test', base + '/orderendpoint/v1/getOrderHistory')).toBe(200);
+    expect(await getAs('cards.example.test', '/_ah/api/orderendpoint/v1/getOrderHistory')).toBe(200);
+    await flush();
+    const endpoints = collector.events().map((e) => e.endpoint);
+    // `_ah` and `api` are Cloud Endpoints words; the service name needs an allowed word
+    expect(endpoints).toEqual(['/_ah/api/:id/v1/getOrderHistory', '/_ah/api/:id/v1/getOrderHistory']);
+  });
+});

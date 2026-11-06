@@ -45,7 +45,7 @@ For a discovered host the SDK sends `provider: null` and the hostname; the colle
 
 Applied in the SDK, before anything leaves the process (code: `packages/shared/src/templating.ts`):
 
-1. The query string and fragment are always dropped. Absolute-form paths (`https://host/path`, used with proxies) are reduced to the path.
+1. The query string and fragment are always dropped. Absolute-form paths (`https://host/path`, used with proxies) are reduced to the path. Repeated slashes collapse into one (`/_ah/api//orderendpoint/v1/x` → `/_ah/api/orderendpoint/v1/x`, as from a base URL ending in `/`), so an empty segment never shifts the positions after it (SDK 0.2.0; the collector collapses them in what older SDKs send).
 2. If you configured explicit `routes` for the provider and one matches, that route string is the template (`/v2/cards/:cardId/activate`).
 3. Otherwise each path segment that looks like an identifier is replaced with `:id`:
    - all digits (`12345`);
@@ -58,6 +58,7 @@ Applied in the SDK, before anything leaves the process (code: `packages/shared/s
    - tokens of 16+ characters that mix letters and digits, contain `+`/`=`, or mix upper and lower case like random strings;
    - any segment longer than 64 characters.
    - Version segments (`v1`, `v2.1`) stay; plain words go to step 4.
+   - In Google Cloud Endpoints paths (`/_ah/api/<name>/v<n>/<method>…`) the framework's `_ah` and `api` stay too, like versions (SDK 0.2.0). `<name>` and `<method>` go to step 4 as usual.
 4. **Plain words: path privacy.** Whether a non-ID segment like `cards` or `ivan-wei` is sent as-is depends on the mode (`pathPrivacy` in `init()`; the dashboard can set it per provider, and a mode set there wins):
    - **`strict` (default): only known API words.** A segment goes out as-is only when **every word in it** is in the built-in vocabulary (about 1,850 words real APIs use in their paths, mined from ~2,500 public API specs, with personal names removed; `tools/vocabulary/`) or in the provider's allowed words (Settings → Providers → "Allowed path words", plus words a catalog provider ships). Words are split at `-`, `_`, `.` and camelCase: `payment-methods`, `line_items`, `bulkUpdate` pass; `ivan-wei`, `olga`, `blue-running-shoes` become `:id`, however often they are called. Known words go out **from the first call**; anything else never: `/v2/people/ivan-wei` is sent as `/v2/people/:id`, and `/customers/cus_123/payment-methods` as `/customers/:id/payment-methods`, every time.
    - **`balanced`: frequency only.** Any plain word can go out as-is, but **only from its 5th sighting** at that position (per process; until then it goes out as `:id`, so nothing is sent on first sight: `/customers/cus_1/cards` is first sent as `/:id/:id/:id`, then `/customers/:id/:id`, then `/customers/:id/cards`). Use it only for providers whose paths never carry personal data; endpoint names are more accurate (product slugs, custom resource names). Set it for one provider in Settings → Providers → "Path privacy", or for the whole app with `init({ pathPrivacy: 'balanced' })`; a mode chosen in the dashboard for a provider wins over init(), and merging two providers keeps strict if either was strict.

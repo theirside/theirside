@@ -77,7 +77,17 @@ export function isIdSegment(rawSegment: string): boolean {
   return false;
 }
 
-/** Drop scheme/host (proxy-style absolute paths), query string and fragment. */
+/**
+ * `/_ah/api//x` → `/_ah/api/x`: an empty segment from a base URL ending in `/`
+ * would shift every later position, so one call would be templated (and
+ * learned) differently depending on how the caller joined its URL.
+ */
+export const collapseSlashes = (path: string): string => path.replace(/\/{2,}/g, '/');
+
+/**
+ * Drop scheme/host (proxy-style absolute paths), query string and fragment, and
+ * collapse repeated slashes.
+ */
 export function pathOnly(rawPath: string): string {
   let p = rawPath;
   if (p.startsWith('http://') || p.startsWith('https://')) {
@@ -90,7 +100,23 @@ export function pathOnly(rawPath: string): string {
   const h = p.indexOf('#');
   if (h !== -1) p = p.slice(0, h);
   if (!p.startsWith('/')) p = '/' + p;
-  return p;
+  return collapseSlashes(p);
+}
+
+/**
+ * Google Cloud Endpoints paths, `/_ah/api/<name>/v<n>/<method>…`: `_ah` and
+ * `api` (positions 0 and 1) are fixed words of the framework, never IDs, so they
+ * are sent as-is like version segments. `<name>` and `<method>` follow the
+ * usual rules (vocabulary, allowed words).
+ */
+export function isCloudEndpointsWord(segs: readonly string[], i: number): boolean {
+  return (
+    (i === 0 || i === 1) &&
+    segs.length >= 5 &&
+    segs[0] === '_ah' &&
+    segs[1] === 'api' &&
+    RE_VERSION.test(segs[3]!)
+  );
 }
 
 function splitSegments(path: string): string[] {
@@ -302,7 +328,9 @@ export interface LearnResult {
  * the provider a host belongs to (`PathPolicy.key`), all its hosts share that
  * key instead, so a provider's api/files/sandbox hosts hold one set of slots.
  *
- * Explicit routes (init(), dashboard, catalog) never reach the learner.
+ * `_ah` and `api` in Google Cloud Endpoints paths are exempt like versions
+ * (`isCloudEndpointsWord`). Explicit routes (init(), dashboard, catalog) never
+ * reach the learner.
  * Memory is hard-bounded: at most maxSlots × (maxValuesPerSlot + 1) counters,
  * maxLearned keys, maxDomains × foldSubdomainsAt label hashes plus as many
  * folded domains, and the remote tenant list (capped by the SDK config limits);
@@ -441,7 +469,7 @@ export class RouteLearner {
     const hostKey = policy.key ?? this.keyFor(host);
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i]!;
-      if (seg !== ID_PLACEHOLDER && !RE_VERSION.test(seg)) {
+      if (seg !== ID_PLACEHOLDER && !RE_VERSION.test(seg) && !isCloudEndpointsWord(segs, i)) {
         const key = `${hostKey}\u0000${parent}\u0000${i}`;
         keys.push(key);
         if (this.learned.get(key)) {

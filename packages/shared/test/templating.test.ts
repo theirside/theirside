@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   EndpointTemplater,
   OVERFLOW_TEMPLATE,
+  RouteLearner,
   autoTemplate,
   compileRoute,
+  isCloudEndpointsWord,
   isIdSegment,
   pathOnly,
 } from '../src/templating.js';
+import { isVocabularySegment } from '../src/vocabulary.js';
 
 describe('autoTemplate', () => {
   const cases: Array<[string, string]> = [
@@ -158,5 +161,61 @@ describe('cardinality guard', () => {
     for (let i = 0; i < 1000; i++) t.template('h', `/a/${i}`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((t as any).cache.size).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('repeated slashes and Google Cloud Endpoints paths', () => {
+  const CALL = '/orderendpoint/v1/getOrderHistory';
+  const policy = { privacy: 'strict' as const, allowedWords: new Set(['orderendpoint']) };
+
+  it.each([
+    ['/_ah/api//orderendpoint/v1/getOrderHistory', '/_ah/api/orderendpoint/v1/getOrderHistory'],
+    ['https://h.example//a//b?x=1', '/a/b'],
+    ['///a', '/a'],
+    ['/a/b//', '/a/b/'],
+  ])('pathOnly %s -> %s', (input, expected) => {
+    expect(pathOnly(input)).toBe(expected);
+  });
+
+  it('a base URL ending in "/" gives the same template as one without', () => {
+    // two services, each with its own learner, joining the URL differently
+    const withSlash = new EndpointTemplater({ learner: new RouteLearner() });
+    const without = new EndpointTemplater({ learner: new RouteLearner() });
+    const a = withSlash.template('h.example', 'https://h.example/_ah/api/' + CALL, [], policy);
+    const b = without.template('h.example', 'https://h.example/_ah/api' + CALL, [], policy);
+    expect(a).toBe('/_ah/api/orderendpoint/v1/getOrderHistory');
+    expect(b).toBe(a);
+    expect(autoTemplate('/_ah/api/' + CALL)).toBe(autoTemplate('/_ah/api' + CALL));
+  });
+
+  it('routes compile and match with slashes collapsed', () => {
+    const r = compileRoute('/_ah/api//orderendpoint/v1/:method');
+    expect(r.template).toBe('/_ah/api/orderendpoint/v1/:method');
+    const t = new EndpointTemplater();
+    expect(t.template('h', '/_ah/api//orderendpoint/v1/getOrderHistory', [r])).toBe(r.template);
+  });
+
+  it('_ah and api are known words in the Cloud Endpoints shape only', () => {
+    expect(isVocabularySegment('_ah')).toBe(false);
+    expect(isCloudEndpointsWord(['_ah', 'api', 'x', 'v1', 'y'], 0)).toBe(true);
+    expect(isCloudEndpointsWord(['_ah', 'api', 'x', 'v1', 'y'], 1)).toBe(true);
+    expect(isCloudEndpointsWord(['_ah', 'api', 'x', 'v1', 'y'], 2)).toBe(false);
+    expect(isCloudEndpointsWord(['_ah', 'api', 'x', 'y'], 0)).toBe(false); // too short
+    expect(isCloudEndpointsWord(['_ah', 'api', 'x', 'beta', 'y'], 0)).toBe(false); // no version
+    const t = new EndpointTemplater({ learner: new RouteLearner() });
+    // strict, without allowed words: the service name is unknown, the framework words are not
+    expect(t.template('h', '/_ah/api/orderendpoint/v1/getOrderHistory')).toBe(
+      '/_ah/api/:id/v1/getOrderHistory',
+    );
+    expect(t.template('h', '/_ah/users/list')).toBe('/:id/users/list');
+  });
+
+  it('Cloud Endpoints words are not counted towards the 16 distinct values', () => {
+    const t = new EndpointTemplater({ learner: new RouteLearner() });
+    for (let i = 0; i < 20; i++) t.template('h', `/w${'abcdefghijklmnopqrst'[i]}x/v1/list`);
+    expect(t.template('h', '/zzq/v1/list')).toBe('/:id/v1/list'); // position 0 learned as ID
+    expect(t.template('h', '/_ah/api/orderendpoint/v1/getOrderHistory', [], policy)).toBe(
+      '/_ah/api/orderendpoint/v1/getOrderHistory',
+    );
   });
 });
