@@ -5,6 +5,7 @@ const LABEL: Record<HealthStatus, string> = {
   green: 'Healthy',
   amber: 'Degraded',
   red: 'Failing',
+  idle: 'Idle',
   unknown: 'No data',
 };
 

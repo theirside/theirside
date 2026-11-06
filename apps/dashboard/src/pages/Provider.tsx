@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react';
-import { api, type EndpointHealth, type Overview, type Series } from '../api';
+import { api, type EndpointHealth, type Overview, type Range, type Series } from '../api';
 import { Chart, type ChartSeries } from '../components/Chart';
 import { Card, ErrorBox, Segmented, StatusDot, usePoll } from '../components/ui';
-import { ms, num, pct } from '../format';
+import { ago, ms, num, pct } from '../format';
 import { href } from '../router';
-
-type Range = '1h' | '24h' | '7d';
 
 const OUTCOME_COLORS: Record<string, string> = {
   http_5xx: '#d64545',
@@ -121,14 +119,16 @@ function EndpointCharts({
 export function Provider({ name, environment }: { name: string; environment: string }) {
   const [range, setRange] = useState<Range>('1h');
   const [open, setOpen] = useState<string | null>(null);
-  const [data, error] = usePoll(
-    () =>
-      api<Overview>(
-        `/v1/admin/overview${environment ? `?environment=${encodeURIComponent(environment)}` : ''}`,
-      ),
-    [environment],
-  );
-  const p = data?.providers.find((x) => x.name === name);
+  // endpoints called within the range stay listed; quiet ones come back as idle
+  const qs = new URLSearchParams({
+    provider: name,
+    range,
+    ...(environment ? { environment } : {}),
+  });
+  const [data, error] = usePoll(() => api<Overview>(`/v1/admin/overview?${qs}`), [qs.toString()]);
+  // a response for the previous range can land after a switch: show only the current one
+  const p = data?.range === range ? data.providers.find((x) => x.name === name) : undefined;
+  const idle = p?.endpoints.filter((e) => e.status === 'idle').length ?? 0;
   const key = (e: EndpointHealth) => `${e.environment} ${e.method} ${e.endpoint}`;
   return (
     <>
@@ -154,19 +154,28 @@ export function Provider({ name, environment }: { name: string; environment: str
           <div>
             <StatusDot status={p.status} label />
           </div>
-          <div>
-            <b>{p.score ?? '–'}</b> score
-          </div>
-          <div>
-            <b>{num(p.callsPerMin)}</b> calls/min
-          </div>
-          <div>
-            <b>{pct(p.errorRate)}</b> errors{' '}
-            <span className="muted">(normal {pct(p.normalErrorRate)})</span>
-          </div>
-          <div>
-            <b>{ms(p.p95Ms)}</b> p95
-          </div>
+          {p.callsPerMin === 0 ? (
+            // nothing in the scoring window: when it was last called, no live numbers
+            <div className="muted" data-testid="provider-last-call">
+              {p.lastCallAt ? `last call ${ago(p.lastCallAt)}` : 'never called'}
+            </div>
+          ) : (
+            <>
+              <div>
+                <b>{p.score ?? '–'}</b> score
+              </div>
+              <div>
+                <b>{num(p.callsPerMin)}</b> calls/min
+              </div>
+              <div>
+                <b>{pct(p.errorRate)}</b> errors{' '}
+                <span className="muted">(normal {pct(p.normalErrorRate)})</span>
+              </div>
+              <div>
+                <b>{ms(p.p95Ms)}</b> p95
+              </div>
+            </>
+          )}
           {p.openIncidentId && (
             <a className="tag red" href={href('incidents', p.openIncidentId)}>
               open incident
@@ -175,7 +184,16 @@ export function Provider({ name, environment }: { name: string; environment: str
         </div>
       )}
       {p && (
-        <Card title="Endpoints" actions={<span className="muted">click a row for charts</span>}>
+        <Card
+          title="Endpoints"
+          actions={
+            <span className="muted">
+              {idle > 0 &&
+                `idle: no calls in the last ${data!.windowMinutes} min, totals over ${range} · `}
+              click a row for charts
+            </span>
+          }
+        >
           <table className="table" data-testid="endpoints">
             <thead>
               <tr>
@@ -195,6 +213,7 @@ export function Provider({ name, environment }: { name: string; environment: str
                 <FragmentRow
                   key={key(e)}
                   e={e}
+                  range={range}
                   open={open === key(e)}
                   onToggle={() => setOpen(open === key(e) ? null : key(e))}
                 >
@@ -204,42 +223,74 @@ export function Provider({ name, environment }: { name: string; environment: str
             </tbody>
           </table>
           {p.endpoints.length === 0 && (
-            <div className="empty">No calls in the last few minutes.</div>
+            <div className="empty">
+              No calls in the last {range}
+              {p.lastCallAt ? ` (last call ${ago(p.lastCallAt)})` : ''}.
+            </div>
           )}
         </Card>
       )}
-      {data && !p && <div className="empty">No data for {name}.</div>}
+      {data?.range === range && !p && <div className="empty">No data for {name}.</div>}
     </>
   );
 }
 
 function FragmentRow({
   e,
+  range,
   open,
   onToggle,
   children,
 }: {
   e: EndpointHealth;
+  range: Range;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
+  const idle = e.status === 'idle';
   return (
     <>
-      <tr className={`clickable ${e.status}`} onClick={onToggle}>
+      <tr
+        className={`clickable ${e.status}`}
+        onClick={onToggle}
+        title={
+          idle ? `No calls in the scoring window; numbers are totals over ${range}` : undefined
+        }
+      >
         <td>
           <StatusDot status={e.status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
-          {e.learning && <span className="tag">learning</span>}
+          {idle && <span className="tag">idle</span>}
+          {e.learning && !idle && <span className="tag">learning</span>}
+          {e.inIncident && idle && <span className="tag red">open incident</span>}
           {e.environment !== 'production' && <span className="tag">{e.environment}</span>}
+          {idle && <span className="muted last-call"> last call {ago(e.lastCallAt)}</span>}
         </td>
-        <td className="num">{e.score ?? '–'}</td>
-        <td className="num">{num(e.callsPerMin)}</td>
-        <td className={`num ${e.inIncident ? 'bad' : ''}`}>{pct(e.errorRate)}</td>
-        <td className="num muted">{pct(e.normalErrorRate)}</td>
-        <td className="num">{pct(e.rate4xx)}</td>
-        <td className="num">{pct(e.rate429)}</td>
-        <td className="num">{ms(e.p95Ms)}</td>
-        <td className="num muted">{ms(e.normalP95Ms)}</td>
+        {idle ? (
+          <>
+            <td className="num">–</td>
+            <td className="num">
+              {num(e.rangeTotals.calls)} <span className="muted">in {range}</span>
+            </td>
+            <td className="num">{pct(e.rangeTotals.errorRate)}</td>
+            <td className="num muted">{pct(e.normalErrorRate)}</td>
+            <td className="num">–</td>
+            <td className="num">–</td>
+            <td className="num">{ms(e.rangeTotals.p95Ms)}</td>
+            <td className="num muted">{ms(e.normalP95Ms)}</td>
+          </>
+        ) : (
+          <>
+            <td className="num">{e.score ?? '–'}</td>
+            <td className="num">{num(e.callsPerMin)}</td>
+            <td className={`num ${e.inIncident ? 'bad' : ''}`}>{pct(e.errorRate)}</td>
+            <td className="num muted">{pct(e.normalErrorRate)}</td>
+            <td className="num">{pct(e.rate4xx)}</td>
+            <td className="num">{pct(e.rate429)}</td>
+            <td className="num">{ms(e.p95Ms)}</td>
+            <td className="num muted">{ms(e.normalP95Ms)}</td>
+          </>
+        )}
       </tr>
       {open && (
         <tr className="detail">

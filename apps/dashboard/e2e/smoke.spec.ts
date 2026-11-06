@@ -147,6 +147,63 @@ test('dashboard: login, providers, endpoint charts, incidents, settings', async 
   );
 });
 
+test('a quiet endpoint stays listed as idle across refreshes', async ({ page, request }) => {
+  // one call 20 minutes ago: inside the 1h range, outside the 5-minute scoring window
+  const ingestKey = process.env.THEIRSIDE_BOOTSTRAP_API_KEY ?? 'tsd_live_localdemo0000000000000000';
+  const provider = 'Quiet Smoke';
+  const res = await request.post('/v1/ingest', {
+    headers: { authorization: `Bearer ${ingestKey}` },
+    data: {
+      protocol: 1,
+      sdk: { name: '@theirside/sdk', version: 'smoke' },
+      service: 'smoke',
+      environment: 'production',
+      dropped: 0,
+      events: [
+        {
+          ts: Date.now() - 20 * 60_000,
+          provider,
+          host: 'quiet-smoke.test',
+          method: 'GET',
+          endpoint: '/v1/quiet/ping',
+          status: 200,
+          durationMs: 80,
+          outcome: 'ok',
+        },
+      ],
+    },
+  });
+  expect(res.status()).toBe(202);
+
+  await signIn(page, request);
+  const providers = page.getByTestId('providers');
+  const listed = providers.getByRole('row', { name: new RegExp(provider) });
+  await expect(listed).toContainText(/last call \d+ min ago/);
+
+  await page.goto(`/#/providers/${encodeURIComponent(provider)}`);
+  const row = page.getByTestId('endpoints').getByRole('row', { name: /\/v1\/quiet\/ping/ });
+  const checkIdle = async () => {
+    await expect(row).toBeVisible();
+    await expect(row).toHaveClass(/idle/);
+    await expect(row).toContainText('idle');
+    await expect(row).toContainText(/last call \d+ min ago/);
+    // earlier runs on the same stack add their call too
+    await expect(row).toContainText(/\d+ in 1h/);
+  };
+  await checkIdle();
+  // the page polls every 15 s: still there after a poll and after reloads
+  await page.waitForTimeout(16_000);
+  await checkIdle();
+  for (let i = 0; i < 2; i++) {
+    await page.reload();
+    await checkIdle();
+  }
+  // switching the range keeps it
+  await page.getByRole('tab', { name: '24h' }).click();
+  await expect(row).toContainText(/\d+ in 24h/);
+  await expect(page.getByTestId('provider-last-call')).toContainText('last call');
+});
+
 test('status page shows public providers only, and embed.js works', async ({ page, request }) => {
   const provider = await firstProviderWithTraffic(request);
   const { providers } = await (await request.get('/v1/admin/providers', { headers: auth })).json();

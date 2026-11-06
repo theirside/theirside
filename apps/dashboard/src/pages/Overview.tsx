@@ -1,6 +1,6 @@
 import { api, type Overview as OverviewData, type ProviderHealth } from '../api';
 import { ErrorBox, Empty, StatusDot, usePoll } from '../components/ui';
-import { ms, num, pct } from '../format';
+import { ago, ms, num, pct } from '../format';
 import { href } from '../router';
 
 export function Overview({ environment }: { environment: string }) {
@@ -108,16 +108,28 @@ function ProviderTable({ providers, testId }: { providers: ProviderHealth[]; tes
                 </a>
               )}
             </td>
-            <td className="num">{p.score ?? '–'}</td>
-            <td className="num">{num(p.callsPerMin)}</td>
-            <td
-              className={`num ${p.errorRate > p.normalErrorRate * 3 && p.errorRate > 0.01 ? 'bad' : ''}`}
-            >
-              {pct(p.errorRate)}
-            </td>
-            <td className="num muted">{pct(p.normalErrorRate)}</td>
-            <td className="num">{ms(p.p95Ms)}</td>
-            <td className="num muted">{ms(p.normalP95Ms)}</td>
+            {p.callsPerMin === 0 ? (
+              // no calls in the scoring window: when it was last called, no live numbers
+              <>
+                <td className="num">–</td>
+                <td className="muted last-call" colSpan={5}>
+                  {p.lastCallAt ? `last call ${ago(p.lastCallAt)}` : 'never called'}
+                </td>
+              </>
+            ) : (
+              <>
+                <td className="num">{p.score ?? '–'}</td>
+                <td className="num">{num(p.callsPerMin)}</td>
+                <td
+                  className={`num ${p.errorRate > p.normalErrorRate * 3 && p.errorRate > 0.01 ? 'bad' : ''}`}
+                >
+                  {pct(p.errorRate)}
+                </td>
+                <td className="num muted">{pct(p.normalErrorRate)}</td>
+                <td className="num">{ms(p.p95Ms)}</td>
+                <td className="num muted">{ms(p.normalP95Ms)}</td>
+              </>
+            )}
           </tr>
         ))}
       </tbody>

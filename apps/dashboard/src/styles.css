@@ -220,6 +220,23 @@ main {
 .dot.red {
   background: var(--red);
 }
+/* idle: known but quiet; a ring, neither healthy nor failing */
+.dot.idle {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--none);
+}
+.table tr.idle td {
+  color: var(--muted);
+}
+.table tr.idle .provider-link {
+  color: var(--muted);
+}
+.table td.last-call {
+  padding-left: 24px;
+}
+.table tr.idle td code {
+  opacity: 0.8;
+}
 .provider-link {
   display: inline-flex;
   align-items: center;

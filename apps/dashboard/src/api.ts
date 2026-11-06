@@ -43,7 +43,10 @@ export async function api<T>(
   return data as T;
 }
 
-export type HealthStatus = 'green' | 'amber' | 'red' | 'unknown';
+/** idle: called before, but not in the scoring window (never healthy or failing). */
+export type HealthStatus = 'green' | 'amber' | 'red' | 'idle' | 'unknown';
+
+export type Range = '1h' | '24h' | '7d';
 
 export interface EndpointHealth {
   environment: string;
@@ -62,6 +65,10 @@ export interface EndpointHealth {
   learning: boolean;
   inIncident: boolean;
   outcomes: Record<string, number>;
+  /** Start of the latest minute with calls within the range. */
+  lastCallAt: string;
+  /** Totals over the range (shown for idle endpoints). */
+  rangeTotals: { calls: number; errorRate: number; p95Ms: number | null };
 }
 
 export type ProviderSource = 'configured' | 'discovered' | 'catalog';
@@ -75,6 +82,8 @@ export interface ProviderHealth {
   source: ProviderSource;
   category: string | null;
   firstSeenAt: string | null;
+  /** Latest call, whatever the range; null = never. */
+  lastCallAt: string | null;
   alertsEnabled: boolean;
   status: HealthStatus;
   score: number | null;
@@ -115,6 +124,7 @@ export interface Overview {
   generatedAt: string;
   minute: string;
   windowMinutes: number;
+  range: Range;
   environment: string | null;
   providers: ProviderHealth[];
   openIncidents: Incident[];
@@ -136,7 +146,7 @@ export interface SeriesPoint {
 }
 
 export interface Series {
-  range: '1h' | '24h' | '7d';
+  range: Range;
   bucketMinutes: number;
   points: SeriesPoint[];
   baseline: {
