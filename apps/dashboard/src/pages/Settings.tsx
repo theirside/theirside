@@ -303,6 +303,27 @@ function AlertsTab() {
   );
 }
 
+const SDK_STATUS: Record<SdkInstance['status'], [string, string]> = {
+  running: ['running', ''],
+  idle: ['running, idle', 'no calls lately; the SDK still checks in'],
+  not_running: ['not running', 'no batch and no heartbeat for 15 minutes'],
+  ok: ['ok', ''],
+  silent: ['silent', 'it sent regularly and has been quiet far longer than usual'],
+  stale: [
+    'stale',
+    'no batch for 10 minutes (SDKs before 0.2.0 send no heartbeat, so idle looks the same)',
+  ],
+};
+
+const gapText = (s: number | null) =>
+  s === null
+    ? ''
+    : s < 120
+      ? `every ~${s}s`
+      : s < 7200
+        ? `every ~${Math.round(s / 60)} min`
+        : `every ~${Math.round(s / 3600)} h`;
+
 function SdkTab() {
   const [data, error] = usePoll(
     () => api<{ instances: SdkInstance[] }>('/v1/admin/sdk-instances'),
@@ -311,6 +332,11 @@ function SdkTab() {
   return (
     <>
       <ErrorBox error={error} />
+      <p className="muted">
+        One row per service and environment. Functions and other short-lived processes are never
+        flagged for being quiet between invocations, only when a regular one stops for much longer
+        than usual.
+      </p>
       {data?.instances.length === 0 && <Empty>No SDK has reported yet.</Empty>}
       {data && data.instances.length > 0 && (
         <table className="table" data-testid="sdk">
@@ -318,27 +344,52 @@ function SdkTab() {
             <tr>
               <th>Service</th>
               <th>Environment</th>
+              <th>Runs as</th>
+              <th className="num">Processes</th>
+              <th>Last call</th>
+              <th>Status</th>
               <th>SDK</th>
-              <th>Last seen</th>
               <th className="num">Dropped events</th>
               <th>Last flush error</th>
             </tr>
           </thead>
           <tbody>
-            {data.instances.map((s) => (
-              <tr key={s.service + s.environment} className={s.stale ? 'amber' : ''}>
-                <td>{s.service}</td>
-                <td>{s.environment}</td>
-                <td>
-                  {s.sdkName} {s.sdkVersion}
-                </td>
-                <td title={when(s.lastSeenAt)}>
-                  {ago(s.lastSeenAt)} {s.stale && <span className="tag">stale</span>}
-                </td>
-                <td className="num">{s.droppedEvents.toLocaleString()}</td>
-                <td className="muted">{s.lastFlushError ?? '–'}</td>
-              </tr>
-            ))}
+            {data.instances.map((s) => {
+              const [label, hint] = SDK_STATUS[s.status];
+              return (
+                <tr key={s.service + s.environment} className={s.stale ? 'amber' : ''}>
+                  <td>{s.service}</td>
+                  <td>{s.environment}</td>
+                  <td>
+                    {s.kind === 'short-lived'
+                      ? 'short-lived'
+                      : s.kind === 'long-running'
+                        ? 'long-running'
+                        : '–'}
+                    {s.platform && <span className="tag">{s.platform}</span>}
+                  </td>
+                  <td className="num" title="active now / seen in the last 24 hours">
+                    {s.kind === 'legacy' ? '–' : `${s.processes.active} / ${s.processes.lastDay}`}
+                  </td>
+                  <td title={s.lastEventAt ? when(s.lastEventAt) : undefined}>
+                    {s.lastEventAt ? ago(s.lastEventAt) : '–'}{' '}
+                    {s.kind === 'short-lived' && (
+                      <span className="muted">{gapText(s.usualGapSeconds)}</span>
+                    )}
+                  </td>
+                  <td title={hint || undefined}>
+                    {s.stale ? <span className="tag red">{label}</span> : label}
+                  </td>
+                  <td>
+                    {s.sdkVersions.length > 1
+                      ? s.sdkVersions.join(', ')
+                      : `${s.sdkName} ${s.sdkVersion}`}
+                  </td>
+                  <td className="num">{s.droppedEvents.toLocaleString()}</td>
+                  <td className="muted">{s.lastFlushError ?? '–'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

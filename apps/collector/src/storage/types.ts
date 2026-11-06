@@ -334,6 +334,10 @@ export interface SdkInstanceRecord extends Tenant {
   lastFlushError: string | null;
   serverless: boolean;
   platform: string | null;
+  /** Running average of the time between batches with calls (null: fewer than two). */
+  eventGapSeconds: number | null;
+  /** Batches with calls received. */
+  eventBatches: number;
 }
 
 /** One SDK process (SDK 0.2.0+: a random instance id and its start time). */

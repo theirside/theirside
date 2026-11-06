@@ -94,3 +94,46 @@ describe('SDK processes and heartbeats', () => {
     expect(pruned).toBe(5); // aaaa (last seen +10), bbbb (+20), l1-l3 (+21); cccc (+40) stays
   });
 });
+
+describe('SDK health API', () => {
+  it("learns a service's usual gap and reports processes and status", async () => {
+    const at = START + 60 * MIN;
+    // a regular function: a batch every 2 minutes from new cold starts
+    for (let i = 0; i < 12; i++)
+      await send(at + i * 2 * MIN, {
+        service: 'nightly-fn',
+        ...instance(`f${i}`, at + i * 2 * MIN - 1000),
+        runtime: { name: 'node', platform: 'aws-lambda', serverless: true },
+      });
+    const svc = (await t.db.storage.config.listSdkInstances(tenant())).find(
+      (s) => s.service === 'nightly-fn',
+    )!;
+    expect(svc.eventBatches).toBe(12);
+    expect(svc.eventGapSeconds).toBeCloseTo(120, 0);
+    t.clock.set(at + 23 * MIN + 10 * MIN);
+    const res = await t.app.inject({
+      method: 'GET',
+      url: '/v1/admin/sdk-instances',
+      headers: { authorization: `Bearer admin-token-for-tests` },
+    });
+    const fn = res.json().instances.find((s: { service: string }) => s.service === 'nightly-fn');
+    expect(fn).toMatchObject({
+      kind: 'short-lived',
+      status: 'ok',
+      stale: false,
+      platform: 'aws-lambda',
+      processes: { lastDay: 12 },
+      usualGapSeconds: 120,
+    });
+    // two hours later: far past its usual gap
+    t.clock.set(at + 3 * 60 * MIN);
+    const later = await t.app.inject({
+      method: 'GET',
+      url: '/v1/admin/sdk-instances',
+      headers: { authorization: `Bearer admin-token-for-tests` },
+    });
+    expect(
+      later.json().instances.find((s: { service: string }) => s.service === 'nightly-fn'),
+    ).toMatchObject({ status: 'silent', stale: true });
+  });
+});

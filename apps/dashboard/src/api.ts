@@ -206,16 +206,24 @@ export interface Delivery {
   title: string | null;
 }
 
+/** SDK health of one service and environment (collector: modules/api/sdk-health.ts). */
 export interface SdkInstance {
   service: string;
   environment: string;
+  kind: 'long-running' | 'short-lived' | 'legacy';
+  status: 'running' | 'idle' | 'not_running' | 'ok' | 'silent' | 'stale';
+  stale: boolean;
+  platform: string | null;
   sdkName: string;
   sdkVersion: string;
+  sdkVersions: string[];
+  processes: { active: number; lastDay: number };
   firstSeenAt: string;
   lastSeenAt: string;
+  lastEventAt: string | null;
+  usualGapSeconds: number | null;
   droppedEvents: number;
   lastFlushError: string | null;
-  stale: boolean;
 }
 
 export interface StatusPage {

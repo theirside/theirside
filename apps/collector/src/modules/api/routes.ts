@@ -12,6 +12,7 @@ import { OTHER_PROVIDER } from '../discovery/directory.js';
 import { mergeEndpoints } from '../discovery/endpoint-merge.js';
 import { adminTenant } from '../auth/tenant.js';
 import { DEFAULT_HEALTH_RANGE, computeHealth } from './health.js';
+import { sdkHealth } from './sdk-health.js';
 import {
   DEFAULT_THRESHOLDS,
   PROVIDER_THRESHOLD_KEYS,
@@ -324,13 +325,12 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
   app.get('/v1/admin/sdk-instances', auth, async (req, reply) => {
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
-    const now = ctx.clock.now().getTime();
-    return {
-      instances: (await ctx.storage.config.listSdkInstances(tenant)).map((s) => ({
-        ...s,
-        stale: now - s.lastSeenAt.getTime() > 10 * 60_000,
-      })),
-    };
+    const now = ctx.clock.now();
+    const [services, processes] = await Promise.all([
+      ctx.storage.config.listSdkInstances(tenant),
+      ctx.storage.config.listSdkProcesses(tenant, new Date(now.getTime() - 24 * 3600_000)),
+    ]);
+    return { instances: services.map((s) => sdkHealth(s, processes, now)) };
   });
 
   app.get('/v1/admin/settings/thresholds', auth, async (req, reply) => {

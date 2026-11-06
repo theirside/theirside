@@ -1312,12 +1312,23 @@ class PgConfigStore implements ConfigStore {
     const eventAt = hb.hasEvents === false ? null : at;
     await this.db.query(
       `INSERT INTO sdk_instances (org_id, project_id, service, environment, sdk_name, sdk_version, first_seen_at,
-                                  last_seen_at, last_event_at, dropped_events, last_flush_error, serverless, platform)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$10,$8,$9,$11,$12)
+                                  last_seen_at, last_event_at, dropped_events, last_flush_error, serverless, platform,
+                                  event_batches)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$10,$8,$9,$11,$12, CASE WHEN $10::timestamptz IS NULL THEN 0 ELSE 1 END)
        ON CONFLICT (org_id, project_id, service, environment) DO UPDATE SET
          sdk_name = EXCLUDED.sdk_name, sdk_version = EXCLUDED.sdk_version,
          last_seen_at = GREATEST(sdk_instances.last_seen_at, EXCLUDED.last_seen_at),
          last_event_at = GREATEST(sdk_instances.last_event_at, EXCLUDED.last_event_at),
+         -- running average of the gap between batches with calls (weights 0.8 old / 0.2 new)
+         event_gap_seconds = CASE
+           WHEN EXCLUDED.last_event_at IS NULL OR sdk_instances.last_event_at IS NULL
+             THEN sdk_instances.event_gap_seconds
+           WHEN sdk_instances.event_gap_seconds IS NULL
+             THEN GREATEST(0, EXTRACT(EPOCH FROM EXCLUDED.last_event_at - sdk_instances.last_event_at))
+           ELSE 0.8 * sdk_instances.event_gap_seconds
+                + 0.2 * GREATEST(0, EXTRACT(EPOCH FROM EXCLUDED.last_event_at - sdk_instances.last_event_at))
+         END,
+         event_batches = sdk_instances.event_batches + EXCLUDED.event_batches,
          dropped_events = sdk_instances.dropped_events + EXCLUDED.dropped_events,
          last_flush_error = EXCLUDED.last_flush_error,
          -- older SDKs don't say: keep what a newer one reported
@@ -1413,6 +1424,8 @@ class PgConfigStore implements ConfigStore {
       lastFlushError: (r.last_flush_error as string | null) ?? null,
       serverless: Boolean(r.serverless),
       platform: (r.platform as string | null) ?? null,
+      eventGapSeconds: r.event_gap_seconds === null ? null : Number(r.event_gap_seconds),
+      eventBatches: Number(r.event_batches ?? 0),
     }));
   }
 
