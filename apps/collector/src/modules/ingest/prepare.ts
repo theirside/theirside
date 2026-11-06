@@ -79,7 +79,7 @@ export function prepareBatch(
     if (ts > recv + MAX_FUTURE_SKEW_MS || ts < recv - MAX_PAST_SKEW_MS) ts = recv;
     const environment = e.environment ?? batch.environment;
     const method = e.method.toUpperCase();
-    // SDKs before 0.2.0 keep the empty segment of `//` (base URL ending in `/`)
+    // SDKs before 0.1.1 keep the empty segment of `//` (base URL ending in `/`)
     let endpoint = collapseSlashes(e.endpoint);
     if (rewriteEndpoint) endpoint = rewriteEndpoint(provider, method, endpoint);
     events.push({

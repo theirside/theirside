@@ -1,6 +1,6 @@
 {
   "name": "@theirside/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Drop-in Node SDK that records outgoing calls to your third-party providers and tells you when one of their endpoints starts failing.",
   "license": "MIT",
   "type": "module",

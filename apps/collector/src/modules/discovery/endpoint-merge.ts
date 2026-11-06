@@ -16,7 +16,7 @@ import { OTHER_PROVIDER } from './directory.js';
  * several templates:
  *
  * - `slashes`: a template with an empty segment (`/_ah/api//x`, SDKs before
- *   0.2.0 with a base URL ending in `/`) is the collapsed template;
+ *   0.1.1 with a base URL ending in `/`) is the collapsed template;
  * - `specific`: an `:id` template merges into the one known template of the
  *   same method and length that has, where it has `:id`, words the provider
  *   allows (its allowed path words, catalog words, or the Cloud Endpoints `_ah`
@@ -31,6 +31,12 @@ import { OTHER_PROVIDER } from './directory.js';
  * written in, at each place a known longer `:id` row suggests one: those match
  * only that exact raw path. History of such 0.1.0 rows is not merged: which
  * `:id` was the slash can't be told.
+ *
+ * Limitation: a doubled-slash route needs a clean row (the call templated
+ * without the extra segment) to copy. When every caller is on SDK 0.1.0 with a
+ * base URL ending in `/`, no clean row ever exists, so no route is made and the
+ * `:id` rows keep coming. The fix for those callers is SDK 0.1.1, which
+ * collapses the slashes itself.
  */
 
 export interface EndpointKey {

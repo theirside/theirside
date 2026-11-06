@@ -173,6 +173,8 @@ From 0.2.0 to 0.2.1: endpoints quiet in the 5-minute window stay listed as `idle
 
 From 0.2.1 to 0.2.2: one call shows as one row. Ingest collapses repeated slashes in templates (`/_ah/api//x` from a base URL ending in `/`), and the collector merges a provider's `:id` templates into the one more specific template whose extra words are the provider's allowed path words (or Cloud Endpoints' `_ah`/`api`), history included, within an hour of the upgrade and right after you add allowed words. Merged templates appear in the provider's routes, some with a doubled slash: those are for SDK 0.1.0, which matches them against the exact raw path. Rows SDK 0.1.0 sent before (`/:id/api/:id/:id/v1/x`, the `//` already turned into `:id`) stay as they are and age out.
 
+**Don't rely on the doubled-slash routes.** One is made only when a clean row of the same call already exists, i.e. some caller sends it without the extra segment. If every caller of an endpoint uses SDK 0.1.0 with a base URL ending in `/`, no clean row ever exists, no route is made, and the call keeps arriving as an `:id` row (`/_ah/api/:id/orderendpoint/v1/x`). The fix is SDK 0.1.1 (`@theirside/sdk@0.1.1`), which collapses repeated slashes before templating; upgrade those services.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
