@@ -56,6 +56,8 @@ export interface EventStore {
   ): Promise<EventSample[]>;
   /** Re-label raw events of provider `from` as `to` (incident samples follow a merge). */
   moveProvider(tenant: Tenant, from: string, to: string): Promise<number>;
+  /** Re-label raw events of one endpoint (request-ID samples follow an endpoint merge). */
+  moveEndpoint(tenant: Tenant, m: EndpointMove): Promise<number>;
   /** Ensure daily partitions exist for [from, from + days). Returns names created. */
   ensurePartitions(from: Date, days: number): Promise<string[]>;
   /** Drop partitions whose whole day is before `before`. Returns names dropped. */
@@ -85,6 +87,14 @@ export interface RollupQuery {
   method?: string;
 }
 
+/** One endpoint template of a provider merged into another (same method). */
+export interface EndpointMove {
+  provider: string;
+  method: string;
+  from: string;
+  to: string;
+}
+
 export interface RollupStore {
   upsert(tenant: Tenant, deltas: RollupDelta[]): Promise<void>;
   /** Raw per-minute rows, ordered by minute. */
@@ -100,6 +110,10 @@ export interface RollupStore {
   activeKeys(from: Date): Promise<(Tenant & RollupKey)[]>;
   /** Re-key every row of provider `from` to `to`, adding into rows that already exist. */
   moveProvider(tenant: Tenant, from: string, to: string): Promise<number>;
+  /** Distinct keys with rows since `since` (all retention when omitted), optionally one provider's. */
+  listKeys(tenant: Tenant, q: { provider?: string; since?: Date }): Promise<RollupKey[]>;
+  /** Re-key one endpoint's rows (all environments, all minutes), adding into existing rows. */
+  moveEndpoint(tenant: Tenant, m: EndpointMove): Promise<number>;
   deleteBefore(before: Date, tenant?: Tenant): Promise<number>;
 }
 
@@ -159,6 +173,11 @@ export interface IncidentStore {
   getBaselines(tenant: Tenant): Promise<Baseline[]>;
   /** Incidents of `from` become `to`'s; `from`'s baselines are dropped (recomputed). */
   moveProvider(tenant: Tenant, from: string, to: string): Promise<void>;
+  /**
+   * Incident endpoints `from` become `to` (combined when an incident has both);
+   * both endpoints' baselines are dropped, for the caller to recompute.
+   */
+  moveEndpoint(tenant: Tenant, m: EndpointMove): Promise<void>;
   upsertBaselines(tenant: Tenant, baselines: Baseline[]): Promise<void>;
   /** Minute ranges covered by incidents touching this endpoint, for baseline exclusion. */
   incidentWindows(
@@ -232,6 +251,8 @@ export interface ProviderRecord extends Tenant {
   pathPrivacy: 'strict' | 'balanced' | null;
   /** Extra words the SDK may send as-is in strict path privacy (lower-case). */
   allowedPathWords: string[];
+  /** Merged endpoint templates: `METHOD /old/template` → `/new/template`, rewritten at ingest. */
+  endpointAliases: Record<string, string>;
 }
 
 type ProviderDiscoveryFields =
@@ -245,7 +266,8 @@ type ProviderDiscoveryFields =
   | 'firstSeenAt'
   | 'displayName'
   | 'pathPrivacy'
-  | 'allowedPathWords';
+  | 'allowedPathWords'
+  | 'endpointAliases';
 
 export type ProviderInput = Omit<
   ProviderRecord,

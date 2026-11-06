@@ -1,7 +1,11 @@
 import { bootstrap } from './bootstrap.js';
 import { loadConfig } from './config.js';
 import { createContext } from './context.js';
-import { discoveryDigestJob, templateMergeJob } from './modules/discovery/jobs.js';
+import {
+  discoveryDigestJob,
+  endpointMergeJob,
+  templateMergeJob,
+} from './modules/discovery/jobs.js';
 import { alertJob, incidentJob } from './modules/incidents/job.js';
 import { partitionJob, rollupRetentionJob } from './modules/scheduler/maintenance.js';
 import { Scheduler } from './modules/scheduler/scheduler.js';
@@ -81,6 +85,7 @@ async function main() {
       alertJob(ctx.alerts),
       discoveryDigestJob(storage, ctx.alerts, { publicUrl: config.publicUrl, log: info }),
       templateMergeJob(storage, info),
+      endpointMergeJob(storage, ctx.directory.catalog.entries, info),
       rollupRetentionJob(storage, ctx.entitlements, {
         rollupRetentionDays: config.rollupRetentionDays,
       }),

@@ -8,6 +8,7 @@ import type { Incident, Tenant } from '../../storage/types.js';
 import { bearerToken } from '../auth/api-keys.js';
 import { adminOnly, requireAdmin } from '../auth/routes.js';
 import { OTHER_PROVIDER } from '../discovery/directory.js';
+import { mergeEndpoints } from '../discovery/endpoint-merge.js';
 import { adminTenant } from '../auth/tenant.js';
 import { DEFAULT_HEALTH_RANGE, computeHealth } from './health.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
@@ -259,8 +260,22 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
       )
         throw adminOnly('change what the status page shows');
     }
-    const updated = await ctx.storage.config.updateProvider(tenant, id, patch);
-    // hosts, hidden/internal: ingest must see the change at once (the SDK within a minute)
+    const before = (await ctx.storage.config.listProviders(tenant)).find((p) => p.id === id);
+    let updated = await ctx.storage.config.updateProvider(tenant, id, patch);
+    // new allowed words: merge the `:id` rows they now name, history included
+    const wordsAdded =
+      updated &&
+      before &&
+      updated.allowedPathWords.some((w) => !before.allowedPathWords.includes(w));
+    if (updated && wordsAdded) {
+      await mergeEndpoints(ctx.storage, tenant, ctx.clock.now(), {
+        catalog: ctx.directory.catalog.entries,
+        provider: updated.name,
+      });
+      updated =
+        (await ctx.storage.config.listProviders(tenant)).find((p) => p.id === id) ?? updated;
+    }
+    // hosts, hidden/internal, aliases: ingest must see the change at once (the SDK within a minute)
     ctx.directory.invalidate(tenant);
     return updated ?? reply.code(404).send({ error: 'not found' });
   });

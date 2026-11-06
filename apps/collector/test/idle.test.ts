@@ -328,7 +328,7 @@ describe('migration 008', () => {
          VALUES ('org_1', 'prj_1', 'production', 'Called', '/a', 'GET', '2026-11-01T10:00:00Z', 3),
                 ('org_1', 'prj_1', 'staging', 'Called', '/b', 'GET', '2026-11-02T08:30:00Z', 1)`,
       );
-      expect(await migrate(pool)).toEqual(['008_provider_last_call.sql']);
+      expect((await migrate(pool))[0]).toBe('008_provider_last_call.sql');
       const { rows } = await pool.query(`SELECT name, last_call_at FROM providers ORDER BY name`);
       expect(rows).toEqual([
         { name: 'Called', last_call_at: new Date('2026-11-02T08:30:00Z') },

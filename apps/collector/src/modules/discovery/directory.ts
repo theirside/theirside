@@ -109,6 +109,16 @@ export class ProviderDirectory {
     );
   }
 
+  /** Merged endpoint templates per provider name (`METHOD /old` → `/new`), for ingest. */
+  async endpointAliases(tenant: Tenant): Promise<Map<string, Readonly<Record<string, string>>>> {
+    const s = await this.snapshot(tenant);
+    const out = new Map<string, Readonly<Record<string, string>>>();
+    for (const e of s.entries)
+      if (Object.keys(e.record.endpointAliases).length > 0)
+        out.set(e.record.name, e.record.endpointAliases);
+    return out;
+  }
+
   /**
    * Provider name per host, or null to drop events for that host. Creates
    * providers and records hosts as a side effect.

@@ -1,9 +1,10 @@
-import { compileRoute } from '@theirside/shared';
+import { compileRoute, type CatalogEntry } from '@theirside/shared';
 import type { ProviderRecord, Storage, Tenant } from '../../storage/types.js';
 import type { AlertPayload } from '../alerts/channels.js';
 import type { AlertDispatcher } from '../alerts/dispatcher.js';
 import type { Job } from '../scheduler/scheduler.js';
 import { OTHER_PROVIDER } from './directory.js';
+import { mergeEndpoints } from './endpoint-merge.js';
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -196,6 +197,44 @@ export async function mergeTemplates(
     out.push({ provider: p.name, routes: add });
   }
   return out;
+}
+
+/** Look-back for the hourly endpoint merge; the very first run takes all retained rollups. */
+export const ENDPOINT_MERGE_DAYS = 7;
+
+/**
+ * Hourly (or on the first tick after): one call, one row (`mergeEndpoints`).
+ * Templates seen in the last 7 days are planned; their whole history moves.
+ * The first run after an upgrade plans from all retained rollups.
+ */
+export function endpointMergeJob(
+  storage: Storage,
+  catalog: readonly CatalogEntry[],
+  log?: (m: string) => void,
+): Job {
+  return {
+    name: 'endpoint-merge',
+    async run(now) {
+      const first = (await storage.config.getMeta('job:endpoint-merge:last_slot')) === null;
+      await oncePerSlot(
+        storage,
+        'endpoint-merge',
+        hourSlot(now),
+        now,
+        async () => {
+          for await (const tenant of tenants(storage))
+            for (const r of await mergeEndpoints(storage, tenant, now, {
+              catalog,
+              ...(first ? {} : { since: new Date(now.getTime() - ENDPOINT_MERGE_DAYS * DAY) }),
+            }))
+              log?.(
+                `merged endpoints of ${r.provider}: ${r.merges.map((m) => `${m.method} ${m.endpoint} → ${m.to}`).join(', ')}${r.routes.length ? `; routes added: ${r.routes.join(', ')}` : ''}`,
+              );
+        },
+        log,
+      );
+    },
+  };
 }
 
 /** Daily at 03:00 UTC (or on the first tick after); merged routes reach the SDK through the remote config. */

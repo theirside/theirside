@@ -114,8 +114,18 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
       const assigned =
         discovered.size > 0 ? await deps.directory.resolve(tenant, discovered) : null;
       const blocked = await deps.directory.blockedNames(tenant);
-      const prepared = prepareBatch(parsed.data, receivedAt, (provider, host) =>
-        provider === null ? (assigned?.get(host) ?? null) : blocked.has(provider) ? null : provider,
+      const aliases = await deps.directory.endpointAliases(tenant);
+      const prepared = prepareBatch(
+        parsed.data,
+        receivedAt,
+        (provider, host) =>
+          provider === null
+            ? (assigned?.get(host) ?? null)
+            : blocked.has(provider)
+              ? null
+              : provider,
+        (provider, method, endpoint) =>
+          aliases.get(provider)?.[`${method} ${endpoint}`] ?? endpoint,
       );
 
       try {

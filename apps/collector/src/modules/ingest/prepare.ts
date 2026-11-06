@@ -1,6 +1,7 @@
 import {
   OUTCOMES,
   bucketIndex,
+  collapseSlashes,
   emptyHistogram,
   type Outcome,
   type ParsedIngestBatch,
@@ -32,6 +33,12 @@ export interface PreparedBatch {
  */
 export type ProviderResolver = (provider: string | null, host: string) => string | null;
 
+/**
+ * The endpoint template to store for a provider's call: merged templates are
+ * rewritten to the template they were merged into (provider `endpointAliases`).
+ */
+export type EndpointRewriter = (provider: string, method: string, endpoint: string) => string;
+
 /** Without auto-discovery data: SDK names as they are, discovered hosts under their host. */
 export const passThrough: ProviderResolver = (provider, host) => provider ?? host;
 
@@ -51,6 +58,7 @@ export function prepareBatch(
   batch: ParsedIngestBatch,
   receivedAt: Date,
   resolveProvider: ProviderResolver = passThrough,
+  rewriteEndpoint?: EndpointRewriter,
 ): PreparedBatch {
   const recv = receivedAt.getTime();
   const okWeight = Math.max(1, Math.round(1 / (batch.sampleRate ?? 1)));
@@ -71,6 +79,9 @@ export function prepareBatch(
     if (ts > recv + MAX_FUTURE_SKEW_MS || ts < recv - MAX_PAST_SKEW_MS) ts = recv;
     const environment = e.environment ?? batch.environment;
     const method = e.method.toUpperCase();
+    // SDKs before 0.2.0 keep the empty segment of `//` (base URL ending in `/`)
+    let endpoint = collapseSlashes(e.endpoint);
+    if (rewriteEndpoint) endpoint = rewriteEndpoint(provider, method, endpoint);
     events.push({
       ts: new Date(ts),
       service: e.service ?? batch.service,
@@ -79,7 +90,7 @@ export function prepareBatch(
       provider,
       host: e.host,
       method,
-      endpoint: e.endpoint,
+      endpoint,
       status: e.status,
       durationMs: e.durationMs,
       outcome: e.outcome,
@@ -91,13 +102,13 @@ export function prepareBatch(
     if (ts > (lastCalls.get(provider)?.getTime() ?? 0)) lastCalls.set(provider, new Date(ts));
 
     const minute = new Date(floorMinute(ts)).toISOString();
-    const key = `${environment}\u0000${provider}\u0000${e.endpoint}\u0000${method}\u0000${minute}`;
+    const key = `${environment}\u0000${provider}\u0000${endpoint}\u0000${method}\u0000${minute}`;
     let d = deltas.get(key);
     if (!d) {
       d = {
         environment,
         provider,
-        endpoint: e.endpoint,
+        endpoint,
         method,
         minute,
         total: 0,

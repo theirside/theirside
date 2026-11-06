@@ -2,6 +2,7 @@ import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
 import { COUNTER_COLUMNS, KEY_COLUMNS, SUM_SELECT, rowToRollup } from './columns.js';
 import type {
+  EndpointMove,
   AlertChannelInput,
   AlertChannelRecord,
   AlertDelivery,
@@ -73,6 +74,15 @@ class PgEventStore implements EventStore {
     const { rowCount } = await this.db.query(
       `UPDATE events SET provider = $4 WHERE org_id = $1 AND project_id = $2 AND provider = $3`,
       [tenant.orgId, tenant.projectId, from, to],
+    );
+    return rowCount ?? 0;
+  }
+
+  async moveEndpoint(tenant: Tenant, m: EndpointMove) {
+    const { rowCount } = await this.db.query(
+      `UPDATE events SET endpoint = $6
+        WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND method = $4 AND endpoint = $5`,
+      [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to],
     );
     return rowCount ?? 0;
   }
@@ -333,6 +343,47 @@ class PgRollupStore implements RollupStore {
     return rowCount ?? 0;
   }
 
+  async listKeys(tenant: Tenant, q: { provider?: string; since?: Date }) {
+    const params: unknown[] = [tenant.orgId, tenant.projectId];
+    let where = 'org_id = $1 AND project_id = $2';
+    if (q.provider !== undefined) {
+      params.push(q.provider);
+      where += ` AND provider = $${params.length}`;
+    }
+    if (q.since) {
+      params.push(q.since);
+      where += ` AND minute >= $${params.length}`;
+    }
+    const { rows } = await this.db.query(
+      `SELECT DISTINCT environment, provider, endpoint, method FROM rollups_1m WHERE ${where}`,
+      params,
+    );
+    return rows.map((r: Row) => ({
+      environment: r.environment as string,
+      provider: r.provider as string,
+      endpoint: r.endpoint as string,
+      method: r.method as string,
+    }));
+  }
+
+  async moveEndpoint(tenant: Tenant, m: EndpointMove) {
+    const cols = [...COUNTER_COLUMNS, 'latency_sum_ms'];
+    const { rowCount } = await this.db.query(
+      `WITH moved AS (
+         DELETE FROM rollups_1m
+          WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND method = $4 AND endpoint = $5
+         RETURNING *
+       )
+       INSERT INTO rollups_1m (org_id, project_id, environment, provider, endpoint, method, minute, ${cols.join(', ')})
+       SELECT org_id, project_id, environment, provider, $6, method, minute, ${cols.join(', ')} FROM moved
+       ORDER BY environment, minute
+       ON CONFLICT (org_id, project_id, environment, provider, endpoint, method, minute) DO UPDATE SET
+         ${cols.map((c) => `${c} = rollups_1m.${c} + EXCLUDED.${c}`).join(', ')}`,
+      [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to],
+    );
+    return rowCount ?? 0;
+  }
+
   async activeKeys(from: Date) {
     const { rows } = await this.db.query(
       `SELECT DISTINCT org_id, project_id, environment, provider, endpoint, method
@@ -408,6 +459,48 @@ class PgIncidentStore implements IncidentStore {
     await this.db.query(
       `DELETE FROM baselines WHERE org_id = $1 AND project_id = $2 AND provider IN ($3, $4)`,
       [tenant.orgId, tenant.projectId, from, to],
+    );
+  }
+
+  async moveEndpoint(tenant: Tenant, m: EndpointMove) {
+    const p = [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to];
+    const ofProvider = `incident_id IN (SELECT id FROM incidents WHERE org_id = $1 AND project_id = $2 AND provider = $3)`;
+    // an incident with both: one row for `to`, from the earliest sighting, the worst peak,
+    // recovered only when both had recovered
+    await this.db.query(
+      `UPDATE incident_endpoints t SET
+         first_seen_at = LEAST(t.first_seen_at, f.first_seen_at),
+         peak_error_rate = GREATEST(t.peak_error_rate, f.peak_error_rate),
+         recovered_at = CASE WHEN t.recovered_at IS NULL OR f.recovered_at IS NULL THEN NULL
+                             ELSE GREATEST(t.recovered_at, f.recovered_at) END
+         FROM incident_endpoints f
+        WHERE f.incident_id = t.incident_id AND f.method = $4 AND f.endpoint = $5
+          AND t.method = $4 AND t.endpoint = $6 AND t.${ofProvider}`,
+      p,
+    );
+    await this.db.query(
+      `DELETE FROM incident_endpoints f
+        WHERE f.method = $4 AND f.endpoint = $5 AND f.${ofProvider}
+          AND EXISTS (SELECT 1 FROM incident_endpoints t
+                       WHERE t.incident_id = f.incident_id AND t.method = $4 AND t.endpoint = $6)`,
+      p,
+    );
+    await this.db.query(
+      `UPDATE incident_endpoints SET endpoint = $6
+        WHERE method = $4 AND endpoint = $5 AND ${ofProvider}`,
+      p,
+    );
+    // one endpoint left: no longer a provider-wide incident
+    await this.db.query(
+      `UPDATE incidents i SET scope = 'endpoint', updated_at = now()
+        WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND scope = 'provider'
+          AND (SELECT count(*) FROM incident_endpoints e WHERE e.incident_id = i.id) = 1`,
+      p.slice(0, 3),
+    );
+    await this.db.query(
+      `DELETE FROM baselines WHERE org_id = $1 AND project_id = $2 AND provider = $3
+          AND method = $4 AND endpoint IN ($5, $6)`,
+      p,
     );
   }
 
@@ -694,6 +787,7 @@ function rowToProvider(r: Row): ProviderRecord {
     displayName: (r.display_name as string | null) ?? null,
     pathPrivacy: (r.path_privacy as ProviderRecord['pathPrivacy'] | undefined) ?? null,
     allowedPathWords: (r.allowed_path_words as string[] | undefined) ?? [],
+    endpointAliases: (r.endpoint_aliases as Record<string, string> | undefined) ?? {},
   };
 }
 
@@ -758,6 +852,7 @@ const PROVIDER_FIELDS: [keyof ProviderInput, string][] = [
   ['displayName', 'display_name'],
   ['pathPrivacy', 'path_privacy'],
   ['allowedPathWords', 'allowed_path_words'],
+  ['endpointAliases', 'endpoint_aliases'],
 ];
 
 class PgConfigStore implements ConfigStore {
@@ -979,6 +1074,7 @@ class PgConfigStore implements ConfigStore {
                              ELSE COALESCE(p.path_privacy, src.path_privacy) END,
          first_seen_at = LEAST(p.first_seen_at, src.first_seen_at),
          last_call_at = GREATEST(p.last_call_at, src.last_call_at),
+         endpoint_aliases = src.endpoint_aliases || p.endpoint_aliases,
          updated_at = now()
        FROM src
        WHERE p.org_id = $1 AND p.project_id = $2 AND p.id = $4
