@@ -85,6 +85,8 @@ const calls = (
 beforeAll(async () => {
   t = await startTestApp({ clock: new FakeClock(F - 2 * 60 * MIN) });
   await t.db.storage.events.ensurePartitions(new Date(F - 2 * 60 * MIN), 2);
+  // per-status counts exist for the whole history (an install upgraded long ago)
+  await t.db.storage.config.setMeta('status_mix_since', new Date(START).toISOString());
   await history('UserCo', '/v1/login', 'POST', 30);
   await history('UserCo', '/v1/profile', 'GET', 120);
   await history('CardCo', '/v1/cards', 'GET', 30);
@@ -171,5 +173,36 @@ describe('behaviour change (database)', () => {
     const s = res.json();
     expect(s.points.at(-1).statusMix).toEqual({ auth: 1 });
     expect(s.baseline.statusMix).toMatchObject({ auth: 0, outage: 0 });
+  });
+});
+
+describe('right after the upgrade to 0.3.0', () => {
+  it('4xx groups are not judged until a day of per-status counts exists', async () => {
+    const { refreshBaselines } = await import('../src/modules/scoring/baseline.js');
+    const { resolveThresholds } = await import('../src/modules/scoring/thresholds.js');
+    const key = {
+      environment: 'production',
+      provider: 'UserCo',
+      endpoint: '/v1/profile',
+      method: 'GET',
+    };
+    const at = new Date(F + 10 * MIN);
+    const thr = resolveThresholds({});
+    // upgraded an hour before: old rows can't tell 404 from other 4xx
+    await t.db.storage.config.setMeta('status_mix_since', new Date(F - 60 * MIN).toISOString());
+    let b = (await refreshBaselines(t.db.storage, tenant(), [key], at, thr)).values().next().value!;
+    expect(b).toMatchObject({ learning: false, statusMixLearning: true });
+    // a day and more of it: judged
+    await t.db.storage.config.setMeta(
+      'status_mix_since',
+      new Date(F - 26 * 60 * MIN).toISOString(),
+    );
+    b = (await refreshBaselines(t.db.storage, tenant(), [key], at, thr)).values().next().value!;
+    expect(b).toMatchObject({ learning: false, statusMixLearning: false });
+    const stored = (await t.db.storage.incidents.getBaselines(tenant())).find(
+      (x) => x.endpoint === '/v1/profile',
+    )!;
+    expect(stored.statusMixLearning).toBe(false);
+    expect(stored.statusMix).not.toHaveProperty('learning');
   });
 });

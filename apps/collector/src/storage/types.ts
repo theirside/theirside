@@ -130,6 +130,8 @@ export interface Baseline extends RollupKey {
   statusMix: Partial<Record<FailureGroup | 'nonSuccess', number>>;
   /** Calls per minute over the history (null: no history). Derived, not stored. */
   callsPerMin: number | null;
+  /** Under a day of per-status counts behind `statusMix` (stored in status_mix as `learning`). */
+  statusMixLearning?: boolean;
   sampleSize: number;
   historyMinutes: number;
   learning: boolean;

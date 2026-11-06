@@ -40,8 +40,14 @@ export function baselineFrom(
   firstMinute: Date,
   now: Date,
   t: Thresholds,
+  /**
+   * Counts from minutes with per-status counts only (after the upgrade to collector 0.3.0,
+   * while that is less than the baseline window) and how many minutes they span.
+   */
+  split?: { counts: RollupCounts | undefined; minutes: number },
 ): Baseline {
   const s = windowStats([counts]);
+  const mixStats = split ? windowStats(split.counts ? [split.counts] : []) : s;
   const historyMinutes = Math.max(0, Math.floor((now.getTime() - firstMinute.getTime()) / MIN));
   const learning = historyMinutes < t.learningMinHours * 60 || s.calls < t.learningMinCalls;
   return {
@@ -53,15 +59,18 @@ export function baselineFrom(
     p95Ms: histogramQuantile(s.histogram, 0.95),
     // the normal status mix (behaviour-change detection) and call volume (side signals)
     statusMix:
-      s.calls > 0
+      mixStats.calls > 0
         ? {
-            auth: s.groups.auth / s.calls,
-            not_found: s.groups.not_found / s.calls,
-            validation: s.groups.validation / s.calls,
-            client_other: s.groups.client_other / s.calls,
-            nonSuccess: s.nonSuccess / s.calls,
+            auth: mixStats.groups.auth / mixStats.calls,
+            not_found: mixStats.groups.not_found / mixStats.calls,
+            validation: mixStats.groups.validation / mixStats.calls,
+            client_other: mixStats.groups.client_other / mixStats.calls,
+            nonSuccess: mixStats.nonSuccess / mixStats.calls,
           }
         : {},
+    statusMixLearning: split
+      ? split.minutes < t.learningMinHours * 60 || mixStats.calls < t.learningMinCalls
+      : learning,
     // over the span the counts cover (the last baselineGapMinutes aren't in them)
     callsPerMin:
       historyMinutes - t.baselineGapMinutes > 0
@@ -96,6 +105,23 @@ export async function refreshBaselines(
   const wanted = new Set(keys.map(keyId));
   const aggs = await storage.rollups.aggregateByKey(tenant, { from, to });
   const byKey = new Map(aggs.map((a) => [keyId(a), a]));
+  // per-status counts exist since the upgrade to collector 0.3.0: the status mix only from then
+  const sinceRaw = await storage.config.getMeta('status_mix_since');
+  const since = sinceRaw ? new Date(sinceRaw) : null;
+  let splitByKey: Map<string, RollupCounts> | null = null;
+  let splitMinutes = 0;
+  if (since && since.getTime() > from.getTime()) {
+    splitMinutes = Math.max(0, Math.floor((to.getTime() - since.getTime()) / MIN));
+    splitByKey =
+      since.getTime() < to.getTime()
+        ? new Map(
+            (await storage.rollups.aggregateByKey(tenant, { from: since, to })).map((a) => [
+              keyId(a),
+              a,
+            ]),
+          )
+        : new Map();
+  }
 
   const baselines: Baseline[] = [];
   for (const key of keys) {
@@ -113,7 +139,14 @@ export async function refreshBaselines(
       });
       if (excluded[0]) counts = subtract(counts, excluded[0]);
     }
-    const b = baselineFrom(key, counts, new Date(agg.firstMinute), now, t);
+    const b = baselineFrom(
+      key,
+      counts,
+      new Date(agg.firstMinute),
+      now,
+      t,
+      splitByKey ? { counts: splitByKey.get(keyId(key)), minutes: splitMinutes } : undefined,
+    );
     if (wanted.has(keyId(key))) baselines.push(b);
     out.set(keyId(key), b);
   }

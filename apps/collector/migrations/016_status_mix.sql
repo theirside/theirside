@@ -18,3 +18,10 @@ ALTER TABLE incidents ADD CONSTRAINT incidents_kind_check CHECK (
   kind IN ('errors', 'latency', 'auth', 'not_found', 'validation', 'rate_limited', 'behaviour')
 );
 ALTER TABLE incidents ADD COLUMN deploy_hint text;
+
+-- Rollups written before this have no per-status counts (their 4xx would all look like "other
+-- 4xx"), so baselines take the status mix only from minutes after this moment, and 4xx groups
+-- aren't judged until a day of it exists.
+INSERT INTO install_meta (key, value)
+VALUES ('status_mix_since', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+ON CONFLICT (key) DO NOTHING;

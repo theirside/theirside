@@ -449,7 +449,10 @@ function rowToBaseline(r: Row): Baseline {
     rate429: Number(r.rate_429),
     p50Ms: r.p50_ms === null ? null : Number(r.p50_ms),
     p95Ms: r.p95_ms === null ? null : Number(r.p95_ms),
-    statusMix: (r.status_mix as Baseline['statusMix'] | null) ?? {},
+    ...(() => {
+      const { learning, ...mix } = (r.status_mix as Record<string, number> | null) ?? {};
+      return { statusMix: mix as Baseline['statusMix'], statusMixLearning: Boolean(learning) };
+    })(),
     callsPerMin:
       Number(r.history_minutes) > 0 ? Number(r.sample_size) / Number(r.history_minutes) : null,
     sampleSize: Number(r.sample_size),
@@ -553,7 +556,10 @@ class PgIncidentStore implements IncidentStore {
           b.historyMinutes,
           b.learning,
           b.computedAt,
-          JSON.stringify(b.statusMix ?? {}),
+          JSON.stringify({
+            ...(b.statusMix ?? {}),
+            ...(b.statusMixLearning ? { learning: 1 } : {}),
+          }),
         ],
       );
     }

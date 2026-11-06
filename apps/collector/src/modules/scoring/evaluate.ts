@@ -101,6 +101,11 @@ export interface BaselineView {
   statusMix?: Partial<Record<FailureGroup | 'nonSuccess', number>>;
   /** Normal calls per minute over the baseline history (side signals). */
   callsPerMin?: number | null;
+  /**
+   * The status mix isn't known well enough yet (under a day of per-status counts, e.g.
+   * right after the upgrade to collector 0.3.0): 4xx groups aren't judged or scored.
+   */
+  statusMixLearning?: boolean;
 }
 
 /** Baseline for an endpoint with no history at all. */
@@ -271,6 +276,7 @@ export function evaluate(
   const shifted = (count: number, base: number) =>
     enough &&
     !b.learning &&
+    !b.statusMixLearning &&
     count >= t.minErrors &&
     count / stats.calls >= errorThreshold(base, t) &&
     binomialUpperTail(stats.calls, count, Math.max(base, t.minBaselineRate)) < t.maxPValue;
@@ -361,7 +367,7 @@ export function scoreWindow(stats: WindowStats, b: BaselineView, t: Thresholds):
   // the worst failure group counts like provider errors: an endpoint answering 401 to every
   // call scores as low as one answering 503 (only against a learned normal)
   let worst = excess(stats.errorRate, b.providerErrorRate);
-  if (!b.learning && stats.calls > 0) {
+  if (!b.learning && !b.statusMixLearning && stats.calls > 0) {
     for (const g of ['auth', 'not_found', 'validation', 'rate_limited', 'client_other'] as const) {
       const base = g === 'rate_limited' ? b.rate429 : (b.statusMix?.[g] ?? 0);
       worst = Math.max(worst, excess(stats.groups[g] / stats.calls, base));
