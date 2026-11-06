@@ -155,7 +155,27 @@ describe('provider actions', () => {
       pathPrivacy: 'balanced',
       allowedWords: ['sneakers', 'jackets'],
     });
-    for (const bad of [{ pathPrivacy: 'loose' }, { allowedPathWords: ['two words'] }])
+    // normalized the way the SDK compares path segments: `_ah` → `ah`, camelCase kept whole
+    const rpc = await admin('PATCH', `/v1/admin/providers/${kyco.id}`, {
+      allowedPathWords: [
+        '_ah',
+        'getLatestOrdSumStatus',
+        'getAcctLoginToken',
+        'order_sum-status',
+      ],
+    });
+    expect(rpc.json().allowedPathWords).toEqual([
+      'ah',
+      'getlatestordsumstatus',
+      'getacctlogintoken',
+      'ordersumstatus',
+    ]);
+    for (const bad of [
+      { pathPrivacy: 'loose' },
+      { allowedPathWords: ['two words'] },
+      { allowedPathWords: ['café'] },
+      { allowedPathWords: ['_'] },
+    ])
       expect((await admin('PATCH', `/v1/admin/providers/${kyco.id}`, bad)).statusCode).toBe(400);
     const back = await admin('PATCH', `/v1/admin/providers/${kyco.id}`, {
       pathPrivacy: null,

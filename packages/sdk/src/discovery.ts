@@ -1,4 +1,6 @@
 import {
+  ALLOWED_WORD,
+  normalizePathWord,
   SDK_CONFIG_LIMITS,
   compileHostPattern,
   compileRoute,
@@ -176,8 +178,8 @@ export function parseRemoteConfig(body: string): SdkRemoteConfig | null {
         ? (p.pathPrivacy as PathPrivacy)
         : null,
       allowedWords: strings(p.allowedWords, SDK_CONFIG_LIMITS.allowedWordsPerProvider)
-        .map((w) => w.toLowerCase())
-        .filter((w) => /^[a-z\d]{1,64}$/.test(w)),
+        .map(normalizePathWord)
+        .filter((w) => ALLOWED_WORD.test(w)),
     }));
   const rate = o.sampleRate;
   return {

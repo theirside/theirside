@@ -230,6 +230,9 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@theirside/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       qrcode-generator:
         specifier: ^2.0.4
         version: 2.0.4

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared/core';
 import {
   api,
   type ApiKey,
@@ -135,10 +136,7 @@ function ProviderForm({
           : {}),
         alertsEnabled: form.alertsEnabled,
         pathPrivacy: form.pathPrivacy || null,
-        allowedPathWords: form.allowedPathWords
-          .toLowerCase()
-          .split(/[^a-z\d]+/)
-          .filter(Boolean),
+        allowedPathWords: allowedWords(form.allowedPathWords).words,
       }),
     );
   const label = p.displayName || p.name;
@@ -226,6 +224,7 @@ function ProviderForm({
             onChange={set('allowedPathWords')}
             placeholder="sneakers jackets"
           />
+          <AllowedWordsPreview input={form.allowedPathWords} saved={p.allowedPathWords} />
         </label>
         <label>
           Support email
@@ -963,5 +962,49 @@ function StatusPageTab() {
           </button>
         ))}
     </>
+  );
+}
+
+/**
+ * Allowed path words as typed (space or comma separated) → the normalized form
+ * the SDK compares path segments in (`_ah` → `ah`, `getLatestOrdSumStatus` →
+ * `getlatestordsumstatus`), and the entries that can't be a word.
+ */
+function allowedWords(input: string): { words: string[]; invalid: string[] } {
+  const words: string[] = [];
+  const invalid: string[] = [];
+  for (const raw of input.split(/[\s,]+/).filter(Boolean)) {
+    const w = normalizePathWord(raw);
+    if (ALLOWED_WORD.test(w)) {
+      if (!words.includes(w)) words.push(w);
+    } else invalid.push(raw);
+  }
+  return { words, invalid };
+}
+
+/** What will be saved, so nothing changes silently. */
+function AllowedWordsPreview({ input, saved }: { input: string; saved: string[] }) {
+  const { words, invalid } = allowedWords(input);
+  const typed = input.split(/[\s,]+/).filter(Boolean);
+  const changed = words.join(' ') !== typed.join(' ').toLowerCase();
+  if (!changed && invalid.length === 0 && words.join(' ') === saved.join(' ')) return null;
+  return (
+    <small data-testid="allowed-words-preview">
+      {words.length > 0 && (
+        <>
+          saved as{' '}
+          {words
+            .map((w) => <code key={w}>{w}</code>)
+            .reduce<React.ReactNode[]>((a, c, i) => (i ? [...a, ' ', c] : [c]), [])}{' '}
+          (lower-case, _ - . removed; path segments are compared the same way)
+        </>
+      )}
+      {invalid.length > 0 && (
+        <span className="bad">
+          {' '}
+          not saved: {invalid.join(', ')} (letters and digits only, up to 64)
+        </span>
+      )}
+    </small>
   );
 }

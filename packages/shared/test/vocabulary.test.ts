@@ -1,6 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { isVocabularySegment, pathWords, vocabulary } from '../src/index.js';
+import {
+  ALLOWED_WORD,
+  EndpointTemplater,
+  RouteLearner,
+  isVocabularySegment,
+  normalizePathWord,
+  pathWords,
+  vocabulary,
+} from '../src/index.js';
 
 /** tools/vocabulary/names.txt: common first and last names from many countries (CC0). */
 const NAMES = readFileSync(new URL('../../../tools/vocabulary/names.txt', import.meta.url), 'utf8')
@@ -75,5 +83,70 @@ describe('vocabulary data', () => {
     ];
     expect(NAMES.length).toBeGreaterThan(3000);
     expect(NAMES.filter((n) => vocabulary().has(n)).sort()).toEqual(collisions);
+  });
+});
+
+describe('allowed path words (RPC APIs: camelCase methods, `_ah`)', () => {
+  // what the dashboard stores for what people typed
+  const ALLOWED = new Set(
+    [
+      'orderendpoint',
+      'accountsendpoint',
+      'getLatestOrdSumStatus',
+      'getAcctLoginToken',
+      '_ah',
+    ].map(normalizePathWord),
+  );
+
+  it.each([
+    ['getLatestOrdSumStatus', 'getlatestordsumstatus'],
+    ['getAcctLoginToken', 'getacctlogintoken'],
+    ['_ah', 'ah'],
+    ['order_sum-status.v2', 'ordersumstatusv2'],
+    ['  Sneakers ', 'sneakers'],
+    ['caf%C3%A9', 'café'],
+  ])('normalizePathWord(%j) = %j', (input, out) => {
+    expect(normalizePathWord(input)).toBe(out);
+  });
+
+  it('a word is letters and digits once normalized', () => {
+    expect(ALLOWED_WORD.test(normalizePathWord('_ah'))).toBe(true);
+    expect(ALLOWED_WORD.test(normalizePathWord('two words'))).toBe(false);
+    expect(ALLOWED_WORD.test(normalizePathWord('café'))).toBe(false);
+  });
+
+  it.each([
+    ['getLatestOrdSumStatus', true],
+    ['getAcctLoginToken', true],
+    ['_ah', true],
+    ['orderendpoint', true],
+    // all parts are vocabulary words: worked before too
+    ['getOrderHistory', true],
+    // allowed as a whole, not as a part of something else
+    ['getLatestOrdSumStatusV2', false],
+  ])('%s passes with the allowed words: %s', (segment, ok) => {
+    expect(isVocabularySegment(segment, ALLOWED)).toBe(ok);
+  });
+
+  it('without the allowed words the RPC methods are :id material', () => {
+    expect(isVocabularySegment('getLatestOrdSumStatus')).toBe(false);
+    expect(isVocabularySegment('_ah')).toBe(false);
+  });
+
+  it('the learner sends them as-is in strict mode', () => {
+    const t = new EndpointTemplater({ learner: new RouteLearner() });
+    const policy = { privacy: 'strict' as const, allowedWords: ALLOWED };
+    expect(t.template('h', '/_ah/api/orderendpoint/v1/getLatestOrdSumStatus', [], policy)).toBe(
+      '/_ah/api/orderendpoint/v1/getLatestOrdSumStatus',
+    );
+    expect(t.template('h', '/accountsendpoint/v1/getAcctLoginToken', [], policy)).toBe(
+      '/accountsendpoint/v1/getAcctLoginToken',
+    );
+    // `_ah` outside the Cloud Endpoints shape: the allowed word
+    expect(t.template('h', '/_ah/users/list', [], policy)).toBe('/_ah/users/list');
+    // without the word (a fresh templater: lookups are cached per host and path)
+    expect(
+      new EndpointTemplater({ learner: new RouteLearner() }).template('h', '/_ah/users/list'),
+    ).toBe('/:id/users/list');
   });
 });

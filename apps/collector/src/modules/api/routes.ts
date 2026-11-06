@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { isStorageUnavailable } from '../../storage/postgres.js';
@@ -103,11 +104,18 @@ const providerPatch = z.object({
   /** Words the SDK may send as-is in strict path privacy. */
   allowedPathWords: z
     .array(
+      // stored normalized, the form the SDK compares path segments in (`_ah` → `ah`)
       z
         .string()
-        .trim()
-        .toLowerCase()
-        .regex(/^[a-z\d]{1,64}$/, 'allowed path words are single words of letters and digits'),
+        .transform(normalizePathWord)
+        .pipe(
+          z
+            .string()
+            .regex(
+              ALLOWED_WORD,
+              'allowed path words are single words of letters and digits (_ - . are ignored)',
+            ),
+        ),
     )
     .max(500)
     .transform((ws) => [...new Set(ws)])

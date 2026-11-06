@@ -40,10 +40,26 @@ export function pathWords(segment: string): string[] {
 const RE_SHORT_NUMBER = /^\d{1,3}$/;
 
 /**
- * True when every word of the segment is a vocabulary word, one of `extra`
- * (a provider's allowed words, lower-case) or a short number (`step-2`).
+ * The one form allowed path words and path segments are compared in, on the
+ * dashboard, in the collector and in the SDK: percent-decoded, lower-case,
+ * with `_`, `-` and `.` removed. `_ah` → `ah`, `getLatestOrdSumStatus` →
+ * `getlatestordsumstatus`, `order_sum-status` → `ordersumstatus`.
+ */
+export function normalizePathWord(s: string): string {
+  return safeDecode(s.trim()).toLowerCase().replace(/[_.-]/g, '');
+}
+
+/** A valid allowed word, once normalized: letters and digits, 1–64 of them. */
+export const ALLOWED_WORD = /^[a-z\d]{1,64}$/;
+
+/**
+ * True when the segment may be sent as-is in strict path privacy: its whole
+ * normalized form is one of `extra` (a provider's allowed words, normalized),
+ * or every word of it (split at separators and camelCase) is a vocabulary
+ * word, one of `extra` or a short number (`step-2`).
  */
 export function isVocabularySegment(segment: string, extra?: ReadonlySet<string>): boolean {
+  if (extra?.has(normalizePathWord(segment))) return true;
   const parts = pathWords(segment);
   if (parts.length === 0) return false;
   const v = vocabulary();

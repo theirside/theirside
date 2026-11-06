@@ -562,3 +562,25 @@ describe('repeated slashes', () => {
     expect(endpoints).toEqual(['/_ah/api/:id/v1/getOrderHistory', '/_ah/api/:id/v1/getOrderHistory']);
   });
 });
+
+describe('allowed words from the remote config', () => {
+  it('are normalized like path segments', () => {
+    const c = parseRemoteConfig(
+      JSON.stringify({
+        hidden: [],
+        internal: [],
+        providers: [
+          {
+            name: 'OrderCo',
+            hosts: ['orderco.example.test'],
+            routes: [],
+            allowedWords: ['getLatestOrdSumStatus', '_ah', 'two words', 'orderendpoint'],
+          },
+        ],
+        tenants: [],
+        sampleRate: null,
+      }),
+    );
+    expect(c!.providers[0]!.allowedWords).toEqual(['getlatestordsumstatus', 'ah', 'orderendpoint']);
+  });
+});

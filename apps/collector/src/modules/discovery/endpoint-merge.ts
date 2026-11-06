@@ -2,6 +2,7 @@ import {
   ID_PLACEHOLDER,
   collapseSlashes,
   isCloudEndpointsWord,
+  normalizePathWord,
   pathWords,
   type CatalogEntry,
 } from '@theirside/shared';
@@ -65,6 +66,8 @@ function allowedAt(target: readonly string[], i: number, allowed: ReadonlySet<st
   const seg = target[i]!;
   if (seg === '' || isPlaceholder(seg)) return false;
   if (isCloudEndpointsWord(target, i)) return true;
+  // the whole segment first (`getLatestOrdSumStatus`), then its words
+  if (allowed.has(normalizePathWord(seg))) return true;
   const words = pathWords(seg);
   return words.length > 0 && words.every((w) => allowed.has(w) || RE_SHORT_NUMBER.test(w));
 }
@@ -161,9 +164,9 @@ export function nextAliases(
 
 /** Words an `:id` may become for this provider: dashboard allowed words plus its catalog words. */
 export function allowedWordsOf(p: ProviderRecord, catalog: readonly CatalogEntry[]): Set<string> {
-  const words = new Set(p.allowedPathWords.map((w) => w.toLowerCase()));
+  const words = new Set(p.allowedPathWords.map(normalizePathWord));
   for (const e of catalog)
-    if (e.name === p.name) for (const w of e.allowedWords ?? []) words.add(w.toLowerCase());
+    if (e.name === p.name) for (const w of e.allowedWords ?? []) words.add(normalizePathWord(w));
   return words;
 }
 

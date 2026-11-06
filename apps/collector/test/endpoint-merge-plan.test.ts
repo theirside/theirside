@@ -142,6 +142,36 @@ describe('planEndpointMerges', () => {
   });
 });
 
+describe('allowed words: the whole segment counts (camelCase RPC methods)', () => {
+  it('merges an :id into a camelCase method named in the allowed words', () => {
+    const allowed = new Set([
+      'orderendpoint',
+      'getlatestordsumstatus',
+      'accountsendpoint',
+      'getacctlogintoken',
+    ]);
+    expect(
+      merges(
+        post(
+          '/_ah/api/orderendpoint/v1/getLatestOrdSumStatus',
+          '/_ah/api/orderendpoint/v1/:id',
+          '/accountsendpoint/v1/getAcctLoginToken',
+          '/:id/v1/getAcctLoginToken',
+        ),
+        allowed,
+      ).map(([f, t]) => [f, t]),
+    ).toEqual([
+      ['/_ah/api/orderendpoint/v1/:id', '/_ah/api/orderendpoint/v1/getLatestOrdSumStatus'],
+      ['/:id/v1/getAcctLoginToken', '/accountsendpoint/v1/getAcctLoginToken'],
+    ]);
+  });
+
+  it('_ah as an allowed word, outside the Cloud Endpoints shape', () => {
+    expect(merges(post('/:id/users/list', '/_ah/users/list'), new Set(['ah']))).toHaveLength(1);
+    expect(merges(post('/:id/users/list', '/_ah/users/list'), new Set())).toEqual([]);
+  });
+});
+
 describe('refines', () => {
   it('needs at least one gained word', () => {
     expect(refines(['a', ':id'], ['a', ':id'], ALLOWED)).toBe(false);
