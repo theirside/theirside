@@ -5,7 +5,7 @@ exports[`Slack message > latency, many endpoints, no dashboard link 1`] = `
   "blocks": [
     {
       "text": {
-        "emoji": true,
+        "emoji": false,
         "text": "Incident opened: Acme Cards",
         "type": "plain_text",
       },
@@ -35,11 +35,11 @@ production",
     },
     {
       "text": {
-        "text": "• GET /v2/thing0/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
-• GET /v2/thing1/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
-• GET /v2/thing2/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
-• GET /v2/thing3/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
-• GET /v2/thing4/:id: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+        "text": "• GET \`/v2/thing0/:id\`: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET \`/v2/thing1/:id\`: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET \`/v2/thing2/:id\`: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET \`/v2/thing3/:id\`: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
+• GET \`/v2/thing4/:id\`: errors 0% (normal 0%), p95 4.1 s (normal 300 ms)
 • …and 2 more endpoints",
         "type": "mrkdwn",
       },
@@ -47,7 +47,7 @@ production",
     },
     {
       "text": {
-        "text": ":warning: Other Acme Cards endpoints: also degraded (GET /v2/cards).",
+        "text": ":warning: Other Acme Cards endpoints: also degraded (GET \`/v2/cards\`).",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -74,7 +74,7 @@ Support: support@acmecards.test\`\`\`",
     },
   ],
   "text": "Incident opened: Acme Cards: 7 endpoints slow
-Other Acme Cards endpoints: also degraded (GET /v2/cards).",
+Other Acme Cards endpoints: also degraded (GET \`/v2/cards\`).",
 }
 `;
 
@@ -83,7 +83,7 @@ exports[`Slack message > open 1`] = `
   "blocks": [
     {
       "text": {
-        "emoji": true,
+        "emoji": false,
         "text": "Incident opened: Acme Cards",
         "type": "plain_text",
       },
@@ -91,7 +91,7 @@ exports[`Slack message > open 1`] = `
     },
     {
       "text": {
-        "text": ":red_circle: *Acme Cards: POST /v2/cards/:id/activate failing (38%)*",
+        "text": ":red_circle: *Acme Cards: POST \`/v2/cards/:id/activate\` failing (38%)*",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -118,7 +118,7 @@ support@acmecards.test · https://status.acmecards.test",
     },
     {
       "text": {
-        "text": "• POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "text": "• POST \`/v2/cards/:id/activate\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -165,7 +165,7 @@ Support: support@acmecards.test\`\`\`",
       "type": "context",
     },
   ],
-  "text": "Incident opened: Acme Cards: POST /v2/cards/:id/activate failing (38%)
+  "text": "Incident opened: Acme Cards: POST \`/v2/cards/:id/activate\` failing (38%)
 Other Acme Cards endpoints: OK.
 https://theirside.internal.example/#/incidents/inc_01",
 }
@@ -176,7 +176,7 @@ exports[`Slack message > resolve 1`] = `
   "blocks": [
     {
       "text": {
-        "emoji": true,
+        "emoji": false,
         "text": "Incident resolved: Acme Cards",
         "type": "plain_text",
       },
@@ -184,7 +184,7 @@ exports[`Slack message > resolve 1`] = `
     },
     {
       "text": {
-        "text": ":large_green_circle: *Acme Cards: POST /v2/cards/:id/activate recovered*",
+        "text": ":large_green_circle: *Acme Cards: POST \`/v2/cards/:id/activate\` recovered*",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -211,7 +211,7 @@ support@acmecards.test · https://status.acmecards.test",
     },
     {
       "text": {
-        "text": "• POST /v2/cards/:id/activate: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "text": "• POST \`/v2/cards/:id/activate\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -257,9 +257,430 @@ Support: support@acmecards.test\`\`\`",
       "type": "context",
     },
   ],
-  "text": "Incident resolved: Acme Cards: POST /v2/cards/:id/activate recovered
+  "text": "Incident resolved: Acme Cards: POST \`/v2/cards/:id/activate\` recovered
 Other Acme Cards endpoints: OK.
 https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`Slack: templates and hosts in inline code > discovery digest: snapshot 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "New providers discovered",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": "• *\`geoapi.test\`* (maps): \`api.geoapi.test\`, \`tiles.geoapi.test:8443\`, \`*.geoapi.test\`
+• *Fire:​fire: Co*: \`fire_co.test\` · alerts off",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": "Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Review providers",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/settings/providers",
+        },
+      ],
+      "type": "actions",
+    },
+  ],
+  "text": "2 new providers discovered: \`geoapi.test\`, Fire:​fire: Co
+Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.
+https://theirside.internal.example/#/settings/providers",
+}
+`;
+
+exports[`Slack: templates and hosts in inline code > escalation with colons: snapshot 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Incident escalated: Example Provider",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":rotating_light: *Example Provider: POST \`/v1/example/:id\`: errors 38%*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (since 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+prod:eu",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@example.test · https://status.example.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST \`/v1/example/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v1/:id:refund/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v2/line_items/*expand*\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":warning: Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "style": "danger",
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_01",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · prod:eu",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident escalated: Example Provider: POST \`/v1/example/:id\`: errors 38%
+Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id
+https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`Slack: templates and hosts in inline code > open with colons: snapshot 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Incident opened: Example Provider",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":red_circle: *Example Provider: POST \`/v1/example/:id\`: errors 38%*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (since 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+prod:eu",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@example.test · https://status.example.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST \`/v1/example/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v1/:id:refund/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v2/line_items/*expand*\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":warning: Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "style": "danger",
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_01",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · prod:eu",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident opened: Example Provider: POST \`/v1/example/:id\`: errors 38%
+Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id
+https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`Slack: templates and hosts in inline code > resolve with colons: snapshot 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Incident resolved: Example Provider",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":large_green_circle: *Example Provider: POST \`/v1/example/:id\`: recovered*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (from 10:20 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+prod:eu",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@example.test · https://status.example.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST \`/v1/example/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v1/:id:refund/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)
+• GET \`/v2/line_items/*expand*\`: errors 38% (normal 0.2%), p95 2.5 s (normal 181 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":warning: Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Acme Cards — POST /v2/cards/:id/activate failing since 10:20 UTC (6 min)
+Error rate 38% (normal 0.2%), 200 calls in window. Outcomes: 5xx 100%.
+p95 latency 2.5 s (normal 181 ms). Other Acme Cards endpoints: OK.
+Sample provider request IDs: req_fail_20_0, req_fail_20_1, req_fail_21_0
+Support: support@acmecards.test\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_01",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · prod:eu",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident resolved: Example Provider: POST \`/v1/example/:id\`: recovered
+Also degraded: GET \`/v1/:id:fire\`: and \`api.example.test:443/v2/:id\`. Status: https://status.example.test/:id
+https://theirside.internal.example/#/incidents/inc_01",
+}
+`;
+
+exports[`Slack: templates and hosts in inline code > test alert: snapshot 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Test alert: Example Provider",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":white_check_mark: *Example Provider: POST \`/v1/example/:id\` failing (38%)*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+6 min (since 09:54 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+test",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Provider support*
+support@example-provider.test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST \`/v1/example/:id\`: errors 38% (normal 0.2%), p95 2.5 s (normal 180 ms)",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":white_check_mark: Other Example Provider endpoints: OK.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`This is a test alert sent to "ops: alerts". If you can read this, the channel works.
+Real alerts carry a paste-ready summary for the provider here: what is failing since when, error rate vs normal, outcomes, sample request IDs and the provider's support contact.\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · test",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Test alert: Example Provider: POST \`/v1/example/:id\` failing (38%)
+Other Example Provider endpoints: OK.
+https://theirside.internal.example/#/incidents",
 }
 `;
 

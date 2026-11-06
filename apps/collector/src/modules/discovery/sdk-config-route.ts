@@ -58,7 +58,8 @@ export function buildSdkConfig(
   }
   for (const e of catalog) {
     if (off.has(e.name) || (!e.routes?.length && !e.allowedWords?.length)) continue;
-    const hosts = e.domains.flatMap((d) => [d, `*.${d}`]);
+    // `email.*.amazonaws.com` has no SDK host-pattern form: not sent (no such entry ships routes)
+    const hosts = e.domains.filter((d) => !d.includes('*')).flatMap((d) => [d, `*.${d}`]);
     const routes = e.routes ?? [];
     const words = e.allowedWords ?? [];
     const own = out.get(e.name);

@@ -43,6 +43,44 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 /** Slack mrkdwn needs &, < and > escaped in user-provided text. */
 const mrkdwn = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/** Inline code for Slack: a backtick inside would end the span early. */
+const code = (s: string) => '`' + mrkdwn(s.replace(/`/g, "'")) + '`';
+
+const HOST = String.raw`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z][a-z0-9-]*[a-z0-9](?::\d+)?`;
+/**
+ * Endpoint templates (`/v2/cards/:id`) and hosts (`api.acme.com:443`, with a
+ * path) in free text. Not inside URLs or emails (preceded by `/`, `:`, `@`,
+ * `.` or a word character), and without trailing sentence punctuation.
+ */
+const CODE_TOKEN = new RegExp(
+  String.raw`(?<![\w@./:\`-])(?:${HOST}(?:/[^\s,;()<>\`]*)?|/[^\s,;()<>\`]+)`,
+  'gi',
+);
+
+/**
+ * Text for Slack mrkdwn (and the notification fallback, which Slack formats
+ * too): endpoint templates and hosts in inline code, so `:id:` never turns
+ * into an emoji and `_` or `*` in a path don't format; &, < and > escaped; and
+ * emoji shortcodes in the remaining text (`:fire:` in a provider name) broken
+ * with a zero-width space so they stay text.
+ */
+export function slackText(s: string): string {
+  let out = '';
+  let last = 0;
+  for (const m of s.matchAll(CODE_TOKEN)) {
+    let token = m[0];
+    const trail = /[.:!?]+$/.exec(token)?.[0] ?? '';
+    token = token.slice(0, token.length - trail.length);
+    if (token.length < 2) continue;
+    out += plain(s.slice(last, m.index)) + code(token);
+    last = m.index + token.length;
+  }
+  return out + plain(s.slice(last));
+}
+
+/** Plain text in mrkdwn: escaped, emoji shortcodes kept as text. */
+const plain = (s: string) => mrkdwn(s).replace(/:([a-z0-9_+-]+):/gi, ':\u200b$1:');
+
 function duration(p: AlertPayload): string | null {
   if (p.durationMinutes === undefined || p.durationMinutes === null || !p.openedAt) return null;
   const since = `${p.openedAt.slice(11, 16)} UTC`;
@@ -77,9 +115,14 @@ function supportText(p: AlertPayload): string | null {
   return [p.support.email, p.support.url].filter(Boolean).join(' · ') || null;
 }
 
-/** Plain-text fallback: notifications, screen readers, clients without Block Kit. */
+/**
+ * Plain-text fallback: notifications, screen readers, clients without Block
+ * Kit. Slack formats it as mrkdwn too, so it gets the same treatment.
+ */
 export function slackFallbackText(p: AlertPayload): string {
-  const lines = [`${LABEL[p.event]}: ${p.title}`, p.otherEndpointsText];
+  // the digest's title already says what it is ("3 new providers discovered: …")
+  const head = p.event === 'discovery' ? '' : `${LABEL[p.event]}: `;
+  const lines = [`${head}${slackText(p.title)}`, slackText(p.otherEndpointsText)];
   if (p.url) lines.push(p.url);
   return cut(lines.filter(Boolean).join('\n'), SLACK_LIMITS.fallbackText);
 }
@@ -90,7 +133,7 @@ function renderSlackDiscovery(p: AlertPayload): { text: string; blocks: unknown[
     .slice(0, 40)
     .map(
       (d) =>
-        `• *${mrkdwn(d.label)}*${d.category ? ` (${mrkdwn(d.category)})` : ''}: ${mrkdwn(d.hosts.slice(0, 3).join(', '))}${d.alertsEnabled ? '' : ' · alerts off'}`,
+        `• *${slackText(d.label)}*${d.category ? ` (${slackText(d.category)})` : ''}: ${d.hosts.slice(0, 3).map(code).join(', ')}${d.alertsEnabled ? '' : ' · alerts off'}`,
     );
   const more = (p.discovered?.length ?? 0) - items.length;
   if (more > 0) items.push(`…and ${more} more`);
@@ -100,20 +143,20 @@ function renderSlackDiscovery(p: AlertPayload): { text: string; blocks: unknown[
       text: {
         type: 'plain_text',
         text: cut(LABEL.discovery, SLACK_LIMITS.headerText),
-        emoji: true,
+        emoji: false,
       },
     },
     {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: cut(items.join('\n') || mrkdwn(p.title), SLACK_LIMITS.sectionText),
+        text: cut(items.join('\n') || slackText(p.title), SLACK_LIMITS.sectionText),
       },
     },
     {
       type: 'context',
       elements: [
-        { type: 'mrkdwn', text: cut(mrkdwn(p.otherEndpointsText), SLACK_LIMITS.sectionText) },
+        { type: 'mrkdwn', text: cut(slackText(p.otherEndpointsText), SLACK_LIMITS.sectionText) },
       ],
     },
   ];
@@ -134,15 +177,16 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
       type: 'header',
       text: {
         type: 'plain_text',
+        // plain text, so no code spans: with emoji off, `:id:` stays text here
         text: cut(`${LABEL[p.event]}: ${p.provider}`, SLACK_LIMITS.headerText),
-        emoji: true,
+        emoji: false,
       },
     },
     {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: cut(`${EMOJI[p.event]} *${mrkdwn(p.title)}*`, SLACK_LIMITS.sectionText),
+        text: cut(`${EMOJI[p.event]} *${slackText(p.title)}*`, SLACK_LIMITS.sectionText),
       },
     },
   ];
@@ -150,9 +194,9 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
   const fields: string[] = [];
   const dur = duration(p);
   if (dur) fields.push(`*Duration*\n${dur}`);
-  fields.push(`*Environment*\n${mrkdwn(p.environment)}`);
+  fields.push(`*Environment*\n${slackText(p.environment)}`);
   const support = supportText(p);
-  if (support) fields.push(`*Provider support*\n${mrkdwn(support)}`);
+  if (support) fields.push(`*Provider support*\n${slackText(support)}`);
   blocks.push({
     type: 'section',
     fields: fields
@@ -167,7 +211,7 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
         type: 'mrkdwn',
         text: cut(
           endpointLines(p)
-            .map((l) => `• ${mrkdwn(l)}`)
+            .map((l) => `• ${slackText(l)}`)
             .join('\n'),
           SLACK_LIMITS.sectionText,
         ),
@@ -179,7 +223,7 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
     text: {
       type: 'mrkdwn',
       text: cut(
-        `${p.otherEndpointsOk ? ':white_check_mark:' : ':warning:'} ${mrkdwn(p.otherEndpointsText)}`,
+        `${p.otherEndpointsOk ? ':white_check_mark:' : ':warning:'} ${slackText(p.otherEndpointsText)}`,
         SLACK_LIMITS.sectionText,
       ),
     },
@@ -209,7 +253,7 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
   }
   blocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: `${PRODUCT_NAME} · ${mrkdwn(p.environment)}` }],
+    elements: [{ type: 'mrkdwn', text: `${PRODUCT_NAME} · ${slackText(p.environment)}` }],
   });
   return { text: slackFallbackText(p), blocks: blocks.slice(0, SLACK_LIMITS.blocks) };
 }

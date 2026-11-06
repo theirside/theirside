@@ -5,7 +5,7 @@ exports[`discovery digest > renders for Slack and email 1`] = `
   "blocks": [
     {
       "text": {
-        "emoji": true,
+        "emoji": false,
         "text": "New providers discovered",
         "type": "plain_text",
       },
@@ -13,8 +13,8 @@ exports[`discovery digest > renders for Slack and email 1`] = `
     },
     {
       "text": {
-        "text": "• *Stripe* (payments): api.stripe.com
-• *AWS* (infrastructure): *.amazonaws.com · alerts off",
+        "text": "• *Stripe* (payments): \`api.stripe.com\`
+• *AWS* (infrastructure): \`*.amazonaws.com\` · alerts off",
         "type": "mrkdwn",
       },
       "type": "section",
@@ -42,7 +42,7 @@ exports[`discovery digest > renders for Slack and email 1`] = `
       "type": "actions",
     },
   ],
-  "text": "New providers discovered: 2 new providers discovered: Stripe, AWS
+  "text": "2 new providers discovered: Stripe, AWS
 Monitoring and alerts are on (infrastructure providers: alerts off). Hide or rename them in Settings → Providers.
 https://theirside.internal/#/settings/providers",
 }

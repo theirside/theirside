@@ -32,7 +32,11 @@ export type ProviderCategory =
 export interface CatalogEntry {
   name: string;
   category: ProviderCategory;
-  /** Exact domain or any subdomain of it. */
+  /**
+   * Exact domain or any subdomain of it. `*` matches within one label
+   * (`email.*.amazonaws.com`: SES in any AWS region;
+   * `*-aiplatform.googleapis.com`: Vertex AI's regional hosts).
+   */
   domains: string[];
   supportEmail: string | null;
   supportUrl: string | null;
@@ -56,9 +60,25 @@ export function bundledCatalog(): CatalogEntry[] {
   return bundled;
 }
 
+/** One domain label: literal, or with `*` standing for one or more label characters. */
+function labelMatcher(label: string): (l: string) => boolean {
+  if (!label.includes('*')) return (l) => l === label;
+  const re = new RegExp(
+    '^' +
+      label
+        .split('*')
+        .map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('[a-z0-9-]+') +
+      '$',
+  );
+  return (l) => re.test(l);
+}
+
 export class Catalog {
   /** domain → entry, for suffix lookup label by label. */
   private readonly byDomain = new Map<string, CatalogEntry>();
+  /** Domains with a `*`, as one matcher per label (`email`, `*`, `amazonaws`, `com`). */
+  private readonly wildcards: { labels: ((l: string) => boolean)[]; entry: CatalogEntry }[] = [];
   readonly entries: readonly CatalogEntry[];
 
   /** `extra` entries (e.g. a test-only override) win over bundled ones on the same domain. */
@@ -68,19 +88,39 @@ export class Catalog {
   ) {
     this.entries = [...entries, ...extra];
     for (const e of this.entries)
-      for (const d of e.domains) this.byDomain.set(d.toLowerCase().replace(/^\*\./, ''), e);
+      for (const raw of e.domains) {
+        const d = raw.toLowerCase().replace(/^\*\./, '');
+        if (d.includes('*'))
+          this.wildcards.push({ labels: d.split('.').map(labelMatcher), entry: e });
+        else this.byDomain.set(d, e);
+      }
   }
 
-  /** Longest matching domain wins: fcm.googleapis.com beats googleapis.com. */
+  /**
+   * Longest matching domain wins (in labels): fcm.googleapis.com beats
+   * googleapis.com, email.*.amazonaws.com beats amazonaws.com. `domain` is the
+   * matched part of the hostname (`email.eu-west-1.amazonaws.com`).
+   */
   match(hostname: string): { entry: CatalogEntry; domain: string } | null {
-    let h = hostname.toLowerCase().replace(/\.$/, '');
-    for (;;) {
-      const e = this.byDomain.get(h);
-      if (e) return { entry: e, domain: h };
-      const dot = h.indexOf('.');
-      if (dot === -1) return null;
-      h = h.slice(dot + 1);
+    const host = hostname.toLowerCase().replace(/\.$/, '');
+    const labels = host.split('.');
+    let best: { entry: CatalogEntry; domain: string; n: number } | null = null;
+    for (let i = 0; i < labels.length; i++) {
+      const d = labels.slice(i).join('.');
+      const e = this.byDomain.get(d);
+      if (e) {
+        best = { entry: e, domain: d, n: labels.length - i };
+        break;
+      }
     }
+    for (const w of this.wildcards) {
+      const n = w.labels.length;
+      if (labels.length < n || (best && best.n >= n)) continue;
+      const tail = labels.slice(labels.length - n);
+      if (w.labels.every((m, j) => m(tail[j]!)))
+        best = { entry: w.entry, domain: tail.join('.'), n };
+    }
+    return best ? { entry: best.entry, domain: best.domain } : null;
   }
 }
 

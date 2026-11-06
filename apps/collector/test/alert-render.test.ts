@@ -4,8 +4,12 @@ import {
   emailSubject,
   renderEmail,
   renderSlack,
+  slackText,
   SLACK_LIMITS,
 } from '../src/modules/alerts/render.js';
+import { testPayload } from '../src/modules/alerts/routes.js';
+import { digestPayload } from '../src/modules/discovery/jobs.js';
+import type { ProviderRecord } from '../src/storage/types.js';
 
 const OPEN: AlertPayload = {
   event: 'open',
@@ -79,7 +83,7 @@ describe('Slack message', () => {
 
   it('has a plain-text fallback with the title and link', () => {
     expect(renderSlack(OPEN).text).toBe(
-      'Incident opened: Acme Cards: POST /v2/cards/:id/activate failing (38%)\nOther Acme Cards endpoints: OK.\nhttps://theirside.internal.example/#/incidents/inc_01',
+      'Incident opened: Acme Cards: POST `/v2/cards/:id/activate` failing (38%)\nOther Acme Cards endpoints: OK.\nhttps://theirside.internal.example/#/incidents/inc_01',
     );
   });
 
@@ -122,6 +126,122 @@ describe('Slack message', () => {
   it('escapes Slack control characters from provider data', () => {
     const p = { ...OPEN, title: 'Evil <!channel> & co: x failing (1%)' };
     expect(JSON.stringify(renderSlack(p))).toContain('Evil &lt;!channel&gt; &amp; co');
+  });
+});
+
+/** `:id` next to other text and colons, as in a real deployment (":id:" became 🆔). */
+const COLONS: AlertPayload = {
+  ...OPEN,
+  event: 'escalation',
+  title: 'Example Provider: POST /v1/example/:id: errors 38%',
+  provider: 'Example Provider',
+  endpoints: [
+    { ...OPEN.endpoints[0]!, endpoint: '/v1/example/:id' },
+    { ...OPEN.endpoints[0]!, method: 'GET', endpoint: '/v1/:id:refund/:id' },
+    { ...OPEN.endpoints[0]!, method: 'GET', endpoint: '/v2/line_items/*expand*' },
+  ],
+  otherEndpointsOk: false,
+  otherEndpointsText:
+    'Also degraded: GET /v1/:id:fire: and api.example.test:443/v2/:id. Status: https://status.example.test/:id',
+  environment: 'prod:eu',
+  support: { email: 'support@example.test', url: 'https://status.example.test' },
+};
+
+/** Text of every mrkdwn element and the fallback. */
+function slackTexts(m: { text: string; blocks: unknown[] }): string[] {
+  const out = [m.text];
+  for (const b of m.blocks as {
+    text?: { type: string; text: string };
+    fields?: { text: string }[];
+    elements?: { type: string; text?: string }[];
+  }[]) {
+    if (b.text?.type === 'mrkdwn') out.push(b.text.text);
+    for (const f of b.fields ?? []) out.push(f.text);
+    for (const e of b.elements ?? []) if (e.type === 'mrkdwn' && e.text) out.push(e.text);
+  }
+  return out;
+}
+/** What Slack would render as text: code spans, code blocks and URLs removed. */
+const outsideCode = (t: string) =>
+  t
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]*`/g, '')
+    .replace(/https?:\/\/\S+/g, '');
+
+describe('Slack: templates and hosts in inline code', () => {
+  const DIGEST = digestPayload(
+    [
+      {
+        name: 'geoapi.test',
+        displayName: null,
+        category: 'maps',
+        hosts: ['api.geoapi.test', 'tiles.geoapi.test:8443'],
+        hostPatterns: ['*.geoapi.test'],
+        alertsEnabled: true,
+      },
+      {
+        name: 'Fire:fire: Co',
+        displayName: null,
+        category: null,
+        hosts: ['fire_co.test'],
+        hostPatterns: [],
+        alertsEnabled: false,
+      },
+    ] as ProviderRecord[],
+    'https://theirside.internal.example',
+  );
+  const MESSAGES: [string, AlertPayload][] = [
+    ['escalation with colons', COLONS],
+    ['open with colons', { ...COLONS, event: 'open' }],
+    [
+      'resolve with colons',
+      { ...COLONS, event: 'resolve', title: 'Example Provider: POST /v1/example/:id: recovered' },
+    ],
+    [
+      'test alert',
+      testPayload(
+        'ops: alerts',
+        'https://theirside.internal.example',
+        new Date('2026-11-06T10:00:00Z'),
+      ),
+    ],
+    ['discovery digest', DIGEST],
+  ];
+
+  it.each(MESSAGES)('%s: no :id or emoji shortcode outside code', (_n, p) => {
+    for (const t of slackTexts(renderSlack(p))) {
+      // our own status emoji are intended
+      const rest = outsideCode(t).replace(
+        /:(red_circle|rotating_light|large_green_circle|white_check_mark|warning|mag):/g,
+        '',
+      );
+      expect(rest, t).not.toMatch(/:[a-z0-9_+-]+:/i);
+      expect(rest, t).not.toContain(':id');
+    }
+  });
+
+  it.each(MESSAGES)('%s: snapshot', (_n, p) => {
+    expect(renderSlack(p)).toMatchSnapshot();
+  });
+
+  it('wraps paths and hosts, leaves URLs, emails and times alone', () => {
+    expect(slackText('Example Provider: POST /v1/example/:id: errors 38%')).toBe(
+      'Example Provider: POST `/v1/example/:id`: errors 38%',
+    );
+    expect(slackText('(GET /v2/cards). Since 10:20 UTC, p95 2.5 s, 0.2%')).toBe(
+      '(GET `/v2/cards`). Since 10:20 UTC, p95 2.5 s, 0.2%',
+    );
+    expect(
+      slackText('api.example.test:443/v2/:id, see https://x.example/:id or ops@x.example'),
+    ).toBe('`api.example.test:443/v2/:id`, see https://x.example/:id or ops@x.example');
+    expect(slackText('a & <b> `/x`')).toBe('a &amp; &lt;b&gt; `/x`');
+    expect(slackText('Fire:fire: Co')).toBe('Fire:\u200bfire: Co');
+  });
+
+  it('the fallback text has the same treatment', () => {
+    expect(renderSlack(testPayload('ops', 'https://t.example')).text).toBe(
+      'Test alert: Example Provider: POST `/v1/example/:id` failing (38%)\nOther Example Provider endpoints: OK.\nhttps://t.example/#/incidents',
+    );
   });
 });
 

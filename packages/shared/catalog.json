@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "Known API providers for auto-discovery naming and grouping (docs/architecture.md \u00a73.2). Domains only where certain; support contacts and status URLs are left to the provider settings. Match is exact domain or any subdomain; the longest matching domain wins. Optional routes: known path templates sent to SDKs as explicit routes (they bypass the 5-sightings rule for literal segments).",
+  "comment": "Known API providers for auto-discovery naming and grouping (docs/architecture.md §3.2). Domains only where certain; support contacts and status URLs are left to the provider settings. Match is exact domain or any subdomain; the longest matching domain wins. `*` matches within one label: `email.*.amazonaws.com` (an AWS region), `*-aiplatform.googleapis.com` (a Vertex AI region). Infrastructure entries (category infrastructure, alerts off) keep a vendor’s cloud platform hosts; its end-user APIs (maps, AI, email, SMS, auth) have their own entries, which win by being longer. Optional routes: known path templates sent to SDKs as explicit routes (they bypass the 5-sightings rule for literal segments).",
   "providers": [
     {
       "name": "Stripe",
@@ -638,6 +638,20 @@
       "supportUrl": null
     },
     {
+      "name": "Azure Communication Services",
+      "category": "messaging",
+      "domains": ["communication.azure.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "AWS End User Messaging",
+      "category": "messaging",
+      "domains": ["sms-voice.*.amazonaws.com", "pinpoint.*.amazonaws.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
       "name": "SendGrid",
       "category": "email",
       "domains": ["sendgrid.com", "sendgrid.net"],
@@ -715,6 +729,13 @@
       "supportUrl": null
     },
     {
+      "name": "Amazon SES",
+      "category": "email",
+      "domains": ["email.*.amazonaws.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
       "name": "OpenAI",
       "category": "ai",
       "domains": ["openai.com"],
@@ -732,6 +753,64 @@
       "name": "Google Gemini API",
       "category": "ai",
       "domains": ["generativelanguage.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Cloud AI APIs",
+      "category": "ai",
+      "domains": [
+        "aiplatform.googleapis.com",
+        "*-aiplatform.googleapis.com",
+        "vision.googleapis.com",
+        "speech.googleapis.com",
+        "texttospeech.googleapis.com",
+        "translation.googleapis.com",
+        "translate.googleapis.com",
+        "language.googleapis.com",
+        "documentai.googleapis.com",
+        "dialogflow.googleapis.com"
+      ],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Amazon Bedrock",
+      "category": "ai",
+      "domains": [
+        "bedrock-runtime.*.amazonaws.com",
+        "bedrock-agent-runtime.*.amazonaws.com",
+        "bedrock.*.amazonaws.com"
+      ],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "AWS AI services",
+      "category": "ai",
+      "domains": [
+        "rekognition.*.amazonaws.com",
+        "textract.*.amazonaws.com",
+        "comprehend.*.amazonaws.com",
+        "translate.*.amazonaws.com",
+        "polly.*.amazonaws.com",
+        "transcribe.*.amazonaws.com",
+        "transcribestreaming.*.amazonaws.com"
+      ],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Azure OpenAI",
+      "category": "ai",
+      "domains": ["openai.azure.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Azure AI services",
+      "category": "ai",
+      "domains": ["cognitiveservices.azure.com", "services.ai.azure.com"],
       "supportEmail": null,
       "supportUrl": null
     },
@@ -869,6 +948,27 @@
       "supportUrl": null
     },
     {
+      "name": "Amazon Cognito",
+      "category": "auth",
+      "domains": ["cognito-idp.*.amazonaws.com", "cognito-identity.*.amazonaws.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "reCAPTCHA Enterprise",
+      "category": "auth",
+      "domains": ["recaptchaenterprise.googleapis.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Cloudflare Turnstile",
+      "category": "auth",
+      "domains": ["challenges.cloudflare.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
       "name": "Salesforce",
       "category": "crm",
       "domains": ["salesforce.com", "force.com"],
@@ -969,7 +1069,19 @@
     {
       "name": "Google Maps Platform",
       "category": "maps",
-      "domains": ["maps.googleapis.com"],
+      "domains": [
+        "maps.googleapis.com",
+        "places.googleapis.com",
+        "addressvalidation.googleapis.com",
+        "routes.googleapis.com",
+        "routeoptimization.googleapis.com",
+        "roads.googleapis.com",
+        "tile.googleapis.com",
+        "airquality.googleapis.com",
+        "pollen.googleapis.com",
+        "solar.googleapis.com",
+        "aerialview.googleapis.com"
+      ],
       "supportEmail": null,
       "supportUrl": null
     },
@@ -991,6 +1103,25 @@
       "name": "Radar",
       "category": "maps",
       "domains": ["radar.io"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Amazon Location Service",
+      "category": "maps",
+      "domains": [
+        "geo.*.amazonaws.com",
+        "geo-places.*.amazonaws.com",
+        "geo-routes.*.amazonaws.com",
+        "geo-maps.*.amazonaws.com"
+      ],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Azure Maps",
+      "category": "maps",
+      "domains": ["atlas.microsoft.com"],
       "supportEmail": null,
       "supportUrl": null
     },
@@ -1157,6 +1288,13 @@
       "name": "Calendly",
       "category": "productivity",
       "domains": ["calendly.com"],
+      "supportEmail": null,
+      "supportUrl": null
+    },
+    {
+      "name": "Google Play Developer API",
+      "category": "commerce",
+      "domains": ["androidpublisher.googleapis.com"],
       "supportEmail": null,
       "supportUrl": null
     },

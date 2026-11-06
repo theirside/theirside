@@ -33,7 +33,10 @@ export const DEFAULT_DIRECTORY_LIMITS: DirectoryLimits = {
 interface Entry {
   record: ProviderRecord;
   hosts: Set<string>;
+  /** Host patterns, except the directory's own `*.domain` fold. */
   patterns: HostMatcher[];
+  /** The `*.domain` pattern the directory folded tenant subdomains into, if any. */
+  fold: HostMatcher | null;
 }
 
 interface Snapshot {
@@ -42,11 +45,15 @@ interface Snapshot {
   entries: Entry[];
 }
 
-const entry = (record: ProviderRecord): Entry => ({
-  record,
-  hosts: new Set(record.hosts.map((h) => h.toLowerCase())),
-  patterns: record.hostPatterns.filter(Boolean).map(compileHostPattern),
-});
+const entry = (record: ProviderRecord): Entry => {
+  const fold = record.domain ? `*.${record.domain}` : null;
+  return {
+    record,
+    hosts: new Set(record.hosts.map((h) => h.toLowerCase())),
+    patterns: record.hostPatterns.filter((p) => p && p !== fold).map(compileHostPattern),
+    fold: fold && record.hostPatterns.includes(fold) ? compileHostPattern(fold) : null,
+  };
+};
 
 /** `host[:port]` or `[v6]:port` → hostname and port. */
 export function splitHost(host: string): { hostname: string; port: string } {
@@ -145,6 +152,18 @@ export class ProviderDirectory {
     if (known) return known.record.hidden || known.record.internal ? null : known.record.name;
 
     const group = groupHost(hostname, this.catalog);
+    // a folded `*.googleapis.com` doesn't swallow a more specific catalog provider
+    // (places.googleapis.com is Google Maps Platform, not Google Cloud)
+    const byFold = s.entries.find((e) => e.fold?.(hostname, port));
+    if (
+      byFold &&
+      !(
+        group.source === 'catalog' &&
+        group.name !== byFold.record.name &&
+        group.domain.length > (byFold.record.domain ?? '').length
+      )
+    )
+      return byFold.record.hidden || byFold.record.internal ? null : byFold.record.name;
     const existing = s.byName.get(group.name);
     if (existing && (existing.record.hidden || existing.record.internal)) return null;
 

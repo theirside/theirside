@@ -124,7 +124,8 @@ describe('catalog', () => {
     expect(new Set(domains).size).toBe(domains.length);
     for (const e of entries) {
       expect(e.domains.length).toBeGreaterThan(0);
-      for (const d of e.domains) expect(d).toMatch(/^[a-z0-9.-]+\.[a-z]{2,}$/);
+      // `*` stands for part of one label (a region), never in the last label
+      for (const d of e.domains) expect(d).toMatch(/^[a-z0-9*-]+(\.[a-z0-9*-]+)*\.[a-z]{2,}$/);
       // unverified contacts are never shipped
       expect(e.supportEmail).toBeNull();
       expect(e.supportUrl).toBeNull();
@@ -141,8 +142,43 @@ describe('catalog', () => {
     ['fcm.googleapis.com', 'Firebase Cloud Messaging', 'messaging'],
     ['www.googleapis.com', 'Google Cloud', 'infrastructure'],
     ['maps.googleapis.com', 'Google Maps Platform', 'maps'],
+    // end-user APIs of the big clouds: providers, not infrastructure
+    ['places.googleapis.com', 'Google Maps Platform', 'maps'],
+    ['addressvalidation.googleapis.com', 'Google Maps Platform', 'maps'],
+    ['routes.googleapis.com', 'Google Maps Platform', 'maps'],
+    ['roads.googleapis.com', 'Google Maps Platform', 'maps'],
+    ['generativelanguage.googleapis.com', 'Google Gemini API', 'ai'],
+    ['us-central1-aiplatform.googleapis.com', 'Google Cloud AI APIs', 'ai'],
+    ['translation.googleapis.com', 'Google Cloud AI APIs', 'ai'],
+    ['recaptchaenterprise.googleapis.com', 'reCAPTCHA Enterprise', 'auth'],
+    ['androidpublisher.googleapis.com', 'Google Play Developer API', 'commerce'],
+    ['storage.googleapis.com', 'Google Cloud', 'infrastructure'],
+    ['pubsub.googleapis.com', 'Google Cloud', 'infrastructure'],
+    ['bigquery.googleapis.com', 'Google Cloud', 'infrastructure'],
+    ['email.eu-west-1.amazonaws.com', 'Amazon SES', 'email'],
+    ['bedrock-runtime.us-east-1.amazonaws.com', 'Amazon Bedrock', 'ai'],
+    ['cognito-idp.eu-central-1.amazonaws.com', 'Amazon Cognito', 'auth'],
+    ['places.geo.us-east-1.amazonaws.com', 'Amazon Location Service', 'maps'],
+    ['sms-voice.ap-southeast-2.amazonaws.com', 'AWS End User Messaging', 'messaging'],
+    ['sqs.us-east-1.amazonaws.com', 'AWS', 'infrastructure'],
+    ['dynamodb.us-east-1.amazonaws.com', 'AWS', 'infrastructure'],
+    ['email.amazonaws.com', 'AWS', 'infrastructure'], // no region label: not SES's shape
+    ['acme.openai.azure.com', 'Azure OpenAI', 'ai'],
+    ['acme.cognitiveservices.azure.com', 'Azure AI services', 'ai'],
+    ['acme.communication.azure.com', 'Azure Communication Services', 'messaging'],
+    ['acme.blob.core.windows.net', 'Microsoft Azure', 'infrastructure'],
+    ['atlas.microsoft.com', 'Azure Maps', 'maps'],
+    ['challenges.cloudflare.com', 'Cloudflare Turnstile', 'auth'],
+    ['api.cloudflare.com', 'Cloudflare', 'infrastructure'],
   ])('%s → %s (%s)', (host, name, category) => {
     expect(groupHost(host, catalog)).toMatchObject({ name, category, source: 'catalog' });
+  });
+
+  it('a wildcard match reports the matched part of the host as the domain', () => {
+    expect(groupHost('email.eu-west-1.amazonaws.com', catalog).domain).toBe(
+      'email.eu-west-1.amazonaws.com',
+    );
+    expect(groupHost('x.email.eu-west-1.amazonaws.com', catalog).name).toBe('Amazon SES');
   });
 
   it('falls back to the registrable domain', () => {

@@ -6,6 +6,7 @@ import {
   endpointMergeJob,
   templateMergeJob,
 } from './modules/discovery/jobs.js';
+import { catalogRegroupJob } from './modules/discovery/regroup.js';
 import { alertJob, incidentJob } from './modules/incidents/job.js';
 import { partitionJob, rollupRetentionJob } from './modules/scheduler/maintenance.js';
 import { Scheduler } from './modules/scheduler/scheduler.js';
@@ -84,6 +85,7 @@ async function main() {
       incidentJob(storage, ctx.alerts, { publicUrl: config.publicUrl, log: info }),
       alertJob(ctx.alerts),
       discoveryDigestJob(storage, ctx.alerts, { publicUrl: config.publicUrl, log: info }),
+      catalogRegroupJob(storage, ctx.directory.catalog, info),
       templateMergeJob(storage, info),
       endpointMergeJob(storage, ctx.directory.catalog.entries, info),
       rollupRetentionJob(storage, ctx.entitlements, {
