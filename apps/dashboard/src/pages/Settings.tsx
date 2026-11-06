@@ -15,11 +15,13 @@ import { ago, when } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
 import { ProviderPanel, ProvidersTable } from './ProviderSettings';
+import { ThresholdsTab } from './Thresholds';
 import { UsersTab } from './Users';
 
 /** [id, label, admins only] */
 const TABS = [
   ['providers', 'Providers', false],
+  ['thresholds', 'Thresholds', false],
   ['alerts', 'Alert channels', true],
   ['api-keys', 'API keys', true],
   ['sdk', 'SDK health', false],
@@ -56,6 +58,7 @@ export function Settings({ tab, sub, me }: { tab: string; sub?: string; me: Me }
         ))}
       </nav>
       {tab === 'providers' && <ProvidersTab name={sub} />}
+      {tab === 'thresholds' && <ThresholdsTab />}
       {tab === 'alerts' && <AlertsTab />}
       {tab === 'api-keys' && <ApiKeysTab />}
       {tab === 'sdk' && <SdkTab />}

@@ -258,6 +258,8 @@ describe('dashboard API', () => {
     expect(got.thresholds).toEqual({ minCalls: 50 });
     // the values in force: the override over the defaults
     expect(got.effective).toMatchObject({ minCalls: 50, openAfterMinutes: 3, windowMinutes: 5 });
+    // the built-in values, for "reset to default"
+    expect(got.defaults).toMatchObject({ minCalls: 20, openAfterMinutes: 3 });
     await admin('/v1/admin/settings/thresholds', { method: 'PUT', payload: { thresholds: {} } });
   });
 });

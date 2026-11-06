@@ -314,6 +314,48 @@ test('provider settings: search, tabs and the settings panel', async ({ page, re
   await expect(page).toHaveURL(/#\/settings\/providers\/panel-smoke\.test$/);
 });
 
+test('project thresholds page: defaults, overrides, providers that override', async ({
+  page,
+  request,
+}) => {
+  // a provider with its own minimum (set through the API), and a clean project
+  const { providers } = await (await request.get('/v1/admin/providers', { headers: auth })).json();
+  const p = providers.find((x: { hidden: boolean; internal: boolean }) => !x.hidden && !x.internal);
+  await request.patch(`/v1/admin/providers/${p.id}`, {
+    headers: auth,
+    data: { thresholds: { minCalls: 7 } },
+  });
+  await request.put('/v1/admin/settings/thresholds', { headers: auth, data: { thresholds: {} } });
+
+  await signIn(page, request);
+  await page.goto('/#/settings/thresholds');
+  const rule = page.getByTestId('thresholds-incident-rule');
+  await expect(rule.getByRole('row', { name: /Minimum calls in the window/ })).toContainText(
+    '20 calls',
+  );
+  await rule.getByLabel('Minimum calls in the window').fill('40');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTestId('thresholds-save-state')).toHaveText('saved');
+  const saved = await (
+    await request.get('/v1/admin/settings/thresholds', { headers: auth })
+  ).json();
+  expect(saved.thresholds).toEqual({ minCalls: 40 });
+  await rule.getByRole('button', { name: 'Reset to default' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTestId('thresholds-save-state')).toHaveText('saved');
+  expect(
+    (await (await request.get('/v1/admin/settings/thresholds', { headers: auth })).json())
+      .thresholds,
+  ).toEqual({});
+
+  // providers that override, linking to their settings
+  const overrides = page.getByTestId('threshold-overrides');
+  await expect(overrides).toContainText('Minimum calls in the window: 7');
+  await overrides.getByRole('link', { name: p.displayName || p.name }).click();
+  await expect(page.getByTestId('provider-panel')).toBeVisible();
+  await request.patch(`/v1/admin/providers/${p.id}`, { headers: auth, data: { thresholds: {} } });
+});
+
 test('status page shows public providers only, and embed.js works', async ({ page, request }) => {
   const provider = await firstProviderWithTraffic(request);
   const { providers } = await (await request.get('/v1/admin/providers', { headers: auth })).json();

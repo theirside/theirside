@@ -49,7 +49,7 @@ A window turns bad once enough of the failure is inside it: at 40% errors agains
 
 ### Defaults and per-project overrides
 
-Set any of these in `settings.thresholds` (JSON, per project) to override:
+Set any of these per project in Settings → Thresholds (admins; stored in `settings.thresholds`, also `PUT /v1/admin/settings/thresholds`) to override:
 
 | key | default | meaning |
 |---|---|---|

@@ -13,6 +13,7 @@ import { mergeEndpoints } from '../discovery/endpoint-merge.js';
 import { adminTenant } from '../auth/tenant.js';
 import { DEFAULT_HEALTH_RANGE, computeHealth } from './health.js';
 import {
+  DEFAULT_THRESHOLDS,
   PROVIDER_THRESHOLD_KEYS,
   PROVIDER_THRESHOLD_LIMITS,
   resolveThresholds,
@@ -337,7 +338,7 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     if (!tenant) return;
     const thresholds = await ctx.storage.config.getThresholds(tenant);
     // effective: the project's overrides over the defaults (what a provider override replaces)
-    return { thresholds, effective: resolveThresholds(thresholds) };
+    return { thresholds, effective: resolveThresholds(thresholds), defaults: DEFAULT_THRESHOLDS };
   });
 
   app.put('/v1/admin/settings/thresholds', auth, async (req, reply) => {
