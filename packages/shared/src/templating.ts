@@ -16,6 +16,9 @@ const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const RE_ULID = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
 const RE_HEX = /^[0-9a-f]{12,}$/i;
 const RE_VERSION = /^v\d+(\.\d+)*$/i;
+
+/** `v1`, `v2.1`: never an ID, never counted by the route learner. */
+export const isVersionSegment = (s: string): boolean => RE_VERSION.test(s);
 const RE_NUMERIC_WITH_SEPARATORS = /^[\d\-_.:,+ ]+$/;
 /** Prefixed IDs such as `cus_123`, `card_8f2KdL3x`, `pi_3Mtw...`. */
 const RE_PREFIXED = /^[A-Za-z]{1,12}[_-]([A-Za-z0-9_-]{3,})$/;
@@ -452,7 +455,17 @@ export class RouteLearner {
 
   /** Mark a position as an ID position (e.g. from remote config). */
   learn(host: string, parent: string, position: number): void {
-    this.learned.set(`${this.keyFor(host)}\u0000${parent}\u0000${position}`, true);
+    this.learnKey(this.keyFor(host), parent, position);
+  }
+
+  /** Mark a position as an ID position under a learner key (`@p:<provider>`, host or `*.domain`). */
+  learnKey(key: string, parent: string, position: number): void {
+    this.learned.set(`${key}\u0000${parent}\u0000${position}`, true);
+  }
+
+  /** True when the position is a learned ID position (tests, pooled learning). */
+  isLearned(key: string, parent: string, position: number): boolean {
+    return this.learned.peek(`${key}\u0000${parent}\u0000${position}`) === true;
   }
 
   /** Count a use of keys from `apply()` (a cached result), so busy paths aren't evicted. */

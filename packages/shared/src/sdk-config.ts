@@ -22,6 +22,22 @@ export interface SdkRemoteProvider {
   allowedWords?: string[];
 }
 
+/**
+ * A path position the service's processes, pooled, have seen take more than
+ * 16 distinct literal values: an ID position. The SDK applies it to every
+ * host of `provider` (as its route learner would after seeing them itself),
+ * so a cold start templates like a warm instance.
+ */
+export interface SdkLearnedPosition {
+  provider: string;
+  /** Hosts the service called this provider on. */
+  hosts: string[];
+  /** Templated path before the position (`/v1/customers/:id`; `` for the first). */
+  parent: string;
+  /** Segment index (0-based). */
+  position: number;
+}
+
 export interface SdkRemoteConfig {
   /** Never record these hosts (dashboard "hide"). */
   hidden: string[];
@@ -36,6 +52,11 @@ export interface SdkRemoteConfig {
   tenants: string[];
   /** Fraction of successful calls kept; applies only when init() sets no sampleRate. */
   sampleRate: number | null;
+  /**
+   * Pooled learning for the requesting service and environment (asked for
+   * with `?service=&environment=`; collector 0.3.0+). Missing: none.
+   */
+  learned?: SdkLearnedPosition[];
 }
 
 /** Caps applied by the SDK to whatever it receives (memory bound). */
@@ -46,4 +67,5 @@ export const SDK_CONFIG_LIMITS = {
   hostsPerProvider: 100,
   routesPerProvider: 500,
   allowedWordsPerProvider: 500,
+  learned: 2000,
 } as const;

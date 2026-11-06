@@ -10,6 +10,7 @@ import {
   type CompiledRoute,
   type Outcome,
   type PathPolicy,
+  type SdkLearnedPosition,
 } from '@theirside/shared/core';
 import type { ResolvedConfig, ResolvedProvider } from './config.js';
 import { HostPolicy } from './discovery.js';
@@ -95,9 +96,35 @@ export class Recorder {
   }
 
   /** After a remote config change: new tenant patterns, and cached templates may use stale routes. */
-  remoteChanged(tenants: readonly string[]): void {
+  remoteChanged(tenants: readonly string[], learned: readonly SdkLearnedPosition[] = []): void {
     this.learner.setTenantPatterns(tenants);
+    this.applyLearned(learned);
     this.templater.clearCache();
+  }
+
+  /**
+   * Pooled learning: ID positions the service's processes saw together. Each is
+   * marked under the key this process's learner uses for the host (the
+   * provider's key when it knows the provider, else the host or `*.domain`).
+   */
+  private applyLearned(learned: readonly SdkLearnedPosition[]): void {
+    for (const l of learned) {
+      const keys = new Set<string>();
+      for (const h of l.hosts) {
+        const colon = h.lastIndexOf(':');
+        const hasPort = colon > 0 && /^\d+$/.test(h.slice(colon + 1)) && !h.startsWith('[');
+        const hostname = (hasPort ? h.slice(0, colon) : h).toLowerCase();
+        const port = hasPort ? h.slice(colon + 1) : '';
+        const resolved = this.policy.resolve(hostname, port, this.lookupProvider(hostname, port));
+        keys.add(resolved?.pathPolicy.key ?? this.learner.keyFor(h.toLowerCase()));
+      }
+      for (const key of keys) this.learner.learnKey(key, l.parent, l.position);
+    }
+  }
+
+  /** True when this process has the position as learned (tests). */
+  isLearned(key: string, parent: string, position: number): boolean {
+    return this.learner.isLearned(key, parent, position);
   }
 
   private lookupProvider(hostname: string, port: string): ResolvedProvider | null {

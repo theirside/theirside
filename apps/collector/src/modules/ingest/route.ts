@@ -11,7 +11,13 @@ import type { ApiKeyAuthenticator } from '../auth/api-keys.js';
 import { bearerToken } from '../auth/api-keys.js';
 import type { UsageLimiter } from '../usage/limits.js';
 import { isStorageUnavailable } from '../../storage/postgres.js';
-import type { ApiKeyRecord, Storage, Tenant } from '../../storage/types.js';
+import type {
+  ApiKeyRecord,
+  ServiceTemplate,
+  Storage,
+  StoredEvent,
+  Tenant,
+} from '../../storage/types.js';
 import { utcDay, type Clock } from '../../util/clock.js';
 import type { ProviderDirectory } from '../discovery/directory.js';
 import { prepareBatch } from './prepare.js';
@@ -41,6 +47,36 @@ declare module 'fastify' {
  * whole batch (raw events, rollups, usage, SDK heartbeat) is one transaction.
  * 401 bad key, 400 invalid, 413 too large, 429 over plan limit, 503 storage down.
  */
+/** Template keys written recently, per collector process (bounded). */
+const writtenTemplates = new Map<string, number>();
+const TEMPLATE_REWRITE_MS = 30 * 60_000;
+
+/** The batch's distinct (service, provider, host, method, endpoint) not written in the last 30 min. */
+function freshTemplates(
+  tenantKey: string,
+  events: readonly StoredEvent[],
+  now: number,
+): ServiceTemplate[] {
+  const out = new Map<string, ServiceTemplate>();
+  for (const e of events) {
+    const key = `${tenantKey}\u0000${e.service}\u0000${e.environment}\u0000${e.provider}\u0000${e.host}\u0000${e.method}\u0000${e.endpoint}`;
+    if (out.has(key)) continue;
+    const at = writtenTemplates.get(key);
+    if (at !== undefined && now - at < TEMPLATE_REWRITE_MS) continue;
+    out.set(key, {
+      service: e.service,
+      environment: e.environment,
+      provider: e.provider,
+      host: e.host,
+      method: e.method,
+      endpoint: e.endpoint,
+    });
+  }
+  if (writtenTemplates.size > 200_000) writtenTemplates.clear();
+  for (const k of out.keys()) writtenTemplates.set(k, now);
+  return [...out.values()];
+}
+
 export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Promise<void> {
   const seenProviders = new Map<string, Set<string>>();
 
@@ -180,6 +216,10 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
           );
           if (newProviders.length > 0)
             await tx.config.ensureProviders(tenant, newProviders, prepared.providers);
+          // pooled learning: the templates this service sends (each written at most every 30 min)
+          const templates = freshTemplates(seenKey, prepared.events, receivedAt.getTime());
+          if (templates.length > 0)
+            await tx.config.recordServiceTemplates(tenant, templates, receivedAt);
           await tx.config.touchProviders(tenant, prepared.lastCalls);
         });
         for (const p of newProviders) seen.add(p);

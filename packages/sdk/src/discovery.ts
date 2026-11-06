@@ -185,11 +185,30 @@ export function parseRemoteConfig(body: string): SdkRemoteConfig | null {
         .filter((w) => ALLOWED_WORD.test(w)),
     }));
   const rate = o.sampleRate;
+  const learned = (Array.isArray(o.learned) ? o.learned : [])
+    .filter(
+      (l): l is Record<string, unknown> =>
+        !!l &&
+        typeof l === 'object' &&
+        typeof (l as { provider?: unknown }).provider === 'string' &&
+        typeof (l as { parent?: unknown }).parent === 'string' &&
+        Number.isInteger((l as { position?: unknown }).position) &&
+        ((l as { position: number }).position as number) >= 0 &&
+        ((l as { position: number }).position as number) < 64,
+    )
+    .slice(0, SDK_CONFIG_LIMITS.learned)
+    .map((l) => ({
+      provider: String(l.provider).slice(0, 128),
+      hosts: strings(l.hosts, SDK_CONFIG_LIMITS.hostsPerProvider),
+      parent: String(l.parent).slice(0, 512),
+      position: l.position as number,
+    }));
   return {
     hidden: strings(o.hidden, SDK_CONFIG_LIMITS.hostLists),
     internal: strings(o.internal, SDK_CONFIG_LIMITS.hostLists),
     providers,
     tenants: strings(o.tenants, SDK_CONFIG_LIMITS.hostLists),
     sampleRate: typeof rate === 'number' && rate > 0 && rate <= 1 ? rate : null,
+    ...(learned.length > 0 ? { learned } : {}),
   };
 }

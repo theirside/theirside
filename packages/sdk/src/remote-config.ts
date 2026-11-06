@@ -35,6 +35,8 @@ export class RemoteConfigClient {
     /** Called once, on the first 404: the collector predates remote config. */
     private readonly onMissing: () => void = () => {},
     private readonly timers = true,
+    /** `?service=&environment=`: the collector answers with this service's pooled learning. */
+    private readonly query = '',
   ) {}
 
   start(): void {
@@ -64,7 +66,7 @@ export class RemoteConfigClient {
     this.lastPollAt = Date.now();
     try {
       const r = await this.transport.get(
-        SDK_CONFIG_PATH,
+        SDK_CONFIG_PATH + this.query,
         this.etag ? { 'if-none-match': this.etag } : {},
         SDK_CONFIG_LIMITS.bytes,
       );

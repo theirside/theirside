@@ -109,7 +109,7 @@ export class Client {
           (c) =>
             safely(this.log, 'remote config', () => {
               this.recorder.policy.setRemote(c);
-              this.recorder.remoteChanged(c.tenants);
+              this.recorder.remoteChanged(c.tenants, c.learned);
               if (!cfg.sampleRateFromInit) {
                 const rate = c.sampleRate ?? 1;
                 this.recorder.sampleRate = rate;
@@ -129,6 +129,8 @@ export class Client {
               );
             }),
           this.timers,
+          // pooled learning is per service and environment
+          `?service=${encodeURIComponent(cfg.service)}&environment=${encodeURIComponent(cfg.environment)}`,
         )
       : undefined;
   }

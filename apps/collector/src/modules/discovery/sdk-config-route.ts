@@ -10,6 +10,7 @@ import {
 import type { AppContext } from '../../context.js';
 import type { ProviderRecord } from '../../storage/types.js';
 import { bearerToken } from '../auth/api-keys.js';
+import { learnedFor } from './pooled-learning.js';
 
 /**
  * Bytes of the remote config spent on providers sent only so the SDK can group
@@ -113,12 +114,22 @@ export async function registerSdkConfigRoute(app: FastifyInstance, ctx: AppConte
       (await ctx.apiKeys.authenticate(token, 'ingest')) ??
       (await ctx.apiKeys.authenticate(token, 'read'));
     if (!key) return reply.code(401).send({ error: 'invalid API key' });
-    const body = JSON.stringify(
-      buildSdkConfig(
-        await ctx.storage.config.listProviders({ orgId: key.orgId, projectId: key.projectId }),
-        ctx.directory.catalog.entries,
-      ),
+    const tenant = { orgId: key.orgId, projectId: key.projectId };
+    const config = buildSdkConfig(
+      await ctx.storage.config.listProviders(tenant),
+      ctx.directory.catalog.entries,
     );
+    // pooled learning for the asking service (SDK 0.2.0+ sends ?service=&environment=)
+    const q = req.query as { service?: unknown; environment?: unknown };
+    if (typeof q.service === 'string' && q.service && q.service.length <= 128) {
+      const env =
+        typeof q.environment === 'string' && q.environment
+          ? q.environment.slice(0, 128)
+          : 'production';
+      const learned = await learnedFor(ctx.storage, tenant, q.service, env, ctx.clock.now());
+      if (learned.length > 0) config.learned = learned;
+    }
+    const body = JSON.stringify(config);
     const etag = `"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"`;
     reply.header('etag', etag).header('cache-control', 'no-cache');
     if (req.headers['if-none-match'] === etag) return reply.code(304).send();

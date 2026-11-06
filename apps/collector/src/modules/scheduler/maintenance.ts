@@ -58,6 +58,8 @@ export function rollupRetentionJob(
       }
       // SDK process rows (restarts, serverless cold starts) are only needed for a week
       await storage.config.pruneSdkProcesses(new Date(today - SDK_PROCESS_DAYS * DAY_MS));
+      // pooled learning looks back 7 days
+      await storage.config.pruneServiceTemplates(new Date(today - SDK_PROCESS_DAYS * DAY_MS));
     },
   };
 }

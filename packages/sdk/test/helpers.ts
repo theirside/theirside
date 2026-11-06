@@ -120,7 +120,7 @@ export interface FakeCollector extends TestServer {
   /** Served on GET /v1/sdk-config (an empty config while undefined; null: 404, like an older collector). */
   sdkConfig: unknown;
   /** GET /v1/sdk-config requests seen, with their If-None-Match. */
-  configRequests: { ifNoneMatch: string | undefined }[];
+  configRequests: { ifNoneMatch: string | undefined; url?: string }[];
   waitForEvents(n: number, timeoutMs?: number): Promise<CallEvent[]>;
 }
 
@@ -128,12 +128,12 @@ export async function startCollector(): Promise<FakeCollector> {
   const batches: IngestBatch[] = [];
   const requests: { headers: http.IncomingHttpHeaders }[] = [];
   const state: { status: number; sdkConfig: unknown } = { status: 202, sdkConfig: undefined };
-  const configRequests: { ifNoneMatch: string | undefined }[] = [];
+  const configRequests: { ifNoneMatch: string | undefined; url?: string }[] = [];
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url?.startsWith('/v1/sdk-config')) {
       req.resume();
       const inm = req.headers['if-none-match'];
-      configRequests.push({ ifNoneMatch: typeof inm === 'string' ? inm : undefined });
+      configRequests.push({ ifNoneMatch: typeof inm === 'string' ? inm : undefined, url: req.url });
       if (state.sdkConfig === null) {
         res.statusCode = 404;
         return res.end();

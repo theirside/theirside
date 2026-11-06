@@ -340,6 +340,16 @@ export interface SdkInstanceRecord extends Tenant {
   eventBatches: number;
 }
 
+/** A template a service sent for a provider and host (pooled learning). */
+export interface ServiceTemplate {
+  service: string;
+  environment: string;
+  provider: string;
+  host: string;
+  method: string;
+  endpoint: string;
+}
+
 /** One SDK process (SDK 0.2.0+: a random instance id and its start time). */
 export interface SdkProcessRecord extends Tenant {
   service: string;
@@ -472,6 +482,17 @@ export interface ConfigStore {
   listSdkProcesses(tenant: Tenant, since: Date): Promise<SdkProcessRecord[]>;
   /** Drop process rows last seen before `before` (all tenants). Returns how many. */
   pruneSdkProcesses(before: Date): Promise<number>;
+  /** Upsert templates seen (last seen = `at`). */
+  recordServiceTemplates(tenant: Tenant, rows: ServiceTemplate[], at: Date): Promise<void>;
+  /** A service's templates seen since `since`. */
+  listServiceTemplates(
+    tenant: Tenant,
+    service: string,
+    environment: string,
+    since: Date,
+  ): Promise<ServiceTemplate[]>;
+  /** Drop templates last seen before `before` (all tenants). */
+  pruneServiceTemplates(before: Date): Promise<number>;
 
   // install metadata
   getMeta(key: string): Promise<string | null>;

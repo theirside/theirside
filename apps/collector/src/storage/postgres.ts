@@ -2,6 +2,7 @@ import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
 import { COUNTER_COLUMNS, KEY_COLUMNS, SUM_SELECT, rowToRollup } from './columns.js';
 import type {
+  ServiceTemplate,
   SdkProcessRecord,
   EndpointMove,
   AlertChannelInput,
@@ -1398,6 +1399,48 @@ class PgConfigStore implements ConfigStore {
       platform: (r.platform as string | null) ?? null,
       serverless: Boolean(r.serverless),
     }));
+  }
+  async recordServiceTemplates(t: Tenant, rows: ServiceTemplate[], at: Date) {
+    if (rows.length === 0) return;
+    const sorted = [...rows].sort((a, b) =>
+      `${a.service}\u0000${a.environment}\u0000${a.provider}\u0000${a.host}\u0000${a.method}\u0000${a.endpoint}`.localeCompare(
+        `${b.service}\u0000${b.environment}\u0000${b.provider}\u0000${b.host}\u0000${b.method}\u0000${b.endpoint}`,
+      ),
+    );
+    await this.db.query(
+      `INSERT INTO service_templates (org_id, project_id, service, environment, provider, host, method, endpoint, last_seen_at)
+       SELECT $1, $2, s, e, p, h, m, ep, $9
+         FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[]) AS u(s, e, p, h, m, ep)
+       ON CONFLICT (org_id, project_id, service, environment, provider, host, method, endpoint)
+       DO UPDATE SET last_seen_at = GREATEST(service_templates.last_seen_at, EXCLUDED.last_seen_at)`,
+      [
+        t.orgId,
+        t.projectId,
+        sorted.map((r) => r.service),
+        sorted.map((r) => r.environment),
+        sorted.map((r) => r.provider),
+        sorted.map((r) => r.host),
+        sorted.map((r) => r.method),
+        sorted.map((r) => r.endpoint),
+        at,
+      ],
+    );
+  }
+  async listServiceTemplates(t: Tenant, service: string, environment: string, since: Date) {
+    const { rows } = await this.db.query(
+      `SELECT service, environment, provider, host, method, endpoint FROM service_templates
+        WHERE org_id = $1 AND project_id = $2 AND service = $3 AND environment = $4 AND last_seen_at >= $5
+        LIMIT 50000`,
+      [t.orgId, t.projectId, service, environment, since],
+    );
+    return rows as ServiceTemplate[];
+  }
+  async pruneServiceTemplates(before: Date) {
+    const { rowCount } = await this.db.query(
+      `DELETE FROM service_templates WHERE last_seen_at < $1`,
+      [before],
+    );
+    return rowCount ?? 0;
   }
   async pruneSdkProcesses(before: Date) {
     const { rowCount } = await this.db.query(`DELETE FROM sdk_processes WHERE last_seen_at < $1`, [

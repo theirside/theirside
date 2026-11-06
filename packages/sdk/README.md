@@ -214,7 +214,8 @@ await wrap(async () => {
 Things to know:
 
 - **Network:** the function must reach the collector (a VPC function needs a route to it, an edge function a public URL). An unreachable collector costs at most the flush cap per invocation; the events are kept for the next one and dropped beyond `maxQueue`.
-- **Path privacy:** keep the default, `strict`. `balanced` needs 5 sightings per process, which a short-lived process rarely reaches, so its endpoints stay `:id`.
+- **Path privacy:** keep the default, `strict`. `balanced` needs 5 sightings per process, which a short-lived process rarely reaches, so its endpoints stay `:id`; that count can't be shared between processes without sending more than templates.
+- **Pooled learning:** with collector 0.3.0+, a function's cold start fetches what all processes of its service learned (positions that turned out to be IDs) and applies it before its first calls are recorded, if the fetch lands first; it never blocks startup.
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
 
 ## How it captures
