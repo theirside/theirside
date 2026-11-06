@@ -55,7 +55,8 @@ async function signIn(page: Page, request: APIRequestContext) {
     const { url } = await (
       await request.post('/v1/admin/users/invites', {
         headers: auth,
-        data: { email: SMOKE_EMAIL, sendEmail: false },
+        // an admin: the smoke test edits admin-only settings (thresholds)
+        data: { email: SMOKE_EMAIL, sendEmail: false, role: 'admin' },
       })
     ).json();
     await request.post('/v1/auth/invite/accept', {
@@ -113,13 +114,10 @@ test('dashboard: login, providers, endpoint charts, incidents, settings', async 
 
   await page.getByRole('link', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  // provider actions (rename, alerts, hide, internal, merge, split) and the digest switch
+  // the providers table and the digest switch (the panel has its own test)
   await page.getByRole('link', { name: 'Providers', exact: true }).last().click();
   await expect(page.getByText('when new providers are discovered')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Hide' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Mark internal' }).first()).toBeVisible();
-  await expect(page.getByLabel('Merge into').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Split out' }).first()).toBeVisible();
+  await expect(page.getByTestId('provider-settings')).toBeVisible();
   await page.getByRole('link', { name: 'Alert channels' }).click();
   await expect(page.getByRole('heading', { name: 'Add channel' })).toBeVisible();
   await page.getByRole('link', { name: 'SDK health' }).click();
@@ -202,6 +200,118 @@ test('a quiet endpoint stays listed as idle across refreshes', async ({ page, re
   await page.getByRole('tab', { name: '24h' }).click();
   await expect(row).toContainText(/\d+ in 24h/);
   await expect(page.getByTestId('provider-last-call')).toContainText('last call');
+});
+
+test('provider settings: search, tabs and the settings panel', async ({ page, request }) => {
+  const ingestKey = process.env.THEIRSIDE_BOOTSTRAP_API_KEY ?? 'tsd_live_localdemo0000000000000000';
+  const name = 'Panel Smoke';
+  const res = await request.post('/v1/ingest', {
+    headers: { authorization: `Bearer ${ingestKey}` },
+    data: {
+      protocol: 1,
+      sdk: { name: '@theirside/sdk', version: 'smoke' },
+      service: 'smoke',
+      environment: 'production',
+      dropped: 0,
+      events: ['api', 'files'].map((sub) => ({
+        ts: Date.now() - 60_000,
+        provider: null,
+        host: `${sub}.panel-smoke.test`,
+        method: 'GET',
+        endpoint: '/v1/things',
+        status: 200,
+        durationMs: 50,
+        outcome: 'ok',
+      })),
+    },
+  });
+  expect(res.status()).toBe(202);
+  // a stack used before: back to a clean state
+  const { providers } = await (await request.get('/v1/admin/providers', { headers: auth })).json();
+  const p = providers.find((x: { name: string }) => x.name === 'panel-smoke.test');
+  expect(p).toBeTruthy();
+  await request.patch(`/v1/admin/providers/${p.id}`, {
+    headers: auth,
+    data: {
+      displayName: name,
+      thresholds: {},
+      alertsEnabled: true,
+      internal: false,
+      hidden: false,
+    },
+  });
+
+  await signIn(page, request);
+  await page.goto('/#/settings/providers');
+  const table = page.getByTestId('provider-settings');
+  const row = table.getByRole('row', { name: new RegExp(name) });
+  await expect(row).toBeVisible();
+
+  // search: by name and by host
+  const search = page.getByLabel('Search providers');
+  await search.fill('panel smoke');
+  await expect(table.locator('tbody tr')).toHaveCount(1);
+  await search.fill('files.panel-smoke');
+  await expect(table.locator('tbody tr')).toHaveCount(1);
+  await search.fill('no such provider at all');
+  await expect(page.getByText('No providers match.')).toBeVisible();
+  await search.fill('panel');
+  await expect(row).toContainText('default'); // no threshold overrides
+  await expect(row).toContainText('2'); // hosts
+
+  // sortable columns
+  await page.getByRole('button', { name: /^Provider/ }).click();
+  await expect(page.getByRole('columnheader', { name: /Provider/ })).toHaveAttribute(
+    'aria-sort',
+    /ascending|descending/,
+  );
+
+  // the panel: every section
+  await row.getByRole('link', { name }).click();
+  const panel = page.getByTestId('provider-panel');
+  for (const title of [
+    'General',
+    'Hosts & routes',
+    'Endpoint names',
+    'Alerts & thresholds',
+    'Public status page',
+  ])
+    await expect(panel.getByText(title, { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Split out' }).first()).toBeVisible();
+  await expect(panel.getByLabel('Merge into')).toBeVisible();
+
+  // a threshold override, saved, shown in the table, then reset
+  await panel.getByLabel('Minimum calls in the window').fill('5');
+  await panel.getByRole('checkbox', { name: /Alerts on/ }).uncheck();
+  await panel.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTestId('provider-save-state')).toHaveText('saved');
+  await expect(panel.getByTestId('thresholds').getByText('override')).toBeVisible();
+  await page.getByRole('link', { name: 'Providers' }).last().click();
+  await search.fill('panel');
+  await expect(row).toContainText('1 override');
+  // tabs: alerts off
+  await page.getByRole('tab', { name: /Alerts off/ }).click();
+  await expect(row).toBeVisible();
+  await page.getByRole('tab', { name: /Hidden/ }).click();
+  await expect(row).toHaveCount(0);
+
+  await page.getByRole('tab', { name: /^All/ }).click();
+  await row.getByRole('link', { name }).click();
+  await panel.getByRole('button', { name: 'Reset to default' }).click();
+  await panel.getByRole('button', { name: 'Mark internal' }).click();
+  await expect(page.getByTestId('provider-save-state')).toHaveText('saved');
+  await panel.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTestId('provider-save-state')).toHaveText('saved');
+  await page.getByRole('link', { name: 'Providers' }).last().click();
+  await page.getByRole('tab', { name: /Hidden/ }).click();
+  await expect(row).toContainText('internal');
+  await expect(row).toContainText('default');
+
+  // "manage" on the provider page opens the same panel
+  await page.goto(`/#/providers/${encodeURIComponent('panel-smoke.test')}`);
+  await page.getByRole('link', { name: 'manage' }).click();
+  await expect(page.getByTestId('provider-panel')).toBeVisible();
+  await expect(page).toHaveURL(/#\/settings\/providers\/panel-smoke\.test$/);
 });
 
 test('status page shows public providers only, and embed.js works', async ({ page, request }) => {

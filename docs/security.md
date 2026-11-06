@@ -41,7 +41,7 @@ Each user is an **admin** or a **member** (Settings → Users).
 | Manage providers: rename, hide, alerts on/off, merge, split, support contact, path privacy, allowed path words | yes | yes |
 | Own account: password, 2FA, sign out everywhere | yes | yes |
 | Users, invites and roles; other users' 2FA, reset links, sign-out, removal | yes | no |
-| API keys, alert channels and thresholds, the new-provider digest | yes | no |
+| API keys, alert channels and thresholds (project and per provider), the new-provider digest | yes | no |
 | Status pages, and which providers they show | yes | no |
 | Security settings (require 2FA) | yes | no |
 

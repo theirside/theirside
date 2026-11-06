@@ -139,9 +139,9 @@ export function Provider({ name, environment }: { name: string; environment: str
           </a>{' '}
           / {p?.label ?? name}{' '}
           <a
-            href={href('settings', 'providers')}
+            href={href('settings', 'providers', name)}
             className="tag"
-            title="Rename, merge, hide, alerts"
+            title="Rename, merge, hide, alerts and thresholds"
           >
             manage
           </a>

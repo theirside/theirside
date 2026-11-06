@@ -59,6 +59,45 @@ export const DEFAULT_THRESHOLDS: Readonly<Thresholds> = Object.freeze({
   escalationFactor: 2,
 });
 
+/**
+ * What one provider may override (Settings → Providers → Alerts & thresholds),
+ * with the accepted range. Everything else is per project only.
+ */
+export const PROVIDER_THRESHOLD_LIMITS = {
+  minCalls: { min: 1, max: 1_000_000, integer: true },
+  openAfterMinutes: { min: 1, max: 60, integer: true },
+  rateMultiplier: { min: 1, max: 1000, integer: false },
+  rateDeltaPp: { min: 0, max: 1, integer: false },
+  latencyMultiplier: { min: 1, max: 1000, integer: false },
+  latencyDeltaMs: { min: 0, max: 600_000, integer: true },
+} as const;
+export type ProviderThresholdKey = keyof typeof PROVIDER_THRESHOLD_LIMITS;
+export type ProviderThresholds = Partial<Record<ProviderThresholdKey, number>>;
+export const PROVIDER_THRESHOLD_KEYS = Object.keys(
+  PROVIDER_THRESHOLD_LIMITS,
+) as ProviderThresholdKey[];
+
+/**
+ * A provider's thresholds: its own overrides first, then the project's
+ * (`project`, already resolved: project overrides over the defaults).
+ * Keys a provider may not override, and values out of range, are ignored.
+ */
+export function thresholdsFor(
+  project: Thresholds,
+  overrides: Readonly<Record<string, unknown>> | undefined,
+): Thresholds {
+  if (!overrides) return project;
+  let t = project;
+  for (const key of PROVIDER_THRESHOLD_KEYS) {
+    const v = overrides[key];
+    const lim = PROVIDER_THRESHOLD_LIMITS[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < lim.min || v > lim.max) continue;
+    if (t === project) t = { ...project };
+    t[key] = v;
+  }
+  return t;
+}
+
 /** Merge per-project overrides; unknown keys and wrong types are ignored. */
 export function resolveThresholds(overrides: Record<string, unknown> | undefined): Thresholds {
   const t: Thresholds = { ...DEFAULT_THRESHOLDS };

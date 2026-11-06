@@ -3,7 +3,7 @@ import type { Storage, Tenant } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
 import { windowStats } from '../scoring/evaluate.js';
 import { errorThreshold } from '../scoring/evaluate.js';
-import { resolveThresholds } from '../scoring/thresholds.js';
+import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 
 const MIN = 60_000;
 
@@ -96,7 +96,10 @@ export async function computeSeries(
 
   let baseline: Series['baseline'] = null;
   if (q.endpoint && q.method) {
-    const t = resolveThresholds(await storage.config.getThresholds(tenant));
+    const t = thresholdsFor(
+      resolveThresholds(await storage.config.getThresholds(tenant)),
+      (await storage.config.listProviders(tenant)).find((p) => p.name === q.provider)?.thresholds,
+    );
     const b = (await storage.incidents.getBaselines(tenant)).find(
       (x) =>
         x.provider === q.provider &&

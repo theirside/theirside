@@ -88,6 +88,7 @@ export function isUnedited(p: ProviderRecord): boolean {
     p.pathPrivacy === null &&
     p.allowedPathWords.length === 0 &&
     p.explicitRoutes.length === 0 &&
+    Object.keys(p.thresholds ?? {}).length === 0 &&
     p.hostPatterns.every((h) => h === `*.${p.domain}`)
   );
 }

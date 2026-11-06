@@ -179,6 +179,10 @@ export interface Provider {
   /** Path privacy for the SDK; null = the SDK's own `pathPrivacy` (default strict). */
   pathPrivacy: 'strict' | 'balanced' | null;
   allowedPathWords: string[];
+  /** Threshold overrides for this provider; missing keys use the project's. */
+  thresholds: Record<string, number>;
+  /** Latest call seen; null = never called. */
+  lastCallAt: string | null;
 }
 
 export interface AlertChannel {

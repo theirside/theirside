@@ -14,7 +14,7 @@ import {
   type BaselineView,
   type HealthStatus,
 } from '../scoring/evaluate.js';
-import { resolveThresholds } from '../scoring/thresholds.js';
+import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 import { evaluateKeys } from '../incidents/job.js';
 import { RANGES, type RangeKey } from './series.js';
 
@@ -152,6 +152,8 @@ export async function computeHealth(
   const configured = (await storage.config.listProviders(tenant)).filter(
     (p) => !opts.provider || p.name === opts.provider,
   );
+  const tOf = (provider: string) =>
+    thresholdsFor(t, configured.find((p) => p.name === provider)?.thresholds);
   const byProvider = new Map<string, EndpointHealth[]>();
   for (const r of inRange) {
     const id = baselineKeyId(r);
@@ -161,7 +163,7 @@ export async function computeHealth(
     const s = e?.evals[0]!.stats;
     let row: EndpointHealth;
     if (e && s && s.calls > 0) {
-      const score = scoreWindow(s, e.baseline, t);
+      const score = scoreWindow(s, e.baseline, tOf(e.provider));
       const incident = inIncident(e);
       row = {
         environment: e.environment,

@@ -19,7 +19,7 @@ import {
   type BaselineView,
   type Evaluation,
 } from '../scoring/evaluate.js';
-import { resolveThresholds, type Thresholds } from '../scoring/thresholds.js';
+import { resolveThresholds, thresholdsFor, type Thresholds } from '../scoring/thresholds.js';
 import { decide, type AlertEvent, type Decision, type EndpointView } from './engine.js';
 import { buildSummary, minutesBetween, othersStatus, pct } from './summary.js';
 
@@ -210,16 +210,27 @@ export function incidentJob(
       }
 
       for (const { tenant, keys } of tenants.values()) {
-        const t = resolveThresholds(await storage.config.getThresholds(tenant));
-        const count = Math.max(t.openAfterMinutes, t.resolveAfterMinutes);
-        const from = new Date(T.getTime() - (count - 1 + t.windowMinutes - 1) * MIN);
-        const rows = await storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN) });
-        const keyList = [...keys.values()];
-        const baselines = await baselinesFor(storage, tenant, keyList, now, t);
-        const evaluated = evaluateKeys(keyList, rows, baselines, T, count, t);
+        const projectT = resolveThresholds(await storage.config.getThresholds(tenant));
         const providers = new Map(
           (await storage.config.listProviders(tenant)).map((p) => [p.name, p]),
         );
+        // the provider's overrides first, then the project's (docs/scoring.md)
+        const tOf = (provider: string) =>
+          thresholdsFor(projectT, providers.get(provider)?.thresholds);
+        const keyList = [...keys.values()];
+        const countOf = (t: Thresholds) => Math.max(t.openAfterMinutes, t.resolveAfterMinutes);
+        const count = Math.max(countOf(projectT), ...keyList.map((k) => countOf(tOf(k.provider))));
+        const from = new Date(T.getTime() - (count - 1 + projectT.windowMinutes - 1) * MIN);
+        const rows = await storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN) });
+        const baselines = await baselinesFor(storage, tenant, keyList, now, projectT);
+        const byProvider = new Map<string, typeof keyList>();
+        for (const k of keyList)
+          byProvider.set(k.provider, [...(byProvider.get(k.provider) ?? []), k]);
+        const evaluated: EvaluatedKey[] = [];
+        for (const [provider, ks] of byProvider) {
+          const t = tOf(provider);
+          evaluated.push(...evaluateKeys(ks, rows, baselines, T, countOf(t), t));
+        }
 
         const groups = new Map<string, EvaluatedKey[]>();
         for (const e of evaluated) {
@@ -230,6 +241,7 @@ export function incidentJob(
 
         for (const group of groups.values()) {
           const { environment, provider } = group[0]!;
+          const t = tOf(provider);
           const open = openAll.find(
             (i) =>
               tenantId(i) === tenantId(tenant) &&

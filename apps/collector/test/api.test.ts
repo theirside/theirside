@@ -254,9 +254,10 @@ describe('dashboard API', () => {
         })
       ).statusCode,
     ).toBe(200);
-    expect((await admin('/v1/admin/settings/thresholds')).json()).toEqual({
-      thresholds: { minCalls: 50 },
-    });
+    const got = (await admin('/v1/admin/settings/thresholds')).json();
+    expect(got.thresholds).toEqual({ minCalls: 50 });
+    // the values in force: the override over the defaults
+    expect(got.effective).toMatchObject({ minCalls: 50, openAfterMinutes: 3, windowMinutes: 5 });
     await admin('/v1/admin/settings/thresholds', { method: 'PUT', payload: { thresholds: {} } });
   });
 });

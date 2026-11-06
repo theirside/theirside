@@ -253,6 +253,8 @@ export interface ProviderRecord extends Tenant {
   allowedPathWords: string[];
   /** Merged endpoint templates: `METHOD /old/template` → `/new/template`, rewritten at ingest. */
   endpointAliases: Record<string, string>;
+  /** Threshold overrides for this provider (`PROVIDER_THRESHOLD_KEYS`); missing keys: the project's. */
+  thresholds: Record<string, number>;
 }
 
 type ProviderDiscoveryFields =
@@ -267,7 +269,8 @@ type ProviderDiscoveryFields =
   | 'displayName'
   | 'pathPrivacy'
   | 'allowedPathWords'
-  | 'endpointAliases';
+  | 'endpointAliases'
+  | 'thresholds';
 
 export type ProviderInput = Omit<
   ProviderRecord,

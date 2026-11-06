@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared/core';
 import {
   api,
   type ApiKey,
@@ -15,6 +14,7 @@ import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
 import { ago, when } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
+import { ProviderPanel, ProvidersTable } from './ProviderSettings';
 import { UsersTab } from './Users';
 
 /** [id, label, admins only] */
@@ -27,7 +27,7 @@ const TABS = [
   ['users', 'Users', true],
 ] as const;
 
-export function Settings({ tab, me }: { tab: string; me: Me }) {
+export function Settings({ tab, sub, me }: { tab: string; sub?: string; me: Me }) {
   const isAdmin = useIsAdmin();
   const tabs = TABS.filter(([, , adminOnly]) => isAdmin || !adminOnly);
   if (!tabs.some(([id]) => id === tab))
@@ -55,273 +55,13 @@ export function Settings({ tab, me }: { tab: string; me: Me }) {
           </a>
         ))}
       </nav>
-      {tab === 'providers' && <ProvidersTab />}
+      {tab === 'providers' && <ProvidersTab name={sub} />}
       {tab === 'alerts' && <AlertsTab />}
       {tab === 'api-keys' && <ApiKeysTab />}
       {tab === 'sdk' && <SdkTab />}
       {tab === 'status-page' && <StatusPageTab />}
       {tab === 'users' && <UsersTab me={me} />}
     </>
-  );
-}
-
-const lines = (s: string) =>
-  s
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-const SOURCE_LABEL: Record<Provider['source'], string> = {
-  configured: 'configured',
-  discovered: 'discovered',
-  catalog: 'known provider',
-};
-
-function ProviderForm({
-  p,
-  others,
-  onSaved,
-}: {
-  p: Provider;
-  others: Provider[];
-  onSaved: () => void;
-}) {
-  const [form, setForm] = useState({
-    displayName: p.displayName ?? '',
-    hosts: p.hostPatterns.join('\n'),
-    routes: p.explicitRoutes.join('\n'),
-    supportEmail: p.supportEmail ?? '',
-    supportUrl: p.supportUrl ?? '',
-    supportNotes: p.supportNotes ?? '',
-    publicDisplayName: p.publicDisplayName ?? '',
-    isPublic: p.isPublic,
-    alertsEnabled: p.alertsEnabled,
-    pathPrivacy: p.pathPrivacy ?? '',
-    allowedPathWords: p.allowedPathWords.join(' '),
-  });
-  const [state, setState] = useState<string>('');
-  const [mergeInto, setMergeInto] = useState('');
-  const isAdmin = useIsAdmin();
-  const set =
-    (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm({
-        ...form,
-        [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value,
-      });
-  const run = async (label: string, fn: () => Promise<unknown>) => {
-    setState(`${label}…`);
-    try {
-      await fn();
-      setState('saved');
-      onSaved();
-    } catch (e) {
-      setState(String((e as Error).message));
-    }
-  };
-  const patch = (body: Record<string, unknown>) =>
-    api(`/v1/admin/providers/${p.id}`, { method: 'PATCH', body });
-  const save = () =>
-    run('saving', () =>
-      patch({
-        displayName: form.displayName.trim() || null,
-        hostPatterns: lines(form.hosts),
-        explicitRoutes: lines(form.routes),
-        supportEmail: form.supportEmail || null,
-        supportUrl: form.supportUrl || null,
-        supportNotes: form.supportNotes || null,
-        // what the status page shows is for admins
-        ...(isAdmin
-          ? { publicDisplayName: form.publicDisplayName || null, isPublic: form.isPublic }
-          : {}),
-        alertsEnabled: form.alertsEnabled,
-        pathPrivacy: form.pathPrivacy || null,
-        allowedPathWords: allowedWords(form.allowedPathWords).words,
-      }),
-    );
-  const label = p.displayName || p.name;
-  return (
-    <Card
-      title={label}
-      actions={
-        <>
-          <span className="muted">{state}</span>{' '}
-          <span className="tag">{SOURCE_LABEL[p.source]}</span>
-          {p.category && <span className="tag">{p.category}</span>}
-          {p.hidden && <span className="tag red">hidden</span>}
-          {p.internal && <span className="tag">internal</span>}
-        </>
-      }
-    >
-      {p.displayName && <p className="muted">Stored as {p.name}</p>}
-      {p.hosts.length > 0 && (
-        <div className="hosts">
-          <span className="muted">Hosts seen:</span>
-          {p.hosts.map((h) => (
-            <span key={h} className="host">
-              <code>{h}</code>
-              {p.hosts.length + p.hostPatterns.length > 1 && (
-                <button
-                  className="btn small"
-                  title="Track this host as a provider of its own (future traffic)"
-                  onClick={() =>
-                    void run('splitting', () =>
-                      api(`/v1/admin/providers/${p.id}/split`, {
-                        method: 'POST',
-                        body: { host: h },
-                      }),
-                    )
-                  }
-                >
-                  Split out
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="form">
-        <label>
-          Name in the dashboard <small>rename; data stays under {p.name}</small>
-          <input value={form.displayName} onChange={set('displayName')} placeholder={p.name} />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={form.alertsEnabled} onChange={set('alertsEnabled')} />{' '}
-          Alerts on <small>(incidents are tracked either way)</small>
-        </label>
-        <label>
-          Host patterns{' '}
-          <small>
-            one per line (`api.x.com`, `*.x.io`); hosts matching them belong to this provider
-          </small>
-          <textarea rows={2} value={form.hosts} onChange={set('hosts')} />
-        </label>
-        <label>
-          Explicit routes{' '}
-          <small>`/v1/users/:userId`; sent to the SDK, override auto-templating</small>
-          <textarea rows={2} value={form.routes} onChange={set('routes')} />
-        </label>
-        <label>
-          Path privacy{' '}
-          <small>
-            strict: only known API words in paths, everything else is <code>:id</code>; balanced:
-            any word seen often (only if paths never carry personal data)
-          </small>
-          <select value={form.pathPrivacy} onChange={set('pathPrivacy')}>
-            <option value="">SDK setting (strict unless the app sets balanced)</option>
-            <option value="strict">Strict</option>
-            <option value="balanced">Balanced</option>
-          </select>
-        </label>
-        <label>
-          Allowed path words{' '}
-          <small>
-            sent as-is in strict mode, e.g. this provider&apos;s resource names (
-            <code>sneakers</code>); never names or other personal data
-          </small>
-          <input
-            value={form.allowedPathWords}
-            onChange={set('allowedPathWords')}
-            placeholder="sneakers jackets"
-          />
-          <AllowedWordsPreview input={form.allowedPathWords} saved={p.allowedPathWords} />
-        </label>
-        <label>
-          Support email
-          <input
-            value={form.supportEmail}
-            onChange={set('supportEmail')}
-            placeholder="support@provider.com"
-          />
-        </label>
-        <label>
-          Support URL
-          <input value={form.supportUrl} onChange={set('supportUrl')} />
-        </label>
-        <label className="wide">
-          Support notes
-          <textarea rows={2} value={form.supportNotes} onChange={set('supportNotes')} />
-        </label>
-        <label>
-          Public display name <small>shown on the status page instead of the provider name</small>
-          <input
-            value={form.publicDisplayName}
-            onChange={set('publicDisplayName')}
-            placeholder="Card issuing"
-            disabled={!isAdmin}
-          />
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={form.isPublic}
-            onChange={set('isPublic')}
-            disabled={!isAdmin}
-          />{' '}
-          Show on the public status page
-          {!isAdmin && <small className="muted"> (admins only)</small>}
-        </label>
-        <div>
-          <button className="btn primary" onClick={() => void save()}>
-            Save
-          </button>
-        </div>
-      </div>
-      <div className="provider-actions">
-        <button
-          className="btn"
-          title="Stop collecting this provider (the SDK drops it within a minute)"
-          onClick={() => void run('saving', () => patch({ hidden: !p.hidden }))}
-        >
-          {p.hidden ? 'Unhide' : 'Hide'}
-        </button>
-        <button
-          className="btn"
-          title="Your own service: never collected"
-          onClick={() => void run('saving', () => patch({ internal: !p.internal }))}
-        >
-          {p.internal ? 'Not internal' : 'Mark internal'}
-        </button>
-        {others.length > 0 && (
-          <span className="merge">
-            <select
-              value={mergeInto}
-              onChange={(e) => setMergeInto(e.target.value)}
-              aria-label="Merge into"
-            >
-              <option value="">Merge into…</option>
-              {others.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.displayName || o.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="btn"
-              disabled={!mergeInto}
-              onClick={() => {
-                const target = others.find((o) => o.id === mergeInto);
-                if (
-                  !target ||
-                  !confirm(
-                    `Merge ${label} into ${target.displayName || target.name}? Its history moves too.`,
-                  )
-                )
-                  return;
-                void run('merging', () =>
-                  api(`/v1/admin/providers/${p.id}/merge`, {
-                    method: 'POST',
-                    body: { into: target.id },
-                  }),
-                );
-              }}
-            >
-              Merge
-            </button>
-          </span>
-        )}
-      </div>
-    </Card>
   );
 }
 
@@ -352,38 +92,16 @@ function DiscoverySettings() {
   );
 }
 
-function ProvidersTab() {
-  const [data, error, reload] = usePoll(
-    () => api<{ providers: Provider[] }>('/v1/admin/providers'),
-    [],
-    60_000,
-  );
-  const providers = data?.providers ?? [];
-  // newest first, so freshly discovered providers are easy to review
-  const sorted = [...providers].sort(
-    (a, b) =>
-      Number(a.hidden || a.internal) - Number(b.hidden || b.internal) ||
-      Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt),
-  );
+function ProvidersTab({ name }: { name: string | undefined }) {
+  if (name) return <ProviderPanel name={name} />;
   return (
     <>
-      <ErrorBox error={error} />
       <p className="muted">
         The SDK finds providers on its own; review new ones, rename or merge them, and hide anything
-        internal. Changes reach the SDK within a minute.
+        internal. Click a provider for its settings. Changes reach the SDK within a minute.
       </p>
       <DiscoverySettings />
-      {data?.providers.length === 0 && (
-        <Empty>Providers appear here as soon as the SDK reports calls to them.</Empty>
-      )}
-      {sorted.map((p) => (
-        <ProviderForm
-          key={`${p.id}:${p.hidden}:${p.internal}:${p.hosts.length}`}
-          p={p}
-          others={providers.filter((o) => o.id !== p.id && !o.hidden && !o.internal)}
-          onSaved={reload}
-        />
-      ))}
+      <ProvidersTable />
     </>
   );
 }
@@ -962,49 +680,5 @@ function StatusPageTab() {
           </button>
         ))}
     </>
-  );
-}
-
-/**
- * Allowed path words as typed (space or comma separated) → the normalized form
- * the SDK compares path segments in (`_ah` → `ah`, `getLatestOrdSumStatus` →
- * `getlatestordsumstatus`), and the entries that can't be a word.
- */
-function allowedWords(input: string): { words: string[]; invalid: string[] } {
-  const words: string[] = [];
-  const invalid: string[] = [];
-  for (const raw of input.split(/[\s,]+/).filter(Boolean)) {
-    const w = normalizePathWord(raw);
-    if (ALLOWED_WORD.test(w)) {
-      if (!words.includes(w)) words.push(w);
-    } else invalid.push(raw);
-  }
-  return { words, invalid };
-}
-
-/** What will be saved, so nothing changes silently. */
-function AllowedWordsPreview({ input, saved }: { input: string; saved: string[] }) {
-  const { words, invalid } = allowedWords(input);
-  const typed = input.split(/[\s,]+/).filter(Boolean);
-  const changed = words.join(' ') !== typed.join(' ').toLowerCase();
-  if (!changed && invalid.length === 0 && words.join(' ') === saved.join(' ')) return null;
-  return (
-    <small data-testid="allowed-words-preview">
-      {words.length > 0 && (
-        <>
-          saved as{' '}
-          {words
-            .map((w) => <code key={w}>{w}</code>)
-            .reduce<React.ReactNode[]>((a, c, i) => (i ? [...a, ' ', c] : [c]), [])}{' '}
-          (lower-case, _ - . removed; path segments are compared the same way)
-        </>
-      )}
-      {invalid.length > 0 && (
-        <span className="bad">
-          {' '}
-          not saved: {invalid.join(', ')} (letters and digits only, up to 64)
-        </span>
-      )}
-    </small>
   );
 }

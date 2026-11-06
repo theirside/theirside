@@ -72,6 +72,10 @@ Set any of these in `settings.thresholds` (JSON, per project) to override:
 | `minBaselineRate` | 0.001 | floor for the binomial test's null rate |
 | `escalationFactor` | 2 | "doubles" |
 
+### Per-provider overrides
+
+A provider can override six of these (Settings → Providers → a provider → Alerts & thresholds; admins only; stored in `providers.thresholds`): `minCalls`, `openAfterMinutes`, `rateMultiplier`, `rateDeltaPp`, `latencyMultiplier`, `latencyDeltaMs`. Precedence: **the provider's override, then the project's, then the default above**, per key (`thresholdsFor` in `apps/collector/src/modules/scoring/thresholds.ts`). The incident rule, the score and the chart's incident threshold all use the provider's values; a provider's endpoints are evaluated with them. Everything else (window, resolve, cooldown, baselines, learning) is per project only. Alerts on/off is the provider's own switch (`alerts_enabled`); incidents are tracked either way.
+
 ## Score (0–100)
 
 Computed over the same 5-minute window, for the dashboard, health API and status page. Start at 100 and subtract four penalties, each scaled to 0..1:

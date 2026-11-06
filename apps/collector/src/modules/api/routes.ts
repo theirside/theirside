@@ -12,6 +12,12 @@ import { OTHER_PROVIDER } from '../discovery/directory.js';
 import { mergeEndpoints } from '../discovery/endpoint-merge.js';
 import { adminTenant } from '../auth/tenant.js';
 import { DEFAULT_HEALTH_RANGE, computeHealth } from './health.js';
+import {
+  PROVIDER_THRESHOLD_KEYS,
+  PROVIDER_THRESHOLD_LIMITS,
+  resolveThresholds,
+  type ProviderThresholdKey,
+} from '../scoring/thresholds.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
 
 const OPENAPI_PATH = fileURLToPath(new URL('../../../openapi.yaml', import.meta.url));
@@ -84,6 +90,24 @@ const incidentQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
+/** A provider's threshold overrides: the whole set (a key left out uses the project's). */
+const providerThresholds = z
+  .object(
+    Object.fromEntries(
+      PROVIDER_THRESHOLD_KEYS.map((k) => {
+        const lim = PROVIDER_THRESHOLD_LIMITS[k];
+        let n = z.number().min(lim.min).max(lim.max);
+        if (lim.integer) n = n.int();
+        return [k, n.optional()];
+      }),
+    ) as Record<ProviderThresholdKey, z.ZodOptional<z.ZodNumber>>,
+  )
+  .strict()
+  .transform((o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)));
+
+const sameThresholds = (a: Record<string, number>, b: Record<string, number>) =>
+  PROVIDER_THRESHOLD_KEYS.every((k) => a[k] === b[k]);
+
 const providerPatch = z.object({
   hostPatterns: z.array(z.string().min(1).max(255)).max(50).optional(),
   explicitRoutes: z.array(z.string().min(1).max(512)).max(500).optional(),
@@ -101,6 +125,8 @@ const providerPatch = z.object({
   alertsEnabled: z.boolean().optional(),
   /** Path privacy for this provider's SDK templating; null = the SDK's own setting. */
   pathPrivacy: z.enum(['strict', 'balanced']).nullable().optional(),
+  /** Threshold overrides (admins only); `{}` = the project's for every key. */
+  thresholds: providerThresholds.optional(),
   /** Words the SDK may send as-is in strict path privacy. */
   allowedPathWords: z
     .array(
@@ -267,6 +293,12 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
             (patch.publicDisplayName || null) !== (current.publicDisplayName || null)))
       )
         throw adminOnly('change what the status page shows');
+      if (
+        current &&
+        patch.thresholds !== undefined &&
+        !sameThresholds(patch.thresholds as Record<string, number>, current.thresholds)
+      )
+        throw adminOnly('change alert thresholds');
     }
     const before = (await ctx.storage.config.listProviders(tenant)).find((p) => p.id === id);
     let updated = await ctx.storage.config.updateProvider(tenant, id, patch);
@@ -303,7 +335,9 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
   app.get('/v1/admin/settings/thresholds', auth, async (req, reply) => {
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
-    return { thresholds: await ctx.storage.config.getThresholds(tenant) };
+    const thresholds = await ctx.storage.config.getThresholds(tenant);
+    // effective: the project's overrides over the defaults (what a provider override replaces)
+    return { thresholds, effective: resolveThresholds(thresholds) };
   });
 
   app.put('/v1/admin/settings/thresholds', auth, async (req, reply) => {

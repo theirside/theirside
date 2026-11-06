@@ -606,3 +606,66 @@ label.check {
   align-items: center;
   gap: 8px;
 }
+
+/* Settings → Providers */
+.table-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.table-tools input[type='search'] {
+  min-width: 240px;
+}
+.subtabs {
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+.subtabs button {
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.subtabs button.on {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+th button.sort {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.provider-panel .card + .card {
+  margin-top: 12px;
+}
+.provider-panel .thresholds input {
+  width: 110px;
+  text-align: right;
+}
+.panel-save {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: var(--bg);
+}
+@media (max-width: 760px) {
+  .table-tools input[type='search'] {
+    min-width: 0;
+    width: 100%;
+  }
+  .providers-table th:nth-child(2),
+  .providers-table td:nth-child(2),
+  .providers-table th:nth-child(5),
+  .providers-table td:nth-child(5) {
+    display: none;
+  }
+}

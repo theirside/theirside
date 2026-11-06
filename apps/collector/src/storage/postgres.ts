@@ -788,6 +788,7 @@ function rowToProvider(r: Row): ProviderRecord {
     pathPrivacy: (r.path_privacy as ProviderRecord['pathPrivacy'] | undefined) ?? null,
     allowedPathWords: (r.allowed_path_words as string[] | undefined) ?? [],
     endpointAliases: (r.endpoint_aliases as Record<string, string> | undefined) ?? {},
+    thresholds: (r.thresholds as Record<string, number> | undefined) ?? {},
   };
 }
 
@@ -853,6 +854,7 @@ const PROVIDER_FIELDS: [keyof ProviderInput, string][] = [
   ['pathPrivacy', 'path_privacy'],
   ['allowedPathWords', 'allowed_path_words'],
   ['endpointAliases', 'endpoint_aliases'],
+  ['thresholds', 'thresholds'],
 ];
 
 class PgConfigStore implements ConfigStore {
