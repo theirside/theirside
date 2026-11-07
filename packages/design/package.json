@@ -1,0 +1,27 @@
+{
+  "name": "@theirside/design",
+  "version": "0.1.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "description": "Theirside design tokens (tokens.json), the CSS custom properties generated from them and the self-hosted UI fonts. The single source for the dashboard and the status page.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "@theirside/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tokens.json": "./tokens.json",
+    "./tokens.css": "./dist/tokens.css"
+  },
+  "files": [
+    "dist",
+    "fonts",
+    "tokens.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/build-css.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

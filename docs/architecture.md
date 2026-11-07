@@ -90,6 +90,11 @@ Licensing (decided 2026-11-04; plain-language version in `LICENSING.md`). Licens
 - Two entry points: `@theirside/shared/core` (dependency-free: constants, outcomes, histogram, templating, host patterns, network row) and `@theirside/shared` (adds the zod schemas).
 - Network aggregate row type (see 5.4), so the format is fixed early.
 
+### 3.2a Design (`packages/design`)
+- `tokens.json` is the only source of colours (dark and light themes, semantic names, chart series), fonts, type scale, spacing (4 px grid), radii, shadows, focus ring and control sizes. `themeCss()` turns it into CSS custom properties (`--color-*`, `--chart-*`, `--text-*`, `--space-*`, …): `auto` follows `prefers-color-scheme`, and `data-theme="light|dark"` on any element overrides it for that subtree. The build writes `dist/tokens.css` for the dashboard; the collector's status page calls `themeCss()` directly.
+- Fonts are self-hosted (Albert Sans for UI, Roboto Mono for code and endpoints; OFL-1.1, Latin and Latin Extended, `fonts/`), so no UI makes third-party requests.
+- Tests: WCAG contrast of every text/background token pair in both themes (≥ 4.5:1; focus ring ≥ 3:1). Usage rules: `docs/design-system.md`.
+
 ### 3.3 Collector (`apps/collector`)
 - Fastify + `pg`. Config by env only (`apps/collector/src/config.ts`). Stateless HTTP layer; one scheduler leader via Postgres advisory lock, so it can run with several replicas.
 - Modules: `ingest`, `storage` (repository interfaces + Postgres implementation), `scheduler`, `scoring`, `incidents`, `alerts` (channel adapters), `api`, `status-page`, `auth`, `entitlements`, `usage`.
@@ -204,6 +209,7 @@ This repo holds everything that can be self-hosted, including `ee/`. Cloud-only 
 ```
 packages/sdk          MIT
 packages/shared       MIT
+packages/design       FCL-1.0-ALv2; design tokens, generated CSS, self-hosted fonts (fonts/ OFL-1.1)
 apps/collector        FCL-1.0-ALv2 (root LICENSE)
 apps/dashboard        FCL-1.0-ALv2
 ee/                   FCL-1.0-ALv2, needs a valid licence key; empty in v1 except README
@@ -307,3 +313,4 @@ Add one line per decision: date, decision, reason.
 - 2026-11-07: Incidents cover any change in an endpoint's status mix, not only 5xx and network errors: a provider answering 401 where it answered 200 is the same kind of event for the team, whoever is to blame. Each failure group is tested like errors against the endpoint's own learned share, so endpoints where some 4xx are normal stay quiet; the threshold gained a "halfway to 100%" cap so frequent groups can still alert. The tests are the existing rate-vs-baseline and binomial checks per group, no new statistics. 4xx groups need a learned normal, trading a missed alert on a brand-new endpoint for no false alarms while its usual 4xx are unknown. Wording names the status and what it usually means, never who is at fault; the deploy hint points at the caller only when one of its services actually restarted in the 15 minutes before, and says "likely on the provider's side" only when the calling services report processes and none restarted. The score counts the worst group like provider errors, so an endpoint failing every call with 401 can't show green.
 - 2026-11-07: After the upgrade to 0.3.0, baselines learn the status mix only from minutes recorded with per-status counts (`status_mix_since`, migration 016), and 4xx groups wait for a day of it: older rollups count every 4xx as "other", so a mixed window would make a normally frequent 404 look new and raise false incidents on the first day.
 - 2026-11-07: The success share is judged right after the upgrade too, from ok vs not-ok counts that every rollup has: an endpoint that normally succeeds ≥ 90% and collapses opens a `behaviour` incident at once instead of waiting a day for the per-status normal (the real-world case: a login endpoint turning 100% 401 minutes after an upgrade would otherwise stay quiet). The 90% bound keeps endpoints whose usual failures are frequent (and of unknown kind) out of it. The incident relabels to the specific kind once the per-status normal exists; incident minutes are excluded from it, and an endpoint failing since the upgrade has its groups judged against the normal unsuccessful share (an upper bound for each group), so the relabel doesn't wait for the incident to end.
+- 2026-11-07: A design system in `packages/design`: one `tokens.json` for every UI (dashboard, status page, later the landing page), CSS custom properties generated from it, contrast checked in tests. A package rather than a folder in the dashboard because the collector renders the status page itself and needs the same tokens and fonts. Fonts are self-hosted: Google Fonts would send every status page visitor's IP to Google and fail on air-gapped installs. The light theme's status colours are darker than before so they pass 4.5:1 as text.
