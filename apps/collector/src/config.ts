@@ -84,6 +84,11 @@ export interface CollectorConfig {
    * account; everyone else it creates is a member (or gets the invite's role).
    */
   adminEmails: string[];
+  /**
+   * THEIRSIDE_DESIGN_GALLERY: the dashboard's #/design page (tokens and components,
+   * docs/design-system.md) opens without sign-in. Off: the page doesn't exist.
+   */
+  designGallery: boolean;
 }
 
 export interface AuthProxyConfig {
@@ -257,5 +262,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
       .split(',')
       .map((x) => x.trim().toLowerCase())
       .filter(Boolean),
+    designGallery: bool(env, 'THEIRSIDE_DESIGN_GALLERY', false),
   };
 }

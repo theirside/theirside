@@ -10,7 +10,7 @@ Tick every line before the SDK goes into a production service.
 
 - [ ] **Client OK obtained in writing** from the service owner, with [privacy.md](privacy.md) shared and reviewed (what is and isn't collected).
 - [ ] **Collector and Postgres run in the client's own account** (§8). No data leaves it; the collector's only outbound calls are the alert channels and SMTP server you configure (and AWS's ALB key endpoint if you use ALB sign-in).
-- [ ] **Dashboard private** (§8, "Network exposure"): reachable only from the client's network/VPN. Only `/status/*` and `/embed.js` may be public, ideally through a separate public-paths-only instance.
+- [ ] **Dashboard private** (§8, "Network exposure"): reachable only from the client's network/VPN. Only `/status/*`, `/embed.js` and `/fonts/*` (the status page's fonts) may be public, ideally through a separate public-paths-only instance.
 - [ ] **Real Slack and/or email test alert received**: Settings → Alert channels → **Send test alert** shows "Sent" and the message arrived where on-call will see it.
 - [ ] **SDK `debug` off** (`debug: false` or unset) in production.
 - [ ] **Discovered providers reviewed in the first hour**: Providers lists every third-party host the service calls (auto-discovery is on by default). Hide anything internal or unwanted (pushed to the SDK within a minute), or set `autoDiscover: false` to record only listed providers.
@@ -295,18 +295,18 @@ Use `/readyz` for the ALB target group health check (it returns 503 while the da
 
 ### Network exposure
 
-**The dashboard must only be reachable on a private network.** It shows every provider, endpoint, error and incident; user sign-in (and the break-glass admin token) is its only lock. Ingest (`/v1/ingest`), the health API (`/v1/health`, `/v1/incidents`), login (`/v1/auth/*`) and the admin API (`/v1/admin/*`) are private too. The only paths that may ever be public are **`/status/*`** and **`/embed.js`**, and only if you use the status page for the client's customers.
+**The dashboard must only be reachable on a private network.** It shows every provider, endpoint, error and incident; user sign-in (and the break-glass admin token) is its only lock. Ingest (`/v1/ingest`), the health API (`/v1/health`, `/v1/incidents`), login (`/v1/auth/*`) and the admin API (`/v1/admin/*`) are private too. The only paths that may ever be public are **`/status/*`**, **`/embed.js`** and **`/fonts/*`** (the status page's self-hosted fonts), and only if you use the status page for the client's customers.
 
 The simplest safe setup is two services from the same image and database:
 
 | | Private instance (all of it) | Public instance (optional) |
 |---|---|---|
-| Serves | ingest, dashboard, APIs, status page | only `/status/*`, `/embed.js`, `/healthz`, `/readyz`; everything else answers 404 |
+| Serves | ingest, dashboard, APIs, status page | only `/status/*`, `/embed.js`, `/fonts/*.woff2` (the status page's fonts), `/healthz`, `/readyz`; everything else answers 404 |
 | Settings | as above | add `THEIRSIDE_PUBLIC_PATHS_ONLY=true`; no `THEIRSIDE_BOOTSTRAP_API_KEY`/`THEIRSIDE_ADMIN_TOKEN` needed |
 | Load balancer | internal ALB, reachable from the services' SGs and the office/VPN | internet-facing ALB, or a CDN in front of it |
 | Scheduler | runs here (leader-elected) | never runs (implied by public-paths-only) |
 
-Because the public instance refuses everything outside the allow-list itself, a misconfigured listener rule can't expose the dashboard. If you'd rather run one service, the public ALB must forward only path patterns `/status/*` and `/embed.js` to it, with a default action of fixed-response 404, and the rest of the traffic must come through the internal ALB.
+Because the public instance refuses everything outside the allow-list itself, a misconfigured listener rule can't expose the dashboard. If you'd rather run one service, the public ALB must forward only path patterns `/status/*`, `/embed.js` and `/fonts/*` to it, with a default action of fixed-response 404, and the rest of the traffic must come through the internal ALB.
 
 Set `THEIRSIDE_PUBLIC_URL` to the **private** dashboard URL (alert links point there). Status page links and the embed snippet use the address they are requested on, so open Settings → Status page through the URL partners should use, or give partners the public instance's `https://status.<client-domain>/status/<token>`.
 
@@ -329,8 +329,9 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `THEIRSIDE_RAW_RETENTION_DAYS` / `THEIRSIDE_ROLLUP_RETENTION_DAYS` | `30` / `90` | |
 | `THEIRSIDE_SMTP_URL` (or `THEIRSIDE_SMTP_HOST`, `_PORT`, `_SECURE`, `_REQUIRE_TLS`, `_USER`, `_PASS`), `THEIRSIDE_SMTP_FROM` | – | Needed for email alert channels. `smtp://user:pass@host:587` uses STARTTLS, `smtps://…:465` TLS; TLS is required when credentials are set. Gmail, SES and Postmark examples: `.env.example`. |
 | `THEIRSIDE_LICENSE_KEY` | – | Paid features; never needed for ingest or alerts. |
+| `THEIRSIDE_DESIGN_GALLERY` | `false` (compose: `1`) | Opens the dashboard's `#/design` page (design tokens and components, no data) without sign-in. Leave it off in production. |
 | `THEIRSIDE_CATALOG_OVERRIDE` | – (compose: the demo's `.test`-only file) | JSON file with extra catalog entries (`{ "providers": [{ "name", "category", "domains": [] }] }`), e.g. to name an internal partner API. |
-| `THEIRSIDE_PUBLIC_PATHS_ONLY` | `false` | `true` for a public-facing instance: serves only `/status/*`, `/embed.js` and health checks, runs no scheduler. |
+| `THEIRSIDE_PUBLIC_PATHS_ONLY` | `false` | `true` for a public-facing instance: serves only `/status/*`, `/embed.js`, `/fonts/*.woff2` and health checks, runs no scheduler. |
 | `LOG_LEVEL` | `info` | |
 
 Full list: `docs/architecture.md` §3.3.

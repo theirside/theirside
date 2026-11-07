@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { FONTS_DIR, FONT_FILES } from '@theirside/design';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { statusPageData } from './data.js';
@@ -13,7 +16,8 @@ interface CacheEntry {
 /**
  * Public status page: GET /status/:token (server-rendered, cached
  * THEIRSIDE_STATUS_CACHE_SECONDS, default 30) and GET /embed.js. No auth; the token is
- * the capability. Only providers marked public appear.
+ * the capability. Only providers marked public appear. GET /fonts/:file serves the
+ * self-hosted UI fonts it uses.
  */
 export async function registerStatusPage(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const cache = new Map<string, CacheEntry>();
@@ -66,10 +70,22 @@ export async function registerStatusPage(app: FastifyInstance, ctx: AppContext):
       // embeddable anywhere, but never framed for clickjacking of anything else
       .header(
         'content-security-policy',
-        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors *",
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'self'; frame-ancestors *",
       )
       .header('referrer-policy', 'no-referrer');
     return entry.html;
+  });
+
+  // the self-hosted UI fonts (packages/design/fonts), for the status page
+  const fonts = new Map<string, string>(FONT_FILES.map((f) => [f.file, join(FONTS_DIR, f.file)]));
+  app.get('/fonts/:file', async (req, reply) => {
+    const path = fonts.get((req.params as { file: string }).file);
+    if (!path) return reply.code(404).send({ error: 'not found' });
+    return reply
+      .type('font/woff2')
+      .header('cache-control', 'public, max-age=604800')
+      .header('access-control-allow-origin', '*')
+      .send(await readFile(path));
   });
 
   app.get('/embed.js', async (req, reply) => {

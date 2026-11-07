@@ -24,7 +24,8 @@ export function isPublicPath(path: string): boolean {
     path === '/embed.js' ||
     path === '/healthz' ||
     path === '/readyz' ||
-    /^\/status\/[^/]+$/.test(path)
+    /^\/status\/[^/]+$/.test(path) ||
+    /^\/fonts\/[^/]+\.woff2$/.test(path)
   );
 }
 

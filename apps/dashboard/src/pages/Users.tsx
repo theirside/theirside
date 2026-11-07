@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, type LinkResult, type Me, type PendingInvite, type Role, type UserRow } from '../api';
-import { Card, CopyButton, ErrorBox, usePoll } from '../components/ui';
+import { Badge, Button, Card, CopyButton, ErrorBox, Field, Table, usePoll } from '../components/ui';
 import { ago, when } from '../format';
 
 interface UsersData {
@@ -39,9 +39,7 @@ function LinkCard({
             ? `The email could not be sent (${link.emailError}); send the link yourself.`
             : 'Send it over a channel you trust.'}
       </p>
-      <button className="btn" onClick={onClose}>
-        Done
-      </button>
+      <Button onClick={onClose}>Done</Button>
     </Card>
   );
 }
@@ -70,7 +68,7 @@ function StepUpForm({
 }) {
   const [s, setS] = useState<StepUp>({});
   const field = (key: keyof StepUp, label: string, props: Record<string, unknown>) => (
-    <label>
+    <Field>
       {label}
       <input
         value={s[key] ?? ''}
@@ -78,7 +76,7 @@ function StepUpForm({
         name={`step-up-${key}`}
         {...props}
       />
-    </label>
+    </Field>
   );
   return (
     <Card title="Confirm it's you">
@@ -107,12 +105,12 @@ function StepUpForm({
           </>
         )}
         <div className="wide row">
-          <button className="btn primary" type="submit">
+          <Button variant="primary" type="submit">
             Confirm
-          </button>
-          <button className="btn" type="button" onClick={onCancel}>
+          </Button>
+          <Button type="button" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </Card>
@@ -135,7 +133,7 @@ function SecurityCard() {
   };
   return (
     <Card title="Security">
-      <label className="check">
+      <Field check>
         <input
           type="checkbox"
           checked={data.require2fa}
@@ -143,7 +141,7 @@ function SecurityCard() {
           onChange={(e) => set(e.target.checked)}
         />{' '}
         Require two-factor sign-in for everyone
-      </label>
+      </Field>
       <p className="muted">
         {data.secretKeyConfigured
           ? `Users without it (${data.passwordUsersWithout2fa} now) must set it up before they can do anything else, including on sessions that are already open. Sign-ins through an identity proxy rely on its own MFA.`
@@ -248,7 +246,7 @@ export function UsersTab({ me }: { me: Me }) {
             inviteUser();
           }}
         >
-          <label>
+          <Field>
             Email
             <input
               type="email"
@@ -257,8 +255,8 @@ export function UsersTab({ me }: { me: Me }) {
               placeholder="colleague@example.com"
               name="invite-email"
             />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Role
             <select
               value={role}
@@ -268,8 +266,8 @@ export function UsersTab({ me }: { me: Me }) {
               <option value="member">Member</option>
               <option value="admin">Admin</option>
             </select>
-          </label>
-          <label className="check">
+          </Field>
+          <Field check>
             <input
               type="checkbox"
               checked={!!data?.emailEnabled && sendEmail}
@@ -279,17 +277,17 @@ export function UsersTab({ me }: { me: Me }) {
             {data?.emailEnabled
               ? 'Also email the links (invites and resets)'
               : 'Email is off (no SMTP): copy the link instead'}
-          </label>
+          </Field>
           <div className="wide">
-            <button className="btn primary" type="submit">
+            <Button variant="primary" type="submit">
               Create invite link
-            </button>{' '}
+            </Button>{' '}
             <span className="muted">Links work once and expire after 7 days.</span>
           </div>
         </form>
       </Card>
       <Card title="Users">
-        <table className="table" data-testid="users">
+        <Table className="users" data-testid="users">
           <thead>
             <tr>
               <th>User</th>
@@ -305,7 +303,7 @@ export function UsersTab({ me }: { me: Me }) {
               <tr key={u.id}>
                 <td>
                   <b>{u.name}</b>
-                  {u.id === data.you && <span className="tag">you</span>}
+                  {u.id === data.you && <Badge>you</Badge>}
                   <div className="muted">{u.email}</div>
                 </td>
                 <td>
@@ -319,25 +317,21 @@ export function UsersTab({ me }: { me: Me }) {
                   </select>
                 </td>
                 <td>
-                  <span className="tag">
-                    {u.source === 'proxy' ? 'identity proxy' : 'password'}
-                  </span>
-                  {u.twoFactor && <span className="tag new">2FA</span>}
-                  {u.source === 'password' && !u.hasPassword && (
-                    <span className="tag">no password yet</span>
-                  )}
+                  <Badge>{u.source === 'proxy' ? 'identity proxy' : 'password'}</Badge>
+                  {u.twoFactor && <Badge tone="healthy">2FA</Badge>}
+                  {u.source === 'password' && !u.hasPassword && <Badge>no password yet</Badge>}
                 </td>
                 <td className="muted">{u.lastLoginAt ? ago(u.lastLoginAt) : 'never'}</td>
                 <td className="muted">{u.activeSessions}</td>
                 <td className="actions">
                   {u.source === 'password' && (
-                    <button className="btn small" onClick={() => resetLink(u)}>
+                    <Button size="small" onClick={() => resetLink(u)}>
                       Reset link
-                    </button>
+                    </Button>
                   )}
                   {u.twoFactor && (
-                    <button
-                      className="btn small"
+                    <Button
+                      size="small"
                       onClick={() =>
                         stepUp(
                           `Turn off two-factor sign-in for ${u.email}? Do this when they lost their phone; they can set it up again.`,
@@ -350,11 +344,11 @@ export function UsersTab({ me }: { me: Me }) {
                       }
                     >
                       Turn off 2FA
-                    </button>
+                    </Button>
                   )}
                   {u.activeSessions > 0 && (
-                    <button
-                      className="btn small"
+                    <Button
+                      size="small"
                       onClick={() =>
                         confirmThen(`Sign ${u.email ?? u.name} out on every device?`, () =>
                           api(`/v1/admin/users/${u.id}/sign-out`, { method: 'POST' }),
@@ -362,11 +356,12 @@ export function UsersTab({ me }: { me: Me }) {
                       }
                     >
                       Sign out
-                    </button>
+                    </Button>
                   )}
                   {u.id !== data.you && (
-                    <button
-                      className="btn small danger"
+                    <Button
+                      variant="danger"
+                      size="small"
                       onClick={() =>
                         stepUp(`Remove ${u.email ?? u.name}? They lose access at once.`, (s) =>
                           api(`/v1/admin/users/${u.id}`, { method: 'DELETE', body: { stepUp: s } }),
@@ -374,38 +369,39 @@ export function UsersTab({ me }: { me: Me }) {
                       }
                     >
                       Remove
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
         {!!data?.invites.length && (
           <>
-            <h3>Pending invites</h3>
-            <table className="table" data-testid="invites">
+            <h3 className="invites-h">Pending invites</h3>
+            <Table data-testid="invites">
               <tbody>
                 {data.invites.map((i) => (
                   <tr key={i.id}>
                     <td>
-                      {i.email} <span className="tag">{i.role}</span>
+                      <span>{i.email}</span> <Badge>{i.role}</Badge>
                     </td>
                     <td className="muted">expires {when(i.expiresAt)}</td>
                     <td className="actions">
-                      <button
-                        className="btn small danger"
+                      <Button
+                        variant="danger"
+                        size="small"
                         onClick={() =>
                           run(api(`/v1/admin/users/invites/${i.id}`, { method: 'DELETE' }))
                         }
                       >
                         Revoke
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </>
         )}
       </Card>

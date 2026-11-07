@@ -1,5 +1,5 @@
 import { api, type Overview as OverviewData, type ProviderHealth } from '../api';
-import { ErrorBox, Empty, StatusDot, usePoll } from '../components/ui';
+import { Badge, Callout, Empty, ErrorBox, StatusDot, Table, usePoll } from '../components/ui';
 import { ago, ms, num, pct } from '../format';
 import { href } from '../router';
 
@@ -25,7 +25,7 @@ export function Overview({ environment }: { environment: string }) {
       </div>
       <ErrorBox error={error} />
       {data && data.openIncidents.length > 0 && (
-        <div className="banner">
+        <Callout tone="danger" className="banner">
           {data.openIncidents.length} open incident{data.openIncidents.length > 1 ? 's' : ''}:{' '}
           {data.openIncidents.map((i) => (
             <a key={i.id} href={href('incidents', i.id)}>
@@ -33,7 +33,7 @@ export function Overview({ environment }: { environment: string }) {
               {i.endpoints.filter((e) => !e.recoveredAt).length > 1 ? 's' : ''})
             </a>
           ))}
-        </div>
+        </Callout>
       )}
       {data && data.providers.length === 0 && (
         <Empty>
@@ -42,7 +42,7 @@ export function Overview({ environment }: { environment: string }) {
         </Empty>
       )}
       {data && data.discovery.recent.length > 0 && (
-        <div className="notice" data-testid="discovered">
+        <Callout data-testid="discovered">
           <b>Discovered in the last 24 h:</b>{' '}
           {data.discovery.recent.map((p, i) => (
             <span key={p.name}>
@@ -51,13 +51,13 @@ export function Overview({ environment }: { environment: string }) {
             </span>
           ))}
           . Review them in <a href={href('settings', 'providers')}>Settings → Providers</a>.
-        </div>
+        </Callout>
       )}
       {data?.discovery.overflow && (
-        <div className="notice warn">
+        <Callout tone="danger">
           This project reached the provider limit; new hosts are collected under <b>Other</b>. Hide
           or merge providers you don't need.
-        </div>
+        </Callout>
       )}
       {data && main.length > 0 && <ProviderTable providers={main} testId="providers" />}
       {data && infra.length > 0 && (
@@ -77,7 +77,7 @@ const WEEK = 7 * 24 * 3600_000;
 
 function ProviderTable({ providers, testId }: { providers: ProviderHealth[]; testId: string }) {
   return (
-    <table className="table" data-testid={testId}>
+    <Table data-testid={testId}>
       <thead>
         <tr>
           <th>Provider</th>
@@ -98,14 +98,12 @@ function ProviderTable({ providers, testId }: { providers: ProviderHealth[]; tes
               </a>
               {p.source !== 'configured' &&
                 p.firstSeenAt &&
-                Date.now() - Date.parse(p.firstSeenAt) < WEEK && (
-                  <span className="tag new">New</span>
-                )}
-              {!p.alertsEnabled && <span className="tag">alerts off</span>}
+                Date.now() - Date.parse(p.firstSeenAt) < WEEK && <Badge tone="healthy">New</Badge>}
+              {!p.alertsEnabled && <Badge>alerts off</Badge>}
               {p.openIncidentId && (
-                <a className="tag red" href={href('incidents', p.openIncidentId)}>
+                <Badge tone="danger" href={href('incidents', p.openIncidentId)}>
                   incident
-                </a>
+                </Badge>
               )}
             </td>
             {p.callsPerMin === 0 ? (
@@ -133,6 +131,6 @@ function ProviderTable({ providers, testId }: { providers: ProviderHealth[]; tes
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }

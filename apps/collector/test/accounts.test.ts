@@ -11,7 +11,10 @@ describe('first-run setup', () => {
 
   it('is required until a user exists, then refuses a second setup', async () => {
     const b = new Browser(t);
-    expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({ setupRequired: true });
+    expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({
+      setupRequired: true,
+      designGallery: false,
+    });
     const code = await t.ctx.accounts.issueSetupCode();
     expect(code).toMatch(/^[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}$/);
 
@@ -758,5 +761,19 @@ describe('managing users', () => {
         })
       ).statusCode,
     ).toBe(404);
+  });
+});
+
+describe('THEIRSIDE_DESIGN_GALLERY', () => {
+  it('tells the dashboard the #/design gallery is open without sign-in', async () => {
+    const t = await startTestApp({ env: { THEIRSIDE_DESIGN_GALLERY: '1' } });
+    try {
+      const b = new Browser(t);
+      expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({
+        designGallery: true,
+      });
+    } finally {
+      await t.close();
+    }
   });
 });

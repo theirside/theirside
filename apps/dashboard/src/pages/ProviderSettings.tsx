@@ -1,7 +1,17 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared/core';
 import { api, type Provider } from '../api';
-import { Card, Empty, ErrorBox, usePoll } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Empty,
+  ErrorBox,
+  Field,
+  Table,
+  Tabs,
+  usePoll,
+} from '../components/ui';
 import { ago } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
@@ -106,19 +116,20 @@ export function ProvidersTable() {
     <>
       <ErrorBox error={error} />
       <div className="table-tools">
-        <nav className="tabs subtabs" role="tablist">
-          {TABS.map(([id, label, filter]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              className={tab === id ? 'on' : ''}
-              onClick={() => setTab(id)}
-            >
-              {label} <span className="muted">{providers.filter(filter).length}</span>
-            </button>
-          ))}
-        </nav>
+        <Tabs
+          variant="sub"
+          label="Provider groups"
+          value={tab}
+          onChange={(id) => setTab(id as typeof tab)}
+          items={TABS.map(([id, label, filter]) => ({
+            id,
+            label: (
+              <>
+                {label} <span className="muted">{providers.filter(filter).length}</span>
+              </>
+            ),
+          }))}
+        />
         <input
           type="search"
           placeholder="Search name, host, category"
@@ -131,7 +142,7 @@ export function ProvidersTable() {
         <Empty>Providers appear here as soon as the SDK reports calls to them.</Empty>
       )}
       {providers.length > 0 && (
-        <table className="table providers-table" data-testid="provider-settings">
+        <Table className="providers-table" data-testid="provider-settings">
           <thead>
             <tr>
               {COLUMNS.map(([key, label, numeric]) => (
@@ -160,17 +171,17 @@ export function ProvidersTable() {
                     {labelOf(p)}
                   </a>
                   {p.displayName && <span className="muted"> {p.name}</span>}
-                  {p.hidden && <span className="tag red">hidden</span>}
-                  {p.internal && <span className="tag">internal</span>}
+                  {p.hidden && <Badge tone="danger">hidden</Badge>}
+                  {p.internal && <Badge>internal</Badge>}
                 </td>
                 <td>{p.category ?? '–'}</td>
                 <td className="num">{hostCount(p)}</td>
                 <td>{p.alertsEnabled ? 'on' : <span className="muted">off</span>}</td>
                 <td>
                   {overrides(p) > 0 ? (
-                    <span className="tag">
+                    <Badge>
                       {overrides(p)} override{overrides(p) > 1 ? 's' : ''}
-                    </span>
+                    </Badge>
                   ) : (
                     <span className="muted">default</span>
                   )}
@@ -179,7 +190,7 @@ export function ProvidersTable() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
       {providers.length > 0 && shown.length === 0 && (
         <div className="empty">No providers match.</div>
@@ -250,9 +261,9 @@ export function ProviderPanel({ name }: { name: string }) {
           / {p ? labelOf(p) : name}
         </h2>
         {p && (
-          <a href={href('providers', p.name)} className="tag" title="Health and charts">
+          <Badge href={href('providers', p.name)} title="Health and charts">
             open dashboard
-          </a>
+          </Badge>
         )}
       </div>
       <ErrorBox error={error} />
@@ -359,9 +370,9 @@ function ProviderForm({
   return (
     <div className="provider-panel" data-testid="provider-panel">
       <p>
-        <span className="tag">{SOURCE_LABEL[p.source]}</span>
-        {p.hidden && <span className="tag red">hidden</span>}
-        {p.internal && <span className="tag">internal</span>}{' '}
+        <Badge>{SOURCE_LABEL[p.source]}</Badge>
+        {p.hidden && <Badge tone="danger">hidden</Badge>}
+        {p.internal && <Badge>internal</Badge>}{' '}
         <span className="muted">
           first seen {ago(p.firstSeenAt)}
           {p.lastCallAt ? `, last call ${ago(p.lastCallAt)}` : ', never called'}
@@ -370,35 +381,35 @@ function ProviderForm({
 
       <Section title="General">
         <div className="form">
-          <label>
+          <Field>
             Name <small>the key data is stored under</small>
             <input value={p.name} readOnly />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Name in the dashboard <small>rename; data stays under {p.name}</small>
             <input value={form.displayName} onChange={set('displayName')} placeholder={p.name} />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Category{' '}
             <small>from the catalog or discovery; infrastructure starts with alerts off</small>
             <input value={p.category ?? 'other'} readOnly />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Support email
             <input
               value={form.supportEmail}
               onChange={set('supportEmail')}
               placeholder="support@provider.com"
             />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Support URL
             <input value={form.supportUrl} onChange={set('supportUrl')} />
-          </label>
-          <label className="wide">
+          </Field>
+          <Field wide>
             Support notes <small>added to the incident summary</small>
             <textarea rows={2} value={form.supportNotes} onChange={set('supportNotes')} />
-          </label>
+          </Field>
         </div>
       </Section>
 
@@ -410,8 +421,8 @@ function ProviderForm({
               <span key={h} className="host">
                 <code>{h}</code>
                 {hostCount(p) > 1 && (
-                  <button
-                    className="btn small"
+                  <Button
+                    size="small"
                     title="Track this host as a provider of its own (future traffic)"
                     onClick={() =>
                       void run('splitting', () =>
@@ -423,39 +434,37 @@ function ProviderForm({
                     }
                   >
                     Split out
-                  </button>
+                  </Button>
                 )}
               </span>
             ))}
           </div>
         )}
         <div className="form">
-          <label>
+          <Field>
             Host patterns{' '}
             <small>one per line (`api.x.com`, `*.x.io`); hosts matching them belong here</small>
             <textarea rows={2} value={form.hosts} onChange={set('hosts')} />
-          </label>
-          <label>
+          </Field>
+          <Field>
             Explicit routes{' '}
             <small>`/v1/users/:userId`; sent to the SDK, override auto-templating</small>
             <textarea rows={2} value={form.routes} onChange={set('routes')} />
-          </label>
+          </Field>
         </div>
         <div className="provider-actions">
-          <button
-            className="btn"
+          <Button
             title="Stop collecting this provider (the SDK drops it within a minute)"
             onClick={() => void run('saving', () => patch({ hidden: !p.hidden }))}
           >
             {p.hidden ? 'Unhide' : 'Hide'}
-          </button>
-          <button
-            className="btn"
+          </Button>
+          <Button
             title="Your own service: never collected"
             onClick={() => void run('saving', () => patch({ internal: !p.internal }))}
           >
             {p.internal ? 'Not internal' : 'Mark internal'}
-          </button>
+          </Button>
           {others.length > 0 && (
             <span className="merge">
               <select
@@ -470,8 +479,7 @@ function ProviderForm({
                   </option>
                 ))}
               </select>
-              <button
-                className="btn"
+              <Button
                 disabled={!mergeInto}
                 onClick={() => {
                   const target = others.find((o) => o.id === mergeInto);
@@ -492,7 +500,7 @@ function ProviderForm({
                 }}
               >
                 Merge
-              </button>
+              </Button>
             </span>
           )}
         </div>
@@ -500,7 +508,7 @@ function ProviderForm({
 
       <Section title="Endpoint names">
         <div className="form">
-          <label>
+          <Field>
             Path privacy{' '}
             <small>
               strict: only known API words in paths, everything else is <code>:id</code>; balanced:
@@ -511,8 +519,8 @@ function ProviderForm({
               <option value="strict">Strict</option>
               <option value="balanced">Balanced</option>
             </select>
-          </label>
-          <label>
+          </Field>
+          <Field>
             Allowed path words{' '}
             <small>
               sent as-is in strict mode, e.g. this provider&apos;s resource or method names (
@@ -524,16 +532,16 @@ function ProviderForm({
               placeholder="sneakers getOrderHistory"
             />
             <AllowedWordsPreview input={form.allowedPathWords} saved={p.allowedPathWords} />
-          </label>
+          </Field>
         </div>
       </Section>
 
       <Section title="Alerts & thresholds" admin="thresholds: admins only, read-only">
-        <label className="check">
+        <Field check>
           <input type="checkbox" checked={form.alertsEnabled} onChange={set('alertsEnabled')} />{' '}
           Alerts on <small className="muted">(incidents are tracked either way)</small>
-        </label>
-        <table className="table thresholds" data-testid="thresholds">
+        </Field>
+        <Table className="thresholds" data-testid="thresholds">
           <thead>
             <tr>
               <th>Rule</th>
@@ -562,30 +570,30 @@ function ProviderForm({
                       disabled={!isAdmin}
                       onChange={(e) => setThr({ ...thr, [k]: e.target.value })}
                     />{' '}
-                    {own ? <span className="tag">override</span> : null}
+                    {own ? <Badge>override</Badge> : null}
                   </td>
                   <td>
                     {own && isAdmin && (
-                      <button
-                        className="btn small"
+                      <Button
+                        size="small"
                         onClick={() =>
                           setThr(Object.fromEntries(Object.entries(thr).filter(([x]) => x !== k)))
                         }
                       >
                         Reset to default
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>
               );
             })}
           </tbody>
-        </table>
+        </Table>
       </Section>
 
       <Section title="Public status page" admin="admins only, read-only">
         <div className="form">
-          <label className="check">
+          <Field check>
             <input
               type="checkbox"
               checked={form.isPublic}
@@ -593,8 +601,8 @@ function ProviderForm({
               disabled={!isAdmin}
             />{' '}
             Show on the public status page
-          </label>
-          <label>
+          </Field>
+          <Field>
             Public display name <small>shown on the status page instead of the provider name</small>
             <input
               value={form.publicDisplayName}
@@ -602,14 +610,14 @@ function ProviderForm({
               placeholder="Card issuing"
               disabled={!isAdmin}
             />
-          </label>
+          </Field>
         </div>
       </Section>
 
       <div className="panel-save">
-        <button className="btn primary" onClick={() => void save()}>
+        <Button variant="primary" onClick={() => void save()}>
           Save
-        </button>{' '}
+        </Button>{' '}
         <span className="muted" data-testid="provider-save-state">
           {state}
         </span>

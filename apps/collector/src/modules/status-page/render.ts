@@ -1,4 +1,5 @@
 import { PRODUCT_NAME, PRODUCT_URL } from '@theirside/shared';
+import { fontFaceCss, themeCss } from '@theirside/design';
 import type { PublicStatus, PublicStatusData } from './data.js';
 
 export type Theme = 'auto' | 'light' | 'dark';
@@ -28,35 +29,30 @@ function pct(x: number): string {
   return p >= 99.995 ? '100%' : `${p.toFixed(2)}%`;
 }
 
-const LIGHT = `--bg:#f5f6f8;--fg:#0f1115;--muted:#5a5e68;--line:#dfe1e6;--card:#ffffff;--ok:#1a7a4c;--deg:#8a5600;--out:#c0262d;--none:#c9ccd3;`;
-const DARK = `--bg:#09090b;--fg:#f1f2f4;--muted:#9a9da6;--line:#26272d;--card:#151519;--ok:#3dd68c;--deg:#f2b35a;--out:#ff6b6b;--none:#3a3b42;`;
+/** Served by the collector at /fonts/ (status-page/routes.ts); relative, so a path prefix works. */
+const FONTS = fontFaceCss('../fonts/');
 
 function css(theme: Theme): string {
-  const vars =
-    theme === 'light'
-      ? `:root{${LIGHT}}`
-      : theme === 'dark'
-        ? `:root{${DARK}}`
-        : `:root{${LIGHT}}@media (prefers-color-scheme: dark){:root{${DARK}}}`;
-  return `${vars}
+  return `${FONTS}
+${themeCss(theme)}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/21px "Helvetica Neue",Arial,sans-serif}
-.wrap{max-width:760px;margin:0 auto;padding:24px 16px}
-.embed .wrap{padding:8px 0;max-width:none}
-h1{font-size:22px;line-height:28px;font-weight:600;margin:0 0 24px}
-.overall{display:flex;align-items:center;gap:10px;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--card);margin-bottom:32px;font-weight:600}
-.dot{width:10px;height:10px;border-radius:50%;flex:none}
-.operational .dot,.dot.operational{background:var(--ok)}.degraded .dot,.dot.degraded{background:var(--deg)}.outage .dot,.dot.outage{background:var(--out)}.no_data .dot,.dot.no_data{background:var(--none)}
-.provider{padding:24px 0;border-top:1px solid var(--line)}
-.row{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.name{font-weight:600}
-.state{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;white-space:nowrap}
-.bars{display:flex;gap:2px;margin-top:10px;height:28px}
-.bar{flex:1;border-radius:2px;background:var(--none);min-width:2px}
-.bar.ok{background:var(--ok)}.bar.degraded{background:var(--deg)}.bar.outage{background:var(--out)}
-.legend{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:6px}
-.foot{color:var(--muted);font-size:12px;margin-top:18px}.foot a{color:inherit}
-.empty{color:var(--muted);padding:12px 0}`;
+body{margin:0;background:var(--color-background);color:var(--color-text);font:var(--text-base)/var(--leading-base) var(--font-ui)}
+.wrap{max-width:var(--size-page-narrow);margin:0 auto;padding:var(--space-6) var(--space-4)}
+.embed .wrap{padding:var(--space-2) 0;max-width:none}
+h1{font-size:var(--text-xl);line-height:var(--leading-xl);font-weight:var(--weight-bold);margin:0 0 var(--space-6)}
+.overall{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4);border:1px solid var(--color-border);border-radius:var(--radius-xl);background:var(--color-surface);margin-bottom:var(--space-8);font-weight:var(--weight-semibold)}
+.dot{width:var(--size-dot);height:var(--size-dot);border-radius:var(--radius-full);flex:none;background:var(--color-neutral)}
+.operational .dot,.dot.operational{background:var(--color-healthy)}.degraded .dot,.dot.degraded{background:var(--color-warning)}.outage .dot,.dot.outage{background:var(--color-danger)}.no_data .dot,.dot.no_data{background:var(--color-neutral)}
+.provider{padding:var(--space-6) 0;border-top:1px solid var(--color-border)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)}
+.name{font-weight:var(--weight-semibold)}
+.state{display:flex;align-items:center;gap:var(--space-2);color:var(--color-text-muted);font-size:var(--text-md);line-height:var(--leading-md);white-space:nowrap}
+.bars{display:flex;gap:var(--space-0_5);margin-top:var(--space-3);height:var(--size-status-bar)}
+.bar{flex:1;border-radius:var(--space-0_5);background:var(--color-neutral);min-width:var(--space-0_5)}
+.bar.ok{background:var(--color-healthy)}.bar.degraded{background:var(--color-warning)}.bar.outage{background:var(--color-danger)}
+.legend{display:flex;justify-content:space-between;color:var(--color-text-muted);font-size:var(--text-sm);line-height:var(--leading-sm);margin-top:var(--space-2)}
+.foot{color:var(--color-text-muted);font-size:var(--text-sm);line-height:var(--leading-sm);margin-top:var(--space-5)}.foot a{color:inherit}
+.empty{color:var(--color-text-muted);padding:var(--space-3) 0}`;
 }
 
 export function renderStatusPage(

@@ -283,6 +283,8 @@ export interface AuthStatus {
   emailEnabled: boolean;
   adminTokenEnabled: boolean;
   proxy: 'header' | 'alb' | null;
+  /** The #/design gallery is on (THEIRSIDE_DESIGN_GALLERY). */
+  designGallery?: boolean;
 }
 
 export interface UserRow {

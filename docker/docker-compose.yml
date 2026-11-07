@@ -57,6 +57,9 @@ services:
       # extra catalog entries for the demo's fake providers; they only match the reserved
       # .test TLD, so they never affect real traffic. Set it to empty to disable.
       THEIRSIDE_CATALOG_OVERRIDE: ${THEIRSIDE_CATALOG_OVERRIDE-/app/demo-catalog.json}
+      # the #/design gallery (tokens and components) without sign-in, for designers and
+      # screenshot checks; this compose file is the local/demo stack. Set it to 0 to hide it.
+      THEIRSIDE_DESIGN_GALLERY: ${THEIRSIDE_DESIGN_GALLERY-1}
       # email alerts (see .env.example); empty = email channel disabled
       THEIRSIDE_SMTP_URL: ${THEIRSIDE_SMTP_URL:-}
       THEIRSIDE_SMTP_HOST: ${THEIRSIDE_SMTP_HOST:-}

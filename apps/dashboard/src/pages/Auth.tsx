@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api, type AuthStatus, type Me } from '../api';
 import { TwoFactorSetup } from '../components/TwoFactor';
 import { href } from '../router';
+import { Badge, Button, Callout, Field, StatusDot } from '../components/ui';
 
 const MIN_PASSWORD = 12;
 
@@ -22,7 +23,7 @@ function Shell({
           onSubmit?.();
         }}
       >
-        <h1 className="login-title">{title}</h1>
+        <h1 className="login-sub">{title}</h1>
         {children}
       </form>
       <LoginPanel />
@@ -30,7 +31,7 @@ function Shell({
   );
 }
 
-/** Static brand panel beside every sign-in screen; the incident is a labelled sample, never tenant data. */
+/** Brand panel beside every sign-in screen. The incident is a labelled sample, never tenant data. */
 function LoginPanel() {
   return (
     <aside className="login-panel">
@@ -44,9 +45,9 @@ function LoginPanel() {
       <div className="login-sample">
         <div className="login-sample-label">Sample incident</div>
         <div className="login-sample-provider">
-          <span className="dot red" aria-hidden />
+          <StatusDot status="red" />
           Acme Cards
-          <span className="tag red">Failing</span>
+          <Badge tone="danger">Failing</Badge>
         </div>
         <code>POST /v2/cards/:id/activate</code>
         <div>
@@ -64,8 +65,8 @@ function LoginPanel() {
           </svg>
           <span>Incident threshold</span>
         </div>
-        <div className="status muted">
-          <span className="dot green" aria-hidden />
+        <div className="muted login-sample-ok">
+          <StatusDot status="green" />
           Other Acme endpoints OK
         </div>
       </div>
@@ -93,7 +94,7 @@ function NewPassword({
 }) {
   return (
     <>
-      <label>
+      <Field>
         Password{' '}
         <small className="muted">at least {MIN_PASSWORD} characters; a passphrase is fine</small>
         <input
@@ -103,8 +104,8 @@ function NewPassword({
           onChange={(e) => onPassword(e.target.value)}
           name="new-password"
         />
-      </label>
-      <label>
+      </Field>
+      <Field>
         Repeat password
         <input
           type="password"
@@ -113,7 +114,7 @@ function NewPassword({
           onChange={(e) => onConfirm(e.target.value)}
           name="confirm-password"
         />
-      </label>
+      </Field>
     </>
   );
 }
@@ -144,7 +145,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
           run(api('/v1/auth/login/2fa', { method: 'POST', body: { mfaToken, code } }).then(onDone))
         }
       >
-        <label>
+        <Field>
           Code from your authenticator app, or a recovery code
           <input
             autoFocus
@@ -153,11 +154,11 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
             onChange={(e) => setCode(e.target.value)}
             name="code"
           />
-        </label>
+        </Field>
         {error && <div className="error">{error}</div>}
-        <button className="btn primary" type="submit" disabled={busy}>
+        <Button variant="primary" type="submit" disabled={busy}>
           Verify
-        </button>
+        </Button>
         <a href={href()} onClick={() => setMfaToken(null)}>
           Back
         </a>
@@ -176,7 +177,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
           Break-glass access with the collector's THEIRSIDE_ADMIN_TOKEN, for when no account can
           sign in.
         </p>
-        <label>
+        <Field>
           Admin token
           <input
             type="password"
@@ -185,11 +186,11 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
             onChange={(e) => setToken(e.target.value)}
             name="token"
           />
-        </label>
+        </Field>
         {error && <div className="error">{error}</div>}
-        <button className="btn primary" type="submit" disabled={busy}>
+        <Button variant="primary" type="submit" disabled={busy}>
           Sign in
-        </button>
+        </Button>
         <a href={href()} onClick={() => setMode('password')}>
           Sign in with your account
         </a>
@@ -212,12 +213,12 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
       }
     >
       {status.proxy && (
-        <p className="notice">
+        <Callout>
           This collector also accepts sign-in through your organization's identity proxy. Open the
           dashboard through it to sign in with your company account.
-        </p>
+        </Callout>
       )}
-      <label>
+      <Field>
         Email
         <input
           type="email"
@@ -227,8 +228,8 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
           onChange={(e) => setEmail(e.target.value)}
           name="email"
         />
-      </label>
-      <label>
+      </Field>
+      <Field>
         Password
         <input
           type="password"
@@ -237,11 +238,11 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
           onChange={(e) => setPassword(e.target.value)}
           name="password"
         />
-      </label>
+      </Field>
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" type="submit" disabled={busy}>
+      <Button variant="primary" type="submit" disabled={busy}>
         Sign in
-      </button>
+      </Button>
       <div className="login-links">
         {status.emailEnabled ? (
           <a href={href('forgot')}>Forgot password?</a>
@@ -290,7 +291,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <code>docker compose logs collector | grep "setup code"</code>) or its
         THEIRSIDE_ADMIN_TOKEN.
       </p>
-      <label>
+      <Field>
         Setup code or admin token
         <input
           autoFocus
@@ -298,8 +299,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
           onChange={(e) => setSecret(e.target.value)}
           name="setup-code"
         />
-      </label>
-      <label>
+      </Field>
+      <Field>
         Your name
         <input
           autoComplete="name"
@@ -307,8 +308,8 @@ export function Setup({ onDone }: { onDone: () => void }) {
           onChange={(e) => setName(e.target.value)}
           name="name"
         />
-      </label>
-      <label>
+      </Field>
+      <Field>
         Email
         <input
           type="email"
@@ -317,7 +318,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
           onChange={(e) => setEmail(e.target.value)}
           name="email"
         />
-      </label>
+      </Field>
       <NewPassword
         password={password}
         confirm={confirm}
@@ -325,9 +326,9 @@ export function Setup({ onDone }: { onDone: () => void }) {
         onConfirm={setConfirm}
       />
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" type="submit">
+      <Button variant="primary" type="submit">
         Create account
-      </button>
+      </Button>
     </Shell>
   );
 }
@@ -374,7 +375,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
       <p>
         You were invited as <b>{info.email}</b>.
       </p>
-      <label>
+      <Field>
         Your name
         <input
           autoFocus
@@ -383,7 +384,7 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
           onChange={(e) => setName(e.target.value)}
           name="name"
         />
-      </label>
+      </Field>
       <NewPassword
         password={password}
         confirm={confirm}
@@ -391,9 +392,9 @@ export function AcceptInvite({ token, onDone }: { token: string; onDone: () => v
         onConfirm={setConfirm}
       />
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" type="submit">
+      <Button variant="primary" type="submit">
         Create account
-      </button>
+      </Button>
     </Shell>
   );
 }
@@ -440,9 +441,9 @@ export function ResetPassword({ token }: { token: string }) {
         onConfirm={setConfirm}
       />
       {error && <div className="error">{error}</div>}
-      <button className="btn primary" type="submit">
+      <Button variant="primary" type="submit">
         Set password
-      </button>
+      </Button>
     </Shell>
   );
 }
@@ -465,7 +466,7 @@ export function ForgotPassword() {
         <p>If {email} has an account, a reset link is on its way. It works for 1 hour.</p>
       ) : (
         <>
-          <label>
+          <Field>
             Email
             <input
               type="email"
@@ -474,11 +475,11 @@ export function ForgotPassword() {
               onChange={(e) => setEmail(e.target.value)}
               name="email"
             />
-          </label>
+          </Field>
           {error && <div className="error">{error}</div>}
-          <button className="btn primary" type="submit">
+          <Button variant="primary" type="submit">
             Send reset link
-          </button>
+          </Button>
         </>
       )}
       <a href={href()}>Back to sign-in</a>
@@ -499,15 +500,15 @@ export function EnrolTwoFactor({
   return (
     <div className="login">
       <div className="login-card">
-        <h1 className="login-title">Set up two-factor sign-in</h1>
+        <h1 className="login-sub">Set up two-factor sign-in</h1>
         <p>
           Two-factor sign-in is required for everyone here. Set it up for{' '}
           <b>{me.user?.email ?? me.user?.name}</b> to continue.
         </p>
         <TwoFactorSetup onDone={onDone} />
-        <button className="btn" type="button" onClick={onSignOut}>
+        <Button type="button" onClick={onSignOut}>
           Sign out
-        </button>
+        </Button>
       </div>
       <LoginPanel />
     </div>

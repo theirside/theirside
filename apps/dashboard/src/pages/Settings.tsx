@@ -10,7 +10,19 @@ import {
   type StatusPageList,
   type Me,
 } from '../api';
-import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Callout,
+  Card,
+  CopyButton,
+  Empty,
+  ErrorBox,
+  Field,
+  Table,
+  Tabs,
+  usePoll,
+} from '../components/ui';
 import { ago, when } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
@@ -38,11 +50,11 @@ export function Settings({ tab, sub, me }: { tab: string; sub?: string; me: Me }
         <div className="page-h">
           <h1>Settings</h1>
         </div>
-        <p className="notice">
+        <Callout>
           Only admins can manage alert channels, API keys, status pages and users. Ask an admin if
           you need a change, or to make you an admin.{' '}
           <a href={href('settings', 'providers')}>Back to providers</a>
-        </p>
+        </Callout>
       </>
     );
   return (
@@ -50,13 +62,11 @@ export function Settings({ tab, sub, me }: { tab: string; sub?: string; me: Me }
       <div className="page-h">
         <h1>Settings</h1>
       </div>
-      <nav className="tabs">
-        {tabs.map(([id, label]) => (
-          <a key={id} href={href('settings', id)} className={tab === id ? 'on' : ''}>
-            {label}
-          </a>
-        ))}
-      </nav>
+      <Tabs
+        label="Settings"
+        value={tab}
+        items={tabs.map(([id, label]) => ({ id, label, href: href('settings', id) }))}
+      />
       {tab === 'providers' && <ProvidersTab name={sub} />}
       {tab === 'thresholds' && <ThresholdsTab />}
       {tab === 'alerts' && <AlertsTab />}
@@ -77,7 +87,7 @@ function DiscoverySettings() {
   );
   if (!data) return null;
   return (
-    <label className="check discovery-setting">
+    <Field check className="discovery-setting">
       <input
         type="checkbox"
         checked={data.digest}
@@ -91,7 +101,7 @@ function DiscoverySettings() {
       />{' '}
       Send a message to alert channels when new providers are discovered (at most hourly)
       {!isAdmin && <small className="muted"> (admins only)</small>}
-    </label>
+    </Field>
   );
 }
 
@@ -196,13 +206,12 @@ function AlertsTab() {
         {channels?.length === 0 && (
           <div className="empty">No channels yet. Alerts are only stored until you add one.</div>
         )}
-        <table className="table">
+        <Table>
           <tbody>
             {channels?.map((c) => (
               <tr key={c.id}>
                 <td>
-                  <b>{c.name}</b> <span className="tag">{c.kind}</span>{' '}
-                  {!c.enabled && <span className="tag">disabled</span>}
+                  <b>{c.name}</b> <Badge>{c.kind}</Badge> {!c.enabled && <Badge>disabled</Badge>}
                 </td>
                 <td className="muted">
                   {String(
@@ -222,67 +231,65 @@ function AlertsTab() {
                       {testResult[c.id]!.text}
                     </span>
                   )}
-                  <button className="btn" onClick={() => void test(c)}>
-                    Send test alert
-                  </button>
-                  <button className="btn toggle" onClick={() => void toggle(c)}>
+                  <Button onClick={() => void test(c)}>Send test alert</Button>
+                  <Button className="toggle" onClick={() => void toggle(c)}>
                     {c.enabled ? 'Disable' : 'Enable'}
-                  </button>
-                  <button className="btn danger" onClick={() => void remove(c)}>
+                  </Button>
+                  <Button variant="danger" onClick={() => void remove(c)}>
                     Delete
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </Card>
       <Card title="Add channel" actions={<span className="muted">{msg.add}</span>}>
         <div className="form">
-          <label>
+          <Field>
             Type
             <select value={kind} onChange={(e) => setKind(e.target.value as AlertChannel['kind'])}>
               <option value="slack">Slack (incoming webhook)</option>
               <option value="webhook">Webhook (HMAC signed)</option>
               <option value="email">Email (SMTP)</option>
             </select>
-          </label>
-          <label>
+          </Field>
+          <Field>
             Name
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="#integrations-alerts"
             />
-          </label>
-          <label className="wide">
+          </Field>
+          <Field wide>
             {kind === 'slack'
               ? 'Webhook URL'
               : kind === 'webhook'
                 ? 'URL'
                 : 'Recipients (comma-separated)'}
             <input value={target} onChange={(e) => setTarget(e.target.value)} />
-          </label>
+          </Field>
           {kind === 'webhook' && (
-            <label className="wide">
+            <Field wide>
               Signing secret <small>min. 16 characters; requests carry x-theirside-signature</small>
               <input value={secret} onChange={(e) => setSecret(e.target.value)} />
-            </label>
+            </Field>
           )}
           <div>
-            <button className="btn primary" onClick={() => void add()}>
+            <Button variant="primary" onClick={() => void add()}>
               Add
-            </button>
+            </Button>
           </div>
         </div>
       </Card>
       <Card title="Recent deliveries">
-        <table className="table">
+        <Table>
           <tbody>
             {deliveries?.map((d) => (
               <tr key={d.id}>
                 <td>
-                  <span className={`tag ${d.status === 'failed' ? 'red' : ''}`}>{d.status}</span>{' '}
+                  <Badge tone={d.status === 'failed' ? 'danger' : undefined}>{d.status}</Badge>{' '}
                   {d.event}
                 </td>
                 <td>
@@ -296,7 +303,7 @@ function AlertsTab() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
         {deliveries?.length === 0 && <div className="empty">Nothing sent yet.</div>}
       </Card>
     </>
@@ -339,7 +346,7 @@ function SdkTab() {
       </p>
       {data?.instances.length === 0 && <Empty>No SDK has reported yet.</Empty>}
       {data && data.instances.length > 0 && (
-        <table className="table" data-testid="sdk">
+        <Table data-testid="sdk">
           <thead>
             <tr>
               <th>Service</th>
@@ -366,7 +373,12 @@ function SdkTab() {
                       : s.kind === 'long-running'
                         ? 'long-running'
                         : '–'}
-                    {s.platform && <span className="tag">{s.platform}</span>}
+                    {s.platform && (
+                      <>
+                        <br />
+                        <Badge>{s.platform}</Badge>
+                      </>
+                    )}
                   </td>
                   <td className="num" title="active now / seen in the last 24 hours">
                     {s.kind === 'legacy' ? '–' : `${s.processes.active} / ${s.processes.lastDay}`}
@@ -378,7 +390,7 @@ function SdkTab() {
                     )}
                   </td>
                   <td title={hint || undefined}>
-                    {s.stale ? <span className="tag red">{label}</span> : label}
+                    {s.stale ? <Badge tone="danger">{label}</Badge> : label}
                   </td>
                   <td>
                     {s.sdkVersions.length > 1
@@ -391,7 +403,7 @@ function SdkTab() {
               );
             })}
           </tbody>
-        </table>
+        </Table>
       )}
     </>
   );
@@ -452,14 +464,12 @@ function ApiKeysTab() {
           <pre className="summary" data-testid="new-api-key">
             {created.key}
           </pre>
-          <button className="btn" onClick={() => setCreated(null)}>
-            Done
-          </button>
+          <Button onClick={() => setCreated(null)}>Done</Button>
         </Card>
       )}
       <Card title="Keys">
         {data && active.length === 0 && <div className="empty">No active keys.</div>}
-        <table className="table" data-testid="api-keys">
+        <Table data-testid="api-keys">
           <thead>
             <tr>
               <th>Name</th>
@@ -479,17 +489,15 @@ function ApiKeysTab() {
                 <td className="mono">{k.keyPrefix}…</td>
                 <td>
                   {k.scopes.map((s) => (
-                    <span key={s} className="tag">
-                      {s}
-                    </span>
+                    <Badge key={s}>{s}</Badge>
                   ))}
                 </td>
                 <td className="muted">{when(k.createdAt)}</td>
                 <td className="muted">{k.lastUsedAt ? ago(k.lastUsedAt) : 'never'}</td>
                 <td className="actions">
-                  <button className="btn danger" onClick={() => void revoke(k)}>
+                  <Button variant="danger" onClick={() => void revoke(k)}>
                     Revoke
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
@@ -501,50 +509,50 @@ function ApiKeysTab() {
                 <td>{when(k.createdAt)}</td>
                 <td>{k.lastUsedAt ? ago(k.lastUsedAt) : 'never'}</td>
                 <td>
-                  <span className="tag">revoked {ago(k.revokedAt!)}</span>
+                  <Badge>revoked {ago(k.revokedAt!)}</Badge>
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </Card>
       <Card title="Create key" actions={<span className="error">{msg}</span>}>
         <div className="form">
-          <label className="wide">
+          <Field>
             Name
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="payments-api production"
             />
-          </label>
-          <fieldset className="wide scopes">
+          </Field>
+          <fieldset className="field wide checks">
             <legend>Scopes</legend>
-            <label className="check">
+            <Field check>
               <input
                 type="checkbox"
                 checked={scopes.ingest}
                 onChange={(e) => setScopes({ ...scopes, ingest: e.target.checked })}
               />
               ingest (SDK)
-            </label>
-            <label className="check">
+            </Field>
+            <Field check>
               <input
                 type="checkbox"
                 checked={scopes.read}
                 onChange={(e) => setScopes({ ...scopes, read: e.target.checked })}
               />
               read (health API)
-            </label>
+            </Field>
           </fieldset>
-          <div>
-            <button
-              className="btn primary"
+          <div className="form-actions">
+            <Button
+              variant="primary"
               disabled={!name.trim() || (!scopes.ingest && !scopes.read)}
               onClick={() => void create()}
             >
               Create key
-            </button>
+            </Button>
           </div>
         </div>
       </Card>
@@ -586,15 +594,15 @@ function StatusPageForm({
   };
   return (
     <div className="form">
-      <label>
+      <Field>
         Title
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Integration status"
         />
-      </label>
-      <label>
+      </Field>
+      <Field>
         Theme
         <select value={theme} onChange={(e) => setTheme(e.target.value as StatusPage['theme'])}>
           {THEMES.map((t) => (
@@ -603,7 +611,7 @@ function StatusPageForm({
             </option>
           ))}
         </select>
-      </label>
+      </Field>
       <div className="wide">
         <div className="muted">
           Providers shown (none ticked = every public provider). Only providers marked public in
@@ -611,7 +619,7 @@ function StatusPageForm({
         </div>
         {publicProviders.length === 0 && <div className="muted">No public providers yet.</div>}
         {publicProviders.map((p) => (
-          <label key={p.id} className="check">
+          <Field key={p.id} check>
             <input
               type="checkbox"
               checked={filter.includes(p.name)}
@@ -622,18 +630,14 @@ function StatusPageForm({
               }
             />
             {p.publicDisplayName || p.name}
-          </label>
+          </Field>
         ))}
       </div>
       <div>
-        <button className="btn primary" disabled={!title.trim()} onClick={() => void submit()}>
+        <Button variant="primary" disabled={!title.trim()} onClick={() => void submit()}>
           {submitLabel}
-        </button>{' '}
-        {onCancel && (
-          <button className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-        )}{' '}
+        </Button>{' '}
+        {onCancel && <Button onClick={onCancel}>Cancel</Button>}{' '}
         <span className="error">{msg}</span>
       </div>
     </div>
@@ -672,12 +676,10 @@ function StatusPageTab() {
           title={p.title}
           actions={
             <>
-              <button className="btn" onClick={() => setEditing(editing === p.id ? null : p.id)}>
-                Edit
-              </button>{' '}
-              <button className="btn danger" onClick={() => void remove(p)}>
+              <Button onClick={() => setEditing(editing === p.id ? null : p.id)}>Edit</Button>{' '}
+              <Button variant="danger" onClick={() => void remove(p)}>
                 Delete
-              </button>
+              </Button>
             </>
           }
         >
@@ -699,7 +701,7 @@ function StatusPageTab() {
                 <a href={p.url} target="_blank" rel="noreferrer">
                   {p.url}
                 </a>{' '}
-                <span className="tag">{p.theme}</span>{' '}
+                <Badge>{p.theme}</Badge>{' '}
                 <span className="muted">
                   {p.providerFilter.length ? p.providerFilter.join(', ') : 'all public providers'}
                 </span>
@@ -712,9 +714,7 @@ function StatusPageTab() {
         </Card>
       ))}
       {data && !data.canCreate && (
-        <div className="notice" data-testid="status-page-limit">
-          {data.limitMessage}
-        </div>
+        <Callout data-testid="status-page-limit">{data.limitMessage}</Callout>
       )}
       {data?.canCreate &&
         (adding ? (
@@ -732,9 +732,9 @@ function StatusPageTab() {
             />
           </Card>
         ) : (
-          <button className="btn primary" onClick={() => setAdding(true)}>
+          <Button variant="primary" onClick={() => setAdding(true)}>
             New status page
-          </button>
+          </Button>
         ))}
     </>
   );

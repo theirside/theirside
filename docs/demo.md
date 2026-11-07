@@ -85,6 +85,7 @@ curl -s -X DELETE localhost:4010/__chaos/rules
 - **Settings → Status page**: open the public page (only providers marked public, under their display names, with a 30-day bar) and copy the `embed.js` snippet into any HTML file.
 - **Incidents**: the seeded history, each with its summary for the provider's support.
 - **Settings → SDK health**: the demo app's SDK, last seen, dropped events.
+- **Design system**: <http://localhost:4318/#/design> shows every design token and component in the light and dark themes, without sign-in (`THEIRSIDE_DESIGN_GALLERY=1`, set by this compose file; [design system](design-system.md)).
 - Health API: `curl -s -H 'Authorization: Bearer tsd_live_localdemo0000000000000000' localhost:4318/v1/health | jq`.
 - SDK and X-Ray side by side: `curl -s localhost:3000/debug/instrumentation` (the demo app's port is published) shows the SDK's counters and the segments a local X-Ray daemon stub received.
 

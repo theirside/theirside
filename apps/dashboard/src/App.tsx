@@ -9,12 +9,15 @@ import {
   ResetPassword,
   Setup,
 } from './pages/Auth';
+import { DesignGallery, NotFound } from './pages/DesignGallery';
 import { Incident, Incidents } from './pages/Incidents';
 import { Overview } from './pages/Overview';
 import { Provider } from './pages/Provider';
 import { Settings } from './pages/Settings';
 import { AdminContext } from './role';
 import { href, useRoute } from './router';
+import { ThemeToggle } from './components/ThemeToggle';
+import { Button } from './components/ui';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -54,6 +57,8 @@ export function App() {
   if (section === 'invite' && arg) return <AcceptInvite token={arg} onDone={signedIn} />;
   if (section === 'reset' && arg) return <ResetPassword token={arg} />;
   if (me === undefined || status === undefined) return null;
+  // the design gallery: open without sign-in when the collector enables it, absent otherwise
+  if (section === 'design') return status.designGallery ? <DesignGallery /> : <NotFound />;
   if (me === null) {
     if (section === 'forgot') return <ForgotPassword />;
     if (status.setupRequired) return <Setup onDone={signedIn} />;
@@ -108,15 +113,12 @@ export function App() {
               ))}
             </select>
           )}
+          <ThemeToggle />
           <span className="muted">{me.entitlements.plan}</span>
           <a href={href('account')} className={active('account')} data-testid="account-link">
             {me.breakGlass ? 'Admin token' : (me.user?.name ?? 'Account')}
           </a>
-          {me.via !== 'proxy' && (
-            <button className="btn" onClick={signOut}>
-              Sign out
-            </button>
-          )}
+          {me.via !== 'proxy' && <Button onClick={signOut}>Sign out</Button>}
         </div>
       </header>
       <main>

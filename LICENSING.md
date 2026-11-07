@@ -5,7 +5,8 @@ Theirside is source-available. This page explains the licences in plain language
 | Folder | Licence |
 |---|---|
 | `packages/sdk` (npm package), `packages/shared` | [MIT](packages/sdk/LICENSE) |
-| Everything else: `apps/collector`, `apps/dashboard`, `ee/`, `examples/`, `tools/`, `docker/` | [Fair Core License, FCL-1.0-ALv2](LICENSE) |
+| Everything else: `apps/collector`, `apps/dashboard`, `packages/design`, `ee/`, `examples/`, `tools/`, `docker/` | [Fair Core License, FCL-1.0-ALv2](LICENSE) |
+| Fonts in `packages/design/fonts` (Albert Sans, Roboto Mono) | [SIL Open Font License 1.1](packages/design/fonts/README.md), their own authors |
 
 Copyright holder and licensor: KRAVA IT SERVICES LTD.
 
