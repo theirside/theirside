@@ -329,6 +329,7 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `THEIRSIDE_RAW_RETENTION_DAYS` / `THEIRSIDE_ROLLUP_RETENTION_DAYS` | `30` / `90` | |
 | `THEIRSIDE_SMTP_URL` (or `THEIRSIDE_SMTP_HOST`, `_PORT`, `_SECURE`, `_REQUIRE_TLS`, `_USER`, `_PASS`), `THEIRSIDE_SMTP_FROM` | – | Needed for email alert channels. `smtp://user:pass@host:587` uses STARTTLS, `smtps://…:465` TLS; TLS is required when credentials are set. Gmail, SES and Postmark examples: `.env.example`. |
 | `THEIRSIDE_LICENSE_KEY` | – | Paid features; never needed for ingest or alerts. |
+| `THEIRSIDE_DESIGN_GALLERY` | `false` (compose: `1`) | Opens the dashboard's `#/design` page (design tokens and components, no data) without sign-in. Leave it off in production. |
 | `THEIRSIDE_CATALOG_OVERRIDE` | – (compose: the demo's `.test`-only file) | JSON file with extra catalog entries (`{ "providers": [{ "name", "category", "domains": [] }] }`), e.g. to name an internal partner API. |
 | `THEIRSIDE_PUBLIC_PATHS_ONLY` | `false` | `true` for a public-facing instance: serves only `/status/*`, `/embed.js`, `/fonts/*.woff2` and health checks, runs no scheduler. |
 | `LOG_LEVEL` | `info` | |
