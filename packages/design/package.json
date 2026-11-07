@@ -12,6 +12,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./contrast": {
+      "@theirside/source": "./src/contrast.ts",
+      "types": "./dist/contrast.d.ts",
+      "import": "./dist/contrast.js"
+    },
     "./tokens.json": "./tokens.json",
     "./tokens.css": "./dist/tokens.css"
   },

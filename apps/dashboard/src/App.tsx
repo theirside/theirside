@@ -9,6 +9,7 @@ import {
   ResetPassword,
   Setup,
 } from './pages/Auth';
+import { DesignGallery, NotFound } from './pages/DesignGallery';
 import { Incident, Incidents } from './pages/Incidents';
 import { Overview } from './pages/Overview';
 import { Provider } from './pages/Provider';
@@ -56,6 +57,8 @@ export function App() {
   if (section === 'invite' && arg) return <AcceptInvite token={arg} onDone={signedIn} />;
   if (section === 'reset' && arg) return <ResetPassword token={arg} />;
   if (me === undefined || status === undefined) return null;
+  // the design gallery: open without sign-in when the collector enables it, absent otherwise
+  if (section === 'design') return status.designGallery ? <DesignGallery /> : <NotFound />;
   if (me === null) {
     if (section === 'forgot') return <ForgotPassword />;
     if (status.setupRequired) return <Setup onDone={signedIn} />;

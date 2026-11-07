@@ -719,6 +719,76 @@ details.infra summary {
   background: var(--color-background);
 }
 
+/* ---- #/design gallery ---------------------------------------------------- */
+.gallery {
+  padding: var(--space-6);
+}
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
+  gap: var(--space-6);
+}
+.gallery-theme {
+  background: var(--color-background);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6);
+  min-width: 0;
+}
+.gallery-theme > h2 {
+  margin-bottom: var(--space-4);
+}
+.gallery-section {
+  margin-bottom: var(--space-6);
+}
+.gallery-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.gallery-swatch {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+.gallery-chip {
+  width: var(--space-10);
+  height: var(--space-10);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  flex: none;
+}
+.gallery-weight {
+  margin-right: var(--space-4);
+}
+.gallery-label {
+  width: 96px;
+}
+.gallery-bar {
+  height: var(--space-3);
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+.gallery-shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+}
+.gallery-shape {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+}
+.gallery-focus {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
 /* ---- touch: 44px targets on coarse pointers -------------------------------- */
 @media (pointer: coarse) {
   .btn,

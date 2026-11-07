@@ -225,6 +225,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
     emailEnabled: ctx.accounts.emailEnabled,
     adminTokenEnabled: !!ctx.config.adminToken,
     proxy: ctx.config.authProxy?.mode ?? null,
+    designGallery: ctx.config.designGallery,
   }));
 
   app.post('/v1/auth/setup', async (req, reply) => {

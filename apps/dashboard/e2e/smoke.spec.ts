@@ -476,3 +476,33 @@ test('accounts: invite link, two-factor setup, sign-in with a recovery code', as
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(row).toHaveCount(0);
 });
+
+test('design gallery: open without sign-in, every token and component in both themes', async ({
+  page,
+}, testInfo) => {
+  await page.context().clearCookies();
+  await page.goto('/#/design');
+  const light = page.getByTestId('gallery-light');
+  const dark = page.getByTestId('gallery-dark');
+  await expect(light).toBeVisible();
+  await expect(dark).toBeVisible();
+  // each panel resolves the tokens of its own theme
+  const bg = (el: typeof light) => el.evaluate((n) => getComputedStyle(n).backgroundColor);
+  expect(await bg(light)).toBe('rgb(255, 255, 255)');
+  expect(await bg(dark)).toBe('rgb(9, 9, 11)');
+  await expect(light.locator('[data-token="--color-danger"]')).toBeVisible();
+  // legend entries are checkboxes; the whole row toggles
+  const legend = light.locator('.chart').getByRole('checkbox', { name: /timeout/ });
+  await expect(legend).toHaveAttribute('aria-checked', 'true');
+  await legend.click();
+  await expect(legend).toHaveAttribute('aria-checked', 'false');
+  // screenshots for visual checks (test-results/, kept as attachments)
+  for (const [name, el] of [
+    ['design-light', light],
+    ['design-dark', dark],
+  ] as const) {
+    const path = testInfo.outputPath(`${name}.png`);
+    await el.screenshot({ path });
+    await testInfo.attach(name, { path, contentType: 'image/png' });
+  }
+});
