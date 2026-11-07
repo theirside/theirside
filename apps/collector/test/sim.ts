@@ -67,6 +67,8 @@ export class Sim {
   readonly alerts: SimAlert[] = [];
   private baselines = new Map<string, BaselineView>();
   private lastBaselineAt = -Infinity;
+  /** When per-status counts start (the upgrade to collector 0.3.0); undefined: always had them. */
+  statusMixSince: number | undefined;
   readonly tenant = { orgId: 'org_sim', projectId: 'prj_sim' };
 
   constructor(
@@ -141,28 +143,41 @@ export class Sim {
               to: (e.recoveredAt ?? i.resolvedAt)?.getTime() ?? Infinity,
             })),
         );
-      const c: RollupCounts = {
-        total: 0,
-        status429: 0,
-        statusCounts: emptyStatusCounts(),
-        outcomes: {} as Record<Outcome, number>,
-        latencyHistogram: emptyHistogram(),
+      const sum = (since: number) => {
+        const c: RollupCounts = {
+          total: 0,
+          status429: 0,
+          statusCounts: emptyStatusCounts(),
+          outcomes: {} as Record<Outcome, number>,
+          latencyHistogram: emptyHistogram(),
+        };
+        for (const o of OUTCOMES) c.outcomes[o] = 0;
+        let first = Infinity;
+        for (const [minute, r] of per) {
+          if (minute < since || minute >= to) continue;
+          if (windows.some((w) => minute >= w.from && minute <= w.to)) continue;
+          first = Math.min(first, minute);
+          c.total += r.total;
+          c.status429 += r.status429;
+          for (const k of STATUS_COUNT_KEYS) c.statusCounts![k] += r.statusCounts?.[k] ?? 0;
+          for (const o of OUTCOMES) c.outcomes[o] += r.outcomes[o];
+          for (let i = 0; i < LATENCY_BUCKET_COUNT; i++)
+            c.latencyHistogram[i]! += r.latencyHistogram[i]!;
+        }
+        return { c, first };
       };
-      for (const o of OUTCOMES) c.outcomes[o] = 0;
-      let first = Infinity;
-      for (const [minute, r] of per) {
-        if (minute < from || minute >= to) continue;
-        if (windows.some((w) => minute >= w.from && minute <= w.to)) continue;
-        first = Math.min(first, minute);
-        c.total += r.total;
-        c.status429 += r.status429;
-        for (const k of STATUS_COUNT_KEYS) c.statusCounts![k] += r.statusCounts?.[k] ?? 0;
-        for (const o of OUTCOMES) c.outcomes[o] += r.outcomes[o];
-        for (let i = 0; i < LATENCY_BUCKET_COUNT; i++)
-          c.latencyHistogram[i]! += r.latencyHistogram[i]!;
-      }
+      const { c, first } = sum(from);
       if (first === Infinity) continue;
-      next.set(id, baselineFrom(key, c, new Date(first), new Date(now), t));
+      // like refreshBaselines: the status mix only from minutes with per-status counts
+      const mixSince = this.statusMixSince;
+      const split =
+        mixSince !== undefined && mixSince > from
+          ? {
+              counts: mixSince < to ? sum(mixSince).c : undefined,
+              minutes: Math.max(0, Math.floor((to - mixSince) / MIN)),
+            }
+          : undefined;
+      next.set(id, baselineFrom(key, c, new Date(first), new Date(now), t, split));
     }
     this.baselines = next;
   }

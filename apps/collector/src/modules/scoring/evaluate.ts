@@ -248,6 +248,14 @@ export interface Evaluation {
   bad: boolean;
 }
 
+/** An endpoint that normally succeeds this often is judged on a success collapse before its status mix is learned. */
+export const NORMAL_SUCCESS_MIN = 0.9;
+
+/** A drop in successful calls can be judged: the status mix is learned, or the endpoint normally succeeds. */
+export function successCollapseJudged(b: BaselineView): boolean {
+  return !b.statusMixLearning || 1 - normalRate(b, 'behaviour') >= NORMAL_SUCCESS_MIN;
+}
+
 /** Is this window "bad" (incident-worthy) relative to the baseline? */
 export function evaluate(
   stats: WindowStats,
@@ -273,13 +281,13 @@ export function evaluate(
 
   // behaviour change: the same test per failure group against its own normal share.
   // Only once the endpoint's normal is learned: a new endpoint's usual 4xx aren't known yet.
-  const shifted = (count: number, base: number) =>
+  const significant = (count: number, base: number) =>
     enough &&
     !b.learning &&
-    !b.statusMixLearning &&
     count >= t.minErrors &&
     count / stats.calls >= errorThreshold(base, t) &&
     binomialUpperTail(stats.calls, count, Math.max(base, t.minBaselineRate)) < t.maxPValue;
+  const shifted = (count: number, base: number) => !b.statusMixLearning && significant(count, base);
   let groupBreach: Evaluation['groupBreach'] = null;
   let strongest = 0;
   for (const g of ['auth', 'not_found', 'validation', 'rate_limited'] as const) {
@@ -292,10 +300,13 @@ export function evaluate(
       groupBreach = g;
     }
   }
+  // the success share collapsing is judged from ok vs not-ok counts, which every rollup
+  // has: also while the per-status mix is still learning (right after the upgrade), for
+  // endpoints that normally succeed
   const behaviourBreach =
     groupBreach === null &&
     (shifted(stats.groups.client_other, b.statusMix?.client_other ?? 0) ||
-      shifted(stats.nonSuccess, normalRate(b, 'behaviour')));
+      (successCollapseJudged(b) && significant(stats.nonSuccess, normalRate(b, 'behaviour'))));
   const kind: IncidentKind | null = errorBreach
     ? 'errors'
     : groupBreach
@@ -372,6 +383,8 @@ export function scoreWindow(stats: WindowStats, b: BaselineView, t: Thresholds):
       const base = g === 'rate_limited' ? b.rate429 : (b.statusMix?.[g] ?? 0);
       worst = Math.max(worst, excess(stats.groups[g] / stats.calls, base));
     }
+    worst = Math.max(worst, excess(stats.nonSuccess / stats.calls, normalRate(b, 'behaviour')));
+  } else if (!b.learning && successCollapseJudged(b) && stats.calls > 0) {
     worst = Math.max(worst, excess(stats.nonSuccess / stats.calls, normalRate(b, 'behaviour')));
   }
   const errorsP = SCORE_WEIGHTS.errors * confidence * worst;

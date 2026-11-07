@@ -5,7 +5,7 @@ import {
   histogramQuantile,
 } from '@theirside/shared';
 import type { Baseline, RollupKey, Storage, Tenant } from '../../storage/types.js';
-import { windowStats, type RollupCounts } from './evaluate.js';
+import { NORMAL_SUCCESS_MIN, windowStats, type RollupCounts } from './evaluate.js';
 import type { Thresholds } from './thresholds.js';
 
 const MIN = 60_000;
@@ -50,6 +50,35 @@ export function baselineFrom(
   const mixStats = split ? windowStats(split.counts ? [split.counts] : []) : s;
   const historyMinutes = Math.max(0, Math.floor((now.getTime() - firstMinute.getTime()) / MIN));
   const learning = historyMinutes < t.learningMinHours * 60 || s.calls < t.learningMinCalls;
+  // ok vs not ok is in every rollup: over the whole window, also right after the upgrade
+  const nonSuccess = s.calls > 0 ? s.nonSuccess / s.calls : undefined;
+  const groupsFrom = (
+    share: (g: 'auth' | 'not_found' | 'validation' | 'client_other') => number,
+  ) => ({
+    auth: share('auth'),
+    not_found: share('not_found'),
+    validation: share('validation'),
+    client_other: share('client_other'),
+  });
+  let groups: ReturnType<typeof groupsFrom> | undefined =
+    mixStats.calls > 0 ? groupsFrom((g) => mixStats.groups[g] / mixStats.calls) : undefined;
+  let statusMixLearning = split
+    ? split.minutes < t.learningMinHours * 60 || mixStats.calls < t.learningMinCalls
+    : learning;
+  // A day after the upgrade an endpoint that normally succeeds may still lack calls with
+  // per-status counts outside incidents (e.g. it has failed since the upgrade): no group can
+  // normally be above its normal non-success share, so judge each group against that bound.
+  if (
+    split &&
+    statusMixLearning &&
+    !learning &&
+    split.minutes >= t.learningMinHours * 60 &&
+    nonSuccess !== undefined &&
+    1 - nonSuccess >= NORMAL_SUCCESS_MIN
+  ) {
+    groups = groupsFrom(() => nonSuccess);
+    statusMixLearning = false;
+  }
   return {
     ...key,
     providerErrorRate: learning ? Math.max(s.errorRate, t.learningDefaultRate) : s.errorRate,
@@ -58,19 +87,8 @@ export function baselineFrom(
     p50Ms: histogramQuantile(s.histogram, 0.5),
     p95Ms: histogramQuantile(s.histogram, 0.95),
     // the normal status mix (behaviour-change detection) and call volume (side signals)
-    statusMix:
-      mixStats.calls > 0
-        ? {
-            auth: mixStats.groups.auth / mixStats.calls,
-            not_found: mixStats.groups.not_found / mixStats.calls,
-            validation: mixStats.groups.validation / mixStats.calls,
-            client_other: mixStats.groups.client_other / mixStats.calls,
-            nonSuccess: mixStats.nonSuccess / mixStats.calls,
-          }
-        : {},
-    statusMixLearning: split
-      ? split.minutes < t.learningMinHours * 60 || mixStats.calls < t.learningMinCalls
-      : learning,
+    statusMix: { ...groups, ...(nonSuccess !== undefined ? { nonSuccess } : {}) },
+    statusMixLearning,
     // over the span the counts cover (the last baselineGapMinutes aren't in them)
     callsPerMin:
       historyMinutes - t.baselineGapMinutes > 0
@@ -128,6 +146,7 @@ export async function refreshBaselines(
     const agg = byKey.get(keyId(key));
     if (!agg) continue; // no history yet: callers use the default baseline
     let counts: RollupCounts = agg;
+    let split = splitByKey?.get(keyId(key));
     for (const w of await storage.incidents.incidentWindows(tenant, key, from)) {
       const wFrom = new Date(Math.max(w.from.getTime() - t.windowMinutes * MIN, from.getTime()));
       const wTo = new Date(Math.min((w.to ?? to).getTime() + MIN, to.getTime()));
@@ -138,6 +157,15 @@ export async function refreshBaselines(
         ...key,
       });
       if (excluded[0]) counts = subtract(counts, excluded[0]);
+      // the per-status counts too: an incident opened on a success collapse while the mix was
+      // learning mustn't become the endpoint's normal
+      if (split && since) {
+        const sFrom = new Date(Math.max(wFrom.getTime(), since.getTime()));
+        if (sFrom < wTo) {
+          const ex = await storage.rollups.aggregateByKey(tenant, { from: sFrom, to: wTo, ...key });
+          if (ex[0]) split = subtract(split, ex[0]);
+        }
+      }
     }
     const b = baselineFrom(
       key,
@@ -145,7 +173,7 @@ export async function refreshBaselines(
       new Date(agg.firstMinute),
       now,
       t,
-      splitByKey ? { counts: splitByKey.get(keyId(key)), minutes: splitMinutes } : undefined,
+      splitByKey ? { counts: split, minutes: splitMinutes } : undefined,
     );
     if (wanted.has(keyId(key))) baselines.push(b);
     out.set(keyId(key), b);

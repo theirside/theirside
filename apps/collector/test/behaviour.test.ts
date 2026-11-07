@@ -184,3 +184,71 @@ describe('the real-world case', () => {
     expect(score.score).toBeLessThanOrEqual(40);
   });
 });
+
+describe('the real-world case right after the upgrade to collector 0.3.0', () => {
+  // a history of 200s from rollups without per-status counts; the upgrade at F; 100% 401 from
+  // the next minute: the success share collapses, judged from ok vs not-ok counts right away
+  const sim = new Sim(DEFAULT_THRESHOLDS, rng(10));
+  sim.statusMixSince = F;
+  const k = sim.key('/_ah/api/accountendpoint/v1/login', 'UserCo');
+  sim.run(START, F, (m) => sim.traffic(k, m, { calls: (m / MIN) % 2 ? 1 : 2, latencyMs: 998 }));
+  const realWorld = (m: number) =>
+    sim.traffic(k, m, {
+      calls: (m / MIN) % 5 === 0 ? 8 : 9,
+      statuses: { 401: 9 },
+      latencyMs: 113,
+    });
+  sim.run(F, F + 30 * MIN, realWorld);
+  const open = sim.alerts.find((a) => a.event === 'open')!;
+  const atOpen = { ...open.incident };
+
+  it('opens a behaviour-change incident within minutes, while the status mix is learning', () => {
+    expect(open.views[0]!.baseline.statusMixLearning).toBe(true);
+    expect(atOpen.kind).toBe('behaviour');
+    expect(open.minute - F).toBeLessThanOrEqual(5 * MIN);
+    const summary = buildSummary({
+      incident: open.incident,
+      views: open.views,
+      provider: null,
+      sampleRequestIds: [],
+      now: new Date(open.minute + MIN),
+    });
+    expect(summary).toMatch(/\d+% of calls are not successful \(normally 0%\)/);
+  });
+
+  it('scores red right away', () => {
+    const v = open.views[0]!;
+    const score = scoreWindow(v.evals[0]!.stats, v.baseline, DEFAULT_THRESHOLDS);
+    expect(score.status).toBe('red');
+  });
+
+  it('takes the auth label once the per-status baseline is learned, same incident', () => {
+    sim.run(F + 30 * MIN, F + 23 * 60 * MIN, realWorld);
+    expect(sim.incidents[0]!.kind).toBe('behaviour');
+    sim.run(F + 23 * 60 * MIN, F + 25 * 60 * MIN, realWorld);
+    expect(sim.incidents).toHaveLength(1);
+    expect(sim.incidents[0]!.resolvedAt).toBeFalsy();
+    expect(sim.incidents[0]!.kind).toBe('auth');
+  });
+});
+
+describe('right after the upgrade, before the status mix is learned', () => {
+  it("an endpoint that doesn't normally succeed ≥ 90% isn't judged on a success collapse", () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(11));
+    sim.statusMixSince = F;
+    const k = sim.key('/v1/lookup', 'UserCo');
+    sim.run(START, F, (m) => sim.traffic(k, m, { calls: 60, statuses: { 404: 18 } }));
+    sim.run(F, F + 60 * MIN, (m) => sim.traffic(k, m, { calls: 60, statuses: { 401: 60 } }));
+    expect(sim.alerts).toEqual([]);
+  });
+
+  it('an endpoint that normally succeeds and keeps succeeding stays quiet', () => {
+    const sim = new Sim(DEFAULT_THRESHOLDS, rng(12));
+    sim.statusMixSince = F;
+    const k = sim.key('/v1/login', 'UserCo');
+    sim.run(START, F + 6 * 60 * MIN, (m) =>
+      sim.traffic(k, m, { calls: 60, statuses: { 404: (m / MIN) % 30 === 0 ? 2 : 0 } }),
+    );
+    expect(sim.alerts).toEqual([]);
+  });
+});
