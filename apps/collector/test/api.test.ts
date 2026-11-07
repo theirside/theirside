@@ -303,7 +303,8 @@ describe('status page', () => {
       method: 'GET',
       url: `/status/${statusToken}?theme=dark&embed=1`,
     });
-    expect(dark.body).toContain('--bg:#111418');
+    expect(dark.body).toContain('--color-background:#09090B');
+    expect(dark.body).not.toContain('--color-background:#FFFFFF');
     expect(dark.body).not.toContain('prefers-color-scheme');
     expect(dark.body).toContain('theirside-status-height');
     expect(dark.body).not.toContain('<h1>');
@@ -329,6 +330,36 @@ describe('status page', () => {
     const html = (await t.app.inject({ method: 'GET', url: `/status/${statusToken}` })).body;
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('uses the design tokens and the self-hosted fonts, with the spacing rules', async () => {
+    const res = await t.app.inject({ method: 'GET', url: `/status/${statusToken}` });
+    const html = res.body;
+    expect(html).toContain('prefers-color-scheme: dark');
+    expect(html).toContain("font-family:'Albert Sans'");
+    expect(html).toContain('url(../fonts/albert-sans-latin-wght-normal.woff2)');
+    expect(res.headers['content-security-policy']).toContain("font-src 'self'");
+    // title → status box 24px, status box → first divider 32px, 24px around each divider
+    expect(html).toContain(
+      'h1{font-size:var(--text-xl);line-height:var(--leading-xl);font-weight:var(--weight-bold);margin:0 0 var(--space-6)}',
+    );
+    expect(html).toMatch(/\.overall\{[^}]*margin-bottom:var\(--space-8\)/);
+    expect(html).toMatch(
+      /\.provider\{padding:var\(--space-6\) 0;border-top:1px solid var\(--color-border\)\}/,
+    );
+    const font = await t.app.inject({
+      method: 'GET',
+      url: '/fonts/albert-sans-latin-wght-normal.woff2',
+    });
+    expect(font.statusCode).toBe(200);
+    expect(font.headers['content-type']).toBe('font/woff2');
+    expect(font.rawPayload.subarray(0, 4).toString('latin1')).toBe('wOF2');
+    for (const url of [
+      '/fonts/nope.woff2',
+      '/fonts/..%2Fpackage.json',
+      '/fonts/OFL-albert-sans.txt',
+    ])
+      expect((await t.app.inject({ method: 'GET', url })).statusCode, url).toBe(404);
   });
 
   it('serves embed.js', async () => {

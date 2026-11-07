@@ -18,6 +18,7 @@
   "dependencies": {
     "@fastify/static": "^10.1.8",
     "@node-rs/argon2": "^2.2.2",
+    "@theirside/design": "workspace:*",
     "@theirside/shared": "workspace:*",
     "fastify": "^5.12.8",
     "nodemailer": "^10.3.1",

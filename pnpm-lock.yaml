@@ -199,6 +199,9 @@ importers:
       '@node-rs/argon2':
         specifier: ^2.2.2
         version: 2.2.2
+      '@theirside/design':
+        specifier: workspace:*
+        version: link:../../packages/design
       '@theirside/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -298,6 +301,8 @@ importers:
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
+
+  packages/design: {}
 
   packages/sdk:
     devDependencies:
