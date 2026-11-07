@@ -303,7 +303,7 @@ describe('status page', () => {
       method: 'GET',
       url: `/status/${statusToken}?theme=dark&embed=1`,
     });
-    expect(dark.body).toContain('--bg:#111418');
+    expect(dark.body).toContain('--bg:#09090b');
     expect(dark.body).not.toContain('prefers-color-scheme');
     expect(dark.body).toContain('theirside-status-height');
     expect(dark.body).not.toContain('<h1>');
