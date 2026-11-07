@@ -5,9 +5,11 @@ import 'uplot/dist/uPlot.min.css';
 export interface ChartSeries {
   label: string;
   values: (number | null)[];
+  /** Design token name, without the leading dashes. */
   color: string;
   /** Dashed reference line (baseline band edges). */
   dash?: boolean;
+  /** Design token name, without the leading dashes. */
   fill?: string;
 }
 
@@ -26,19 +28,41 @@ export function Chart({
   yMin?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // data polls rebuild the plot: keep what the user switched off
+  const hidden = useRef(new Set<string>());
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const xs = times.map((t) => new Date(t).getTime() / 1000);
     // canvas can't resolve CSS variables: read the theme colours when drawing
     const css = getComputedStyle(document.documentElement);
-    const muted = css.getPropertyValue('--muted').trim() || '#646d78';
-    const grid = css.getPropertyValue('--grid').trim() || '#eceef1';
+    const token = (name: string) => css.getPropertyValue(`--${name}`).trim();
+    const muted = token('ink-muted');
+    const grid = token('line');
     const opts: uPlot.Options = {
       width: el.clientWidth || 600,
       height,
-      legend: { show: true },
+      legend: {
+        show: true,
+        // coloured checkboxes: filled when shown, outlined when off (styles.css)
+        markers: {
+          width: 2,
+          dash: 'solid',
+          fill: (_u, i) => token(series[i - 1]?.color ?? 'ink-muted'),
+          stroke: (_u, i) => token(series[i - 1]?.color ?? 'ink-muted'),
+        },
+      },
       cursor: { drag: { x: false, y: false } },
+      hooks: {
+        setSeries: [
+          (u, i, o) => {
+            const label = i === null ? undefined : u.series[i]?.label;
+            if (typeof label !== 'string' || o.show === undefined) return;
+            if (o.show) hidden.current.delete(label);
+            else hidden.current.add(label);
+          },
+        ],
+      },
       // times in UTC, like the rest of the dashboard and the alerts
       tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), 'Etc/UTC'),
       scales: {
@@ -63,10 +87,11 @@ export function Chart({
         {},
         ...series.map((s) => ({
           label: s.label,
-          stroke: s.color,
+          show: !hidden.current.has(s.label),
+          stroke: token(s.color),
           width: s.dash ? 1 : 1.5,
           ...(s.dash ? { dash: [4, 4] } : {}),
-          ...(s.fill ? { fill: s.fill } : {}),
+          ...(s.fill ? { fill: token(s.fill) } : {}),
           points: { show: false },
           value: (_u: uPlot, v: number | null) => (v === null || v === undefined ? '–' : format(v)),
         })),

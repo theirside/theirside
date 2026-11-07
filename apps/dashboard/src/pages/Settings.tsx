@@ -225,7 +225,7 @@ function AlertsTab() {
                   <button className="btn" onClick={() => void test(c)}>
                     Send test alert
                   </button>
-                  <button className="btn" onClick={() => void toggle(c)}>
+                  <button className="btn toggle" onClick={() => void toggle(c)}>
                     {c.enabled ? 'Disable' : 'Enable'}
                   </button>
                   <button className="btn danger" onClick={() => void remove(c)}>
@@ -510,7 +510,7 @@ function ApiKeysTab() {
       </Card>
       <Card title="Create key" actions={<span className="error">{msg}</span>}>
         <div className="form">
-          <label>
+          <label className="wide">
             Name
             <input
               value={name}
@@ -518,22 +518,25 @@ function ApiKeysTab() {
               placeholder="payments-api production"
             />
           </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={scopes.ingest}
-              onChange={(e) => setScopes({ ...scopes, ingest: e.target.checked })}
-            />
-            ingest (SDK)
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={scopes.read}
-              onChange={(e) => setScopes({ ...scopes, read: e.target.checked })}
-            />
-            read (health API)
-          </label>
+          <fieldset className="wide scopes">
+            <legend>Scopes</legend>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={scopes.ingest}
+                onChange={(e) => setScopes({ ...scopes, ingest: e.target.checked })}
+              />
+              ingest (SDK)
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={scopes.read}
+                onChange={(e) => setScopes({ ...scopes, read: e.target.checked })}
+              />
+              read (health API)
+            </label>
+          </fieldset>
           <div>
             <button
               className="btn primary"

@@ -22,11 +22,54 @@ function Shell({
           onSubmit?.();
         }}
       >
-        <h1>Theirside</h1>
-        <h2 className="login-sub">{title}</h2>
+        <h1 className="login-title">{title}</h1>
         {children}
       </form>
+      <LoginPanel />
     </div>
+  );
+}
+
+/** Static brand panel beside every sign-in screen; the incident is a labelled sample, never tenant data. */
+function LoginPanel() {
+  return (
+    <aside className="login-panel">
+      <div className="login-brand">Theirside</div>
+      <div className="login-pitch">
+        <p className="login-statement">It&apos;s not you. It&apos;s them.</p>
+        <p className="login-lead">
+          Know within minutes when a provider&apos;s endpoint starts failing, and which one.
+        </p>
+      </div>
+      <div className="login-sample">
+        <div className="login-sample-label">Sample incident</div>
+        <div className="login-sample-provider">
+          <span className="dot red" aria-hidden />
+          Acme Cards
+          <span className="tag red">Failing</span>
+        </div>
+        <code>POST /v2/cards/:id/activate</code>
+        <div>
+          <b>38%</b> <span className="muted">errors for 6 min, normally 0.2%</span>
+        </div>
+        <div className="login-sample-chart">
+          <svg
+            viewBox="0 0 320 90"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="Sample error rate holds near zero, then jumps above the incident threshold"
+          >
+            <line className="threshold" x1="0" y1="50" x2="320" y2="50" />
+            <path className="rate" d="M0 84 H235 L248 14 H320" />
+          </svg>
+          <span>Incident threshold</span>
+        </div>
+        <div className="status muted">
+          <span className="dot green" aria-hidden />
+          Other Acme endpoints OK
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -456,8 +499,7 @@ export function EnrolTwoFactor({
   return (
     <div className="login">
       <div className="login-card">
-        <h1>Theirside</h1>
-        <h2 className="login-sub">Set up two-factor sign-in</h2>
+        <h1 className="login-title">Set up two-factor sign-in</h1>
         <p>
           Two-factor sign-in is required for everyone here. Set it up for{' '}
           <b>{me.user?.email ?? me.user?.name}</b> to continue.
@@ -467,6 +509,7 @@ export function EnrolTwoFactor({
           Sign out
         </button>
       </div>
+      <LoginPanel />
     </div>
   );
 }

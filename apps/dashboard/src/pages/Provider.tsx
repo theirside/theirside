@@ -6,25 +6,25 @@ import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
 
 const OUTCOME_COLORS: Record<string, string> = {
-  http_5xx: '#d64545',
-  timeout: '#9b59b6',
-  conn_reset: '#e67e22',
-  conn_refused: '#c0392b',
-  dns: '#16a085',
-  tls: '#2c3e50',
-  http_4xx: '#d98b06',
-  other_error: '#7f8c8d',
+  http_5xx: 'bad',
+  timeout: 'chart-violet',
+  conn_reset: 'chart-pink',
+  conn_refused: 'ink',
+  dns: 'chart-teal',
+  tls: 'brand',
+  http_4xx: 'warn',
+  other_error: 'ink-muted',
 };
 
 const GROUP_COLORS: Record<string, string> = {
-  outage: '#d64545',
-  auth: '#8e44ad',
-  not_found: '#d98b06',
-  validation: '#16a085',
-  rate_limited: '#2c3e50',
-  client_other: '#7f8c8d',
+  outage: 'bad',
+  auth: 'chart-violet',
+  not_found: 'warn',
+  validation: 'chart-teal',
+  rate_limited: 'chart-pink',
+  client_other: 'ink-muted',
 };
-const PALETTE = ['#3b82f6', '#9b59b6', '#e67e22'];
+const PALETTE = ['brand', 'chart-violet', 'chart-pink'];
 
 function EndpointCharts({
   provider,
@@ -58,20 +58,20 @@ function EndpointCharts({
       ...outcomes.map((o) => ({
         label: o,
         values: series.points.map((p) => (p.calls > 0 ? (p.outcomeRates[o] ?? 0) : null)),
-        color: OUTCOME_COLORS[o] ?? '#888',
+        color: OUTCOME_COLORS[o] ?? 'ink-muted',
       })),
     ];
     if (b) {
       errorSeries.push({
         label: 'normal',
         values: times.map(() => b.errorRate),
-        color: '#1f9d55',
+        color: 'ok',
         dash: true,
       });
       errorSeries.push({
         label: 'incident threshold',
         values: times.map(() => b.errorThreshold),
-        color: '#d64545',
+        color: 'bad',
         dash: true,
       });
     }
@@ -103,14 +103,14 @@ function EndpointCharts({
         : [line];
     });
     const latency: ChartSeries[] = [
-      { label: 'p50', values: series.points.map((p) => p.p50Ms), color: '#3b82f6' },
-      { label: 'p95', values: series.points.map((p) => p.p95Ms), color: '#9b59b6' },
+      { label: 'p50', values: series.points.map((p) => p.p50Ms), color: 'brand' },
+      { label: 'p95', values: series.points.map((p) => p.p95Ms), color: 'warn' },
     ];
     if (b?.p95Ms)
       latency.push({
         label: 'normal p95',
         values: times.map(() => b.p95Ms),
-        color: '#1f9d55',
+        color: 'ok',
         dash: true,
       });
     return {
@@ -119,8 +119,8 @@ function EndpointCharts({
         {
           label: 'calls/min',
           values: series.points.map((p) => p.callsPerMin),
-          color: '#3b82f6',
-          fill: 'rgba(59,130,246,0.12)',
+          color: 'brand',
+          fill: 'brand-wash',
         },
       ],
       errors: errorSeries,
