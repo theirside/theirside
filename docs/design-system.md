@@ -28,7 +28,7 @@ One source of truth for every Theirside UI: the dashboard, the public status pag
 
 `themeCss('auto')` writes the light theme on `:root`, switches to dark under `prefers-color-scheme: dark`, and honours `data-theme="light"` or `data-theme="dark"` on any element (the dashboard's theme menu sets it on `<html>`; the gallery sets it on each panel). `themeCss('light' | 'dark')` pins one theme (the status page's `?theme=` and its configured theme). The dashboard keeps the choice per browser (`localStorage` `theirside.theme`); "Auto theme" follows the system.
 
-The dark theme is seeded from the design review. The light theme derives from the status page's light theme, with the status colours darkened so they pass 4.5:1 as text.
+The dark theme is seeded from the design review; its accent is the same deep blue as the light theme, so buttons and the brand panel match across themes, with a lighter `link` blue for text. The light theme derives from the status page's light theme, with the status colours darkened so they pass 4.5:1 as text.
 
 ## Tokens
 
@@ -46,7 +46,8 @@ All custom properties, with the rule for each. Values: `tokens.json` (and the ga
 | `--color-text` | Body text, headings, values | |
 | `--color-text-secondary` | Secondary emphasis: legend labels, supporting values | Body text |
 | `--color-text-muted` | Labels, hints, timestamps, table headers, inactive tabs | Anything the user must read to act |
-| `--color-accent` | Links, primary buttons, the selected tab or segment, focus ring | Status |
+| `--color-accent` | Primary buttons, the selected tab or segment, focus ring, the sign-in brand panel (a fill: the same deep blue in both themes) | Text (use `link`), status |
+| `--color-link` | Links and other blue text. Dark: a lighter tint of the accent so text reads on near-black; light: the accent | Fills |
 | `--color-on-accent` | Text and icons on `accent` | |
 | `--color-danger` | Failing, errors, destructive actions, the incident threshold | Anything that isn't a problem |
 | `--color-on-danger` | Text on a `danger` fill (the incident badge) | |
@@ -73,6 +74,7 @@ Fonts: `--font-ui` (Albert Sans) for everything, `--font-mono` (Roboto Mono) for
 | `lg` | 16 / 24 | Card titles (`h2`), KPI values |
 | `xl` | 20 / 28 | Page titles (`h1`) |
 | `2xl` | 24 / 32 | Reserved for the landing page and hero numbers |
+| `display` | 48 / 52 | Brand statements: the sign-in panel and, later, the landing page hero |
 
 Set both: `font-size: var(--text-md); line-height: var(--leading-md)`. Weights: `--weight-regular` 400, `medium` 500, `semibold` 600 (labels, provider names, table headers), `bold` 700 (page titles, brand).
 
@@ -114,7 +116,7 @@ Layout helpers in `styles.css`: `.page-h` (page title row), `.form` (two-column 
 
 ## Accessibility
 
-- **Contrast**: text tokens (`text`, `text-muted`, `text-secondary`, `accent`, `danger`, `warning`, `healthy`, `info`) are ≥ 4.5:1 on `background`, `surface` and `surface-alt` in both themes, and `on-accent`/`on-danger` on their fills; the focus colour is ≥ 3:1. `packages/design/test/tokens.test.ts` checks every pair, so a token change that breaks contrast fails CI.
+- **Contrast**: text tokens (`text`, `text-muted`, `text-secondary`, `link`, `danger`, `warning`, `healthy`, `info`) are ≥ 4.5:1 on `background`, `surface` and `surface-alt` in both themes, and `on-accent`/`on-danger` on their fills; the focus colour is ≥ 3:1. `packages/design/test/tokens.test.ts` checks every pair, so a token change that breaks contrast fails CI.
 - **Focus visible**: `:focus-visible` draws the focus ring on every interactive element; never remove outlines.
 - **Touch targets**: on coarse pointers (`@media (pointer: coarse)`) buttons, inputs, tabs, segments and legend entries are at least 44 px tall.
 - **Not colour alone**: status dots carry a text label (visible or screen-reader); legend entries carry the series name; incident badges carry words.

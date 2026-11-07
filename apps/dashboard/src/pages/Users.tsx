@@ -287,7 +287,7 @@ export function UsersTab({ me }: { me: Me }) {
         </form>
       </Card>
       <Card title="Users">
-        <Table data-testid="users">
+        <Table className="users" data-testid="users">
           <thead>
             <tr>
               <th>User</th>
@@ -378,13 +378,13 @@ export function UsersTab({ me }: { me: Me }) {
         </Table>
         {!!data?.invites.length && (
           <>
-            <h3>Pending invites</h3>
+            <h3 className="invites-h">Pending invites</h3>
             <Table data-testid="invites">
               <tbody>
                 {data.invites.map((i) => (
                   <tr key={i.id}>
                     <td>
-                      {i.email} <Badge>{i.role}</Badge>
+                      <span>{i.email}</span> <Badge>{i.role}</Badge>
                     </td>
                     <td className="muted">expires {when(i.expiresAt)}</td>
                     <td className="actions">

@@ -151,6 +151,10 @@ function EndpointCharts({
             </h3>
             <Chart times={charts.times} series={charts.errors} format={(v) => pct(v)} />
           </div>
+          <div>
+            <h3>Latency p50 / p95</h3>
+            <Chart times={charts.times} series={charts.latency} format={(v) => ms(v)} />
+          </div>
           <div data-testid="status-mix">
             <h3>Status mix (share of calls, dashed: normal)</h3>
             {charts.mix.length > 0 ? (
@@ -158,10 +162,6 @@ function EndpointCharts({
             ) : (
               <div className="empty">Every call succeeded in this range.</div>
             )}
-          </div>
-          <div>
-            <h3>Latency p50 / p95</h3>
-            <Chart times={charts.times} series={charts.latency} format={(v) => ms(v)} />
           </div>
         </>
       )}

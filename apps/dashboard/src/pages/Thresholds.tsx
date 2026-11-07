@@ -145,10 +145,10 @@ function ThresholdsForm({ data, onSaved }: { data: ThresholdsResponse; onSaved: 
                         placeholder="default"
                         disabled={!isAdmin}
                         onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-                      />{' '}
-                      {own && <Badge>override</Badge>}
+                      />
                     </td>
                     <td>
+                      {own && <Badge>override</Badge>}{' '}
                       {own && isAdmin && (
                         <Button
                           size="small"

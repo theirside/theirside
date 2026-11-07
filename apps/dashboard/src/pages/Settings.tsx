@@ -232,7 +232,9 @@ function AlertsTab() {
                     </span>
                   )}
                   <Button onClick={() => void test(c)}>Send test alert</Button>
-                  <Button onClick={() => void toggle(c)}>{c.enabled ? 'Disable' : 'Enable'}</Button>
+                  <Button className="toggle" onClick={() => void toggle(c)}>
+                    {c.enabled ? 'Disable' : 'Enable'}
+                  </Button>
                   <Button variant="danger" onClick={() => void remove(c)}>
                     Delete
                   </Button>
@@ -371,7 +373,12 @@ function SdkTab() {
                       : s.kind === 'long-running'
                         ? 'long-running'
                         : '–'}
-                    {s.platform && <Badge>{s.platform}</Badge>}
+                    {s.platform && (
+                      <>
+                        <br />
+                        <Badge>{s.platform}</Badge>
+                      </>
+                    )}
                   </td>
                   <td className="num" title="active now / seen in the last 24 hours">
                     {s.kind === 'legacy' ? '–' : `${s.processes.active} / ${s.processes.lastDay}`}
@@ -519,23 +526,26 @@ function ApiKeysTab() {
               placeholder="payments-api production"
             />
           </Field>
-          <Field check>
-            <input
-              type="checkbox"
-              checked={scopes.ingest}
-              onChange={(e) => setScopes({ ...scopes, ingest: e.target.checked })}
-            />
-            ingest (SDK)
-          </Field>
-          <Field check>
-            <input
-              type="checkbox"
-              checked={scopes.read}
-              onChange={(e) => setScopes({ ...scopes, read: e.target.checked })}
-            />
-            read (health API)
-          </Field>
-          <div>
+          <fieldset className="field wide checks">
+            <legend>Scopes</legend>
+            <Field check>
+              <input
+                type="checkbox"
+                checked={scopes.ingest}
+                onChange={(e) => setScopes({ ...scopes, ingest: e.target.checked })}
+              />
+              ingest (SDK)
+            </Field>
+            <Field check>
+              <input
+                type="checkbox"
+                checked={scopes.read}
+                onChange={(e) => setScopes({ ...scopes, read: e.target.checked })}
+              />
+              read (health API)
+            </Field>
+          </fieldset>
+          <div className="form-actions">
             <Button
               variant="primary"
               disabled={!name.trim() || (!scopes.ingest && !scopes.read)}

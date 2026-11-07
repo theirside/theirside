@@ -30,7 +30,8 @@ export type ColorName =
   | 'neutral'
   | 'on-accent'
   | 'on-danger'
-  | 'qr-background';
+  | 'qr-background'
+  | 'link';
 
 export interface Tokens {
   color: Record<ThemeName, Record<ColorName, string>>;

@@ -44,7 +44,9 @@ describe('tokens.json', () => {
       text: '#F1F2F4',
       'text-muted': '#9A9DA6',
       'text-secondary': '#C7C9CF',
-      accent: '#45AEF7',
+      // one deep blue accent in both themes; a lighter tint for blue text on near-black
+      accent: '#2563EB',
+      link: '#6B9EFF',
       danger: '#FF6B6B',
       healthy: '#3DD68C',
       warning: '#F2B35A',
