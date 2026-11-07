@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
  * colours outside packages/design/tokens.json.
  */
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const UI_SOURCES = ['apps/collector/src/modules/status-page'];
+const UI_SOURCES = ['apps/dashboard/src', 'apps/collector/src/modules/status-page'];
 const RAW = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/g;
 
 function files(dir: string): string[] {

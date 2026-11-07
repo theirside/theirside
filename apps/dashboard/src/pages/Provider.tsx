@@ -1,30 +1,34 @@
 import { useMemo, useState } from 'react';
 import { api, type EndpointHealth, type Overview, type Range, type Series } from '../api';
 import { Chart, type ChartSeries } from '../components/Chart';
-import { Card, ErrorBox, Segmented, StatusDot, usePoll } from '../components/ui';
+import { Badge, Card, ErrorBox, Segmented, StatusDot, Table, usePoll } from '../components/ui';
 import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
 
+// series colours are tokens (packages/design): chart-1 blue, -2 pink, -3 purple, -4 teal,
+// -5 amber, -6 red, -7 green, -8 grey
 const OUTCOME_COLORS: Record<string, string> = {
-  http_5xx: '#d64545',
-  timeout: '#9b59b6',
-  conn_reset: '#e67e22',
-  conn_refused: '#c0392b',
-  dns: '#16a085',
-  tls: '#2c3e50',
-  http_4xx: '#d98b06',
-  other_error: '#7f8c8d',
+  http_5xx: 'var(--chart-6)',
+  timeout: 'var(--chart-3)',
+  conn_reset: 'var(--chart-2)',
+  conn_refused: 'var(--chart-4)',
+  dns: 'var(--chart-1)',
+  tls: 'var(--color-text-secondary)',
+  http_4xx: 'var(--chart-5)',
+  other_error: 'var(--chart-8)',
 };
 
 const GROUP_COLORS: Record<string, string> = {
-  outage: '#d64545',
-  auth: '#8e44ad',
-  not_found: '#d98b06',
-  validation: '#16a085',
-  rate_limited: '#2c3e50',
-  client_other: '#7f8c8d',
+  outage: 'var(--chart-6)',
+  auth: 'var(--chart-3)',
+  not_found: 'var(--chart-5)',
+  validation: 'var(--chart-4)',
+  rate_limited: 'var(--chart-2)',
+  client_other: 'var(--chart-8)',
 };
-const PALETTE = ['#3b82f6', '#9b59b6', '#e67e22'];
+const PALETTE = ['var(--chart-1)', 'var(--chart-3)', 'var(--chart-2)'];
+const NORMAL = 'var(--color-healthy)';
+const THRESHOLD = 'var(--color-danger)';
 
 function EndpointCharts({
   provider,
@@ -58,20 +62,20 @@ function EndpointCharts({
       ...outcomes.map((o) => ({
         label: o,
         values: series.points.map((p) => (p.calls > 0 ? (p.outcomeRates[o] ?? 0) : null)),
-        color: OUTCOME_COLORS[o] ?? '#888',
+        color: OUTCOME_COLORS[o] ?? 'var(--chart-8)',
       })),
     ];
     if (b) {
       errorSeries.push({
         label: 'normal',
         values: times.map(() => b.errorRate),
-        color: '#1f9d55',
+        color: NORMAL,
         dash: true,
       });
       errorSeries.push({
         label: 'incident threshold',
         values: times.map(() => b.errorThreshold),
-        color: '#d64545',
+        color: THRESHOLD,
         dash: true,
       });
     }
@@ -103,14 +107,18 @@ function EndpointCharts({
         : [line];
     });
     const latency: ChartSeries[] = [
-      { label: 'p50', values: series.points.map((p) => p.p50Ms), color: '#3b82f6' },
-      { label: 'p95', values: series.points.map((p) => p.p95Ms), color: '#9b59b6' },
+      { label: 'p50', values: series.points.map((p) => p.p50Ms), color: 'var(--chart-1)' },
+      {
+        label: 'p95',
+        values: series.points.map((p) => p.p95Ms),
+        color: 'var(--chart-3)',
+      },
     ];
     if (b?.p95Ms)
       latency.push({
         label: 'normal p95',
         values: times.map(() => b.p95Ms),
-        color: '#1f9d55',
+        color: NORMAL,
         dash: true,
       });
     return {
@@ -119,8 +127,8 @@ function EndpointCharts({
         {
           label: 'calls/min',
           values: series.points.map((p) => p.callsPerMin),
-          color: '#3b82f6',
-          fill: 'rgba(59,130,246,0.12)',
+          color: 'var(--chart-1)',
+          fillAlpha: 0.12,
         },
       ],
       errors: errorSeries,
@@ -139,8 +147,7 @@ function EndpointCharts({
           </div>
           <div>
             <h3>
-              Error rate by outcome{' '}
-              {series?.baseline?.learning ? <span className="tag">learning</span> : null}
+              Error rate by outcome {series?.baseline?.learning ? <Badge>learning</Badge> : null}
             </h3>
             <Chart times={charts.times} series={charts.errors} format={(v) => pct(v)} />
           </div>
@@ -184,13 +191,12 @@ export function Provider({ name, environment }: { name: string; environment: str
             Providers
           </a>{' '}
           / {p?.label ?? name}{' '}
-          <a
+          <Badge
             href={href('settings', 'providers', name)}
-            className="tag"
             title="Rename, merge, hide, alerts and thresholds"
           >
             manage
-          </a>
+          </Badge>
         </h1>
         <Segmented value={range} options={['1h', '24h', '7d']} onChange={setRange} />
       </div>
@@ -223,9 +229,9 @@ export function Provider({ name, environment }: { name: string; environment: str
             </>
           )}
           {p.openIncidentId && (
-            <a className="tag red" href={href('incidents', p.openIncidentId)}>
+            <Badge tone="danger" href={href('incidents', p.openIncidentId)}>
               open incident
-            </a>
+            </Badge>
           )}
         </div>
       )}
@@ -240,7 +246,7 @@ export function Provider({ name, environment }: { name: string; environment: str
             </span>
           }
         >
-          <table className="table" data-testid="endpoints">
+          <Table data-testid="endpoints">
             <thead>
               <tr>
                 <th>Endpoint</th>
@@ -267,7 +273,7 @@ export function Provider({ name, environment }: { name: string; environment: str
                 </FragmentRow>
               ))}
             </tbody>
-          </table>
+          </Table>
           {p.endpoints.length === 0 && (
             <div className="empty">
               No calls in the last {range}
@@ -306,15 +312,15 @@ function FragmentRow({
       >
         <td>
           <StatusDot status={e.status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
-          {idle && <span className="tag">idle</span>}
-          {e.learning && !idle && <span className="tag">learning</span>}
+          {idle && <Badge>idle</Badge>}
+          {e.learning && !idle && <Badge>learning</Badge>}
           {e.incidentKind && (
-            <span className="tag red" data-testid="incident-kind">
+            <Badge tone="danger" data-testid="incident-kind">
               {KIND_LABEL[e.incidentKind] ?? e.incidentKind}
-            </span>
+            </Badge>
           )}
-          {e.inIncident && idle && <span className="tag red">open incident</span>}
-          {e.environment !== 'production' && <span className="tag">{e.environment}</span>}
+          {e.inIncident && idle && <Badge tone="danger">open incident</Badge>}
+          {e.environment !== 'production' && <Badge>{e.environment}</Badge>}
           {idle && <span className="muted last-call"> last call {ago(e.lastCallAt)}</span>}
         </td>
         {idle ? (

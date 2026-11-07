@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, type Provider } from '../api';
-import { Card, ErrorBox, usePoll } from '../components/ui';
+import { Badge, Button, Card, ErrorBox, Table, usePoll } from '../components/ui';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
 
@@ -113,8 +113,8 @@ function ThresholdsForm({ data, onSaved }: { data: ThresholdsResponse; onSaved: 
     <>
       {GROUPS.map(([title, rows]) => (
         <Card key={title} title={title}>
-          <table
-            className="table thresholds"
+          <Table
+            className="thresholds"
             data-testid={`thresholds-${title.toLowerCase().replace(/\W+/g, '-')}`}
           >
             <thead>
@@ -146,12 +146,12 @@ function ThresholdsForm({ data, onSaved }: { data: ThresholdsResponse; onSaved: 
                         disabled={!isAdmin}
                         onChange={(e) => setForm({ ...form, [k]: e.target.value })}
                       />{' '}
-                      {own && <span className="tag">override</span>}
+                      {own && <Badge>override</Badge>}
                     </td>
                     <td>
                       {own && isAdmin && (
-                        <button
-                          className="btn small"
+                        <Button
+                          size="small"
                           onClick={() =>
                             setForm(
                               Object.fromEntries(Object.entries(form).filter(([x]) => x !== k)),
@@ -159,21 +159,21 @@ function ThresholdsForm({ data, onSaved }: { data: ThresholdsResponse; onSaved: 
                           }
                         >
                           Reset to default
-                        </button>
+                        </Button>
                       )}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
-          </table>
+          </Table>
         </Card>
       ))}
       {isAdmin && (
         <div className="panel-save">
-          <button className="btn primary" onClick={() => void save()}>
+          <Button variant="primary" onClick={() => void save()}>
             Save
-          </button>{' '}
+          </Button>{' '}
           <span className="muted" data-testid="thresholds-save-state">
             {state}
           </span>
@@ -190,7 +190,7 @@ function ProviderOverrides({ providers }: { providers: Provider[] }) {
   if (own.length === 0)
     return <div className="empty">No provider overrides the project thresholds.</div>;
   return (
-    <table className="table" data-testid="threshold-overrides">
+    <Table data-testid="threshold-overrides">
       <thead>
         <tr>
           <th>Provider</th>
@@ -205,14 +205,14 @@ function ProviderOverrides({ providers }: { providers: Provider[] }) {
             </td>
             <td>
               {Object.entries(p.thresholds).map(([k, v]) => (
-                <span key={k} className="tag" title={LABEL[k] ?? k}>
+                <Badge key={k} title={LABEL[k] ?? k}>
                   {LABEL[k] ?? k}: {k === 'rateDeltaPp' ? `${pp(v)} pp` : v}
-                </span>
+                </Badge>
               ))}
             </td>
           </tr>
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }

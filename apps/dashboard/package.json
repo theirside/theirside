@@ -6,12 +6,13 @@
   "description": "Theirside dashboard (Vite + React), built into the collector's static directory.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "pnpm --filter @theirside/design build && vite",
+    "build": "pnpm --filter @theirside/design build && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "playwright test"
   },
   "dependencies": {
+    "@theirside/design": "workspace:*",
     "@theirside/shared": "workspace:*",
     "qrcode-generator": "^2.0.4",
     "react": "^19.3.1",

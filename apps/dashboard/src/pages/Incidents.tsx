@@ -1,5 +1,5 @@
 import { api, type Incident as IncidentData } from '../api';
-import { Card, CopyButton, Empty, ErrorBox, usePoll } from '../components/ui';
+import { Badge, Card, CopyButton, Empty, ErrorBox, Table, usePoll } from '../components/ui';
 import { ago, ms, pct, when, KIND_LABEL } from '../format';
 import { href } from '../router';
 
@@ -16,7 +16,7 @@ export function Incidents() {
       <ErrorBox error={error} />
       {data && data.incidents.length === 0 && <Empty>No incidents yet.</Empty>}
       {data && data.incidents.length > 0 && (
-        <table className="table" data-testid="incidents">
+        <Table data-testid="incidents">
           <thead>
             <tr>
               <th>Status</th>
@@ -35,11 +35,9 @@ export function Incidents() {
                 onClick={() => (window.location.hash = href('incidents', i.id))}
               >
                 <td>
-                  <span className={`tag ${i.status === 'open' ? 'red' : ''}`}>{i.status}</span>
+                  <Badge tone={i.status === 'open' ? 'danger' : undefined}>{i.status}</Badge>
                   {i.alertsMuted && (
-                    <span className="tag" title="opened during cooldown; no alerts sent">
-                      muted
-                    </span>
+                    <Badge title="opened during cooldown; no alerts sent">muted</Badge>
                   )}
                 </td>
                 <td>{i.provider}</td>
@@ -58,7 +56,7 @@ export function Incidents() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </>
   );
@@ -83,7 +81,7 @@ export function Incident({ id }: { id: string }) {
       {inc && (
         <>
           <div className="kpis">
-            <span className={`tag ${inc.status === 'open' ? 'red' : ''}`}>{inc.status}</span>
+            <Badge tone={inc.status === 'open' ? 'danger' : undefined}>{inc.status}</Badge>
             <div>
               {inc.scope === 'provider' ? 'Provider-wide' : 'Single endpoint'},{' '}
               {KIND_LABEL[inc.kind] ?? inc.kind}
@@ -94,7 +92,7 @@ export function Incident({ id }: { id: string }) {
             <div>opened {when(inc.openedAt)}</div>
             {inc.resolvedAt && <div>resolved {when(inc.resolvedAt)}</div>}
             <div>{inc.durationMinutes} min</div>
-            {inc.alertsMuted && <span className="tag">muted (cooldown)</span>}
+            {inc.alertsMuted && <Badge>muted (cooldown)</Badge>}
           </div>
           <Card
             title="Summary for the provider"
@@ -105,7 +103,7 @@ export function Incident({ id }: { id: string }) {
             </pre>
           </Card>
           <Card title="Endpoints">
-            <table className="table">
+            <Table>
               <thead>
                 <tr>
                   <th>Endpoint</th>
@@ -128,7 +126,7 @@ export function Incident({ id }: { id: string }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </Card>
           {inc.sampleRequestIds.length > 0 && (
             <Card

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { CopyButton } from './ui';
+import { Button, CopyButton, Field } from './ui';
 
 function QrCode({ text }: { text: string }) {
   const [svg, setSvg] = useState('');
@@ -50,12 +50,12 @@ export function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () =
       </pre>
       <div className="row">
         <CopyButton text={text} label="Copy codes" />
-        <button className="btn" type="button" onClick={download}>
+        <Button type="button" onClick={download}>
           Download
-        </button>
-        <button className="btn primary" type="button" onClick={onDone}>
+        </Button>
+        <Button variant="primary" type="button" onClick={onDone}>
           I saved them
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -78,8 +78,8 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
         </p>
         {error && <div className="error">{error}</div>}
         <div>
-          <button
-            className="btn primary"
+          <Button
+            variant="primary"
             type="button"
             onClick={() =>
               void api<{ secret: string; otpauthUrl: string }>('/v1/account/2fa/setup', {
@@ -88,7 +88,7 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
             }
           >
             Set up two-factor sign-in
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -112,7 +112,7 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
       <p className="muted">
         Can't scan? Enter this key: <code data-testid="totp-secret">{setup.secret}</code>
       </p>
-      <label>
+      <Field>
         2. Enter the 6-digit code it shows
         <input
           inputMode="numeric"
@@ -122,12 +122,12 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
           name="code"
           maxLength={7}
         />
-      </label>
+      </Field>
       {error && <div className="error">{error}</div>}
       <div>
-        <button className="btn primary" type="submit">
+        <Button variant="primary" type="submit">
           Turn on
-        </button>
+        </Button>
       </div>
     </form>
   );

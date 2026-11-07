@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, type Me, type TwoFactorStatus } from '../api';
 import { RecoveryCodes, TwoFactorSetup } from '../components/TwoFactor';
-import { Card, ErrorBox, usePoll } from '../components/ui';
+import { Badge, Button, Callout, Card, ErrorBox, Field, usePoll } from '../components/ui';
 
 function PasswordCard() {
   const [form, setForm] = useState({ current: '', next: '', confirm: '' });
@@ -29,7 +29,7 @@ function PasswordCard() {
           save();
         }}
       >
-        <label className="wide">
+        <Field wide>
           Current password
           <input
             type="password"
@@ -37,8 +37,8 @@ function PasswordCard() {
             value={form.current}
             onChange={(e) => setForm({ ...form, current: e.target.value })}
           />
-        </label>
-        <label>
+        </Field>
+        <Field>
           New password <small>at least 12 characters</small>
           <input
             type="password"
@@ -46,8 +46,8 @@ function PasswordCard() {
             value={form.next}
             onChange={(e) => setForm({ ...form, next: e.target.value })}
           />
-        </label>
-        <label>
+        </Field>
+        <Field>
           Repeat new password
           <input
             type="password"
@@ -55,11 +55,11 @@ function PasswordCard() {
             value={form.confirm}
             onChange={(e) => setForm({ ...form, confirm: e.target.value })}
           />
-        </label>
+        </Field>
         <div className="wide row">
-          <button className="btn primary" type="submit">
+          <Button variant="primary" type="submit">
             Change password
-          </button>
+          </Button>
           {msg && <span className={msg.ok ? 'ok' : 'error'}>{msg.text}</span>}
         </div>
       </form>
@@ -96,12 +96,12 @@ function ConfirmWithPassword({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <button className="btn primary" type="submit">
+      <Button variant="primary" type="submit">
         Confirm
-      </button>
-      <button className="btn" type="button" onClick={onCancel}>
+      </Button>
+      <Button type="button" onClick={onCancel}>
         Cancel
-      </button>
+      </Button>
     </form>
   );
 }
@@ -140,12 +140,12 @@ function TwoFactorCard() {
       ) : status.enabled ? (
         <div className="stack">
           <p>
-            <span className="tag new">On</span> Sign-in asks for a code from your authenticator app.{' '}
+            <Badge tone="healthy">On</Badge> Sign-in asks for a code from your authenticator app.{' '}
             {status.recoveryCodesLeft} recovery code
             {status.recoveryCodesLeft === 1 ? '' : 's'} left.
           </p>
           {status.recoveryCodesLeft <= 3 && (
-            <p className="notice warn">Few recovery codes left: make new ones.</p>
+            <Callout tone="danger">Few recovery codes left: make new ones.</Callout>
           )}
           {pending ? (
             <ConfirmWithPassword
@@ -155,8 +155,7 @@ function TwoFactorCard() {
             />
           ) : (
             <div className="row">
-              <button
-                className="btn"
+              <Button
                 type="button"
                 onClick={() =>
                   act(
@@ -166,19 +165,19 @@ function TwoFactorCard() {
                 }
               >
                 New recovery codes
-              </button>
+              </Button>
               {status.required ? (
                 <span className="muted">
                   Required for everyone here, so it can't be turned off.
                 </span>
               ) : (
-                <button
-                  className="btn danger"
+                <Button
+                  variant="danger"
                   type="button"
                   onClick={() => act('/v1/account/2fa/disable', 'Turn off two-factor sign-in?')}
                 >
                   Turn off
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -186,10 +185,10 @@ function TwoFactorCard() {
       ) : status.available ? (
         <TwoFactorSetup onDone={reload} />
       ) : (
-        <p className="notice">
+        <Callout>
           Two-factor sign-in needs THEIRSIDE_SECRET_KEY on the collector (it encrypts the
           authenticator secrets). Ask whoever runs Theirside to set one.
-        </p>
+        </Callout>
       )}
       {msg && <div className="error">{msg}</div>}
     </Card>
@@ -204,15 +203,15 @@ export function Account({ me, onSignedOut }: { me: Me; onSignedOut: () => void }
         <h1>Your account</h1>
       </div>
       {me.breakGlass ? (
-        <p className="notice">
+        <Callout>
           You are signed in with the collector's admin token (break-glass). It has no account
           settings; use it to fix accounts under Settings → Users, then sign in with an account.
-        </p>
+        </Callout>
       ) : (
         <>
           <Card title="Profile">
             <p>
-              <b>{me.user?.name}</b> · {me.user?.email} <span className="tag">{me.role}</span>
+              <b>{me.user?.name}</b> · {me.user?.email} <Badge>{me.role}</Badge>
             </p>
             {me.role === 'member' && (
               <p className="muted">
@@ -235,8 +234,8 @@ export function Account({ me, onSignedOut }: { me: Me; onSignedOut: () => void }
                 <p className="muted">
                   Signed in on a shared or lost device? Sign out everywhere, including here.
                 </p>
-                <button
-                  className="btn danger"
+                <Button
+                  variant="danger"
                   type="button"
                   onClick={() => {
                     if (!confirm('Sign out on every device, including this one?')) return;
@@ -247,7 +246,7 @@ export function Account({ me, onSignedOut }: { me: Me; onSignedOut: () => void }
                   }}
                 >
                   Sign out everywhere
-                </button>
+                </Button>
                 {msg && <div className="error">{msg}</div>}
               </Card>
             </>

@@ -15,6 +15,8 @@ import { Provider } from './pages/Provider';
 import { Settings } from './pages/Settings';
 import { AdminContext } from './role';
 import { href, useRoute } from './router';
+import { ThemeToggle } from './components/ThemeToggle';
+import { Button } from './components/ui';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -108,15 +110,12 @@ export function App() {
               ))}
             </select>
           )}
+          <ThemeToggle />
           <span className="muted">{me.entitlements.plan}</span>
           <a href={href('account')} className={active('account')} data-testid="account-link">
             {me.breakGlass ? 'Admin token' : (me.user?.name ?? 'Account')}
           </a>
-          {me.via !== 'proxy' && (
-            <button className="btn" onClick={signOut}>
-              Sign out
-            </button>
-          )}
+          {me.via !== 'proxy' && <Button onClick={signOut}>Sign out</Button>}
         </div>
       </header>
       <main>
