@@ -47,7 +47,16 @@ export function App() {
   useEffect(() => {
     if (me)
       void api<{ environments: string[] }>('/v1/admin/overview').then(
-        (o) => setEnvs(o.environments),
+        (o) => {
+          setEnvs(o.environments);
+          // a remembered environment with no data (another install, or it went away) would leave
+          // the dashboard empty with the picker hidden: fall back to all environments
+          setEnvironment((cur) => {
+            if (!cur || o.environments.includes(cur)) return cur;
+            localStorage.removeItem('im.env');
+            return '';
+          });
+        },
         () => {},
       );
   }, [me]);
