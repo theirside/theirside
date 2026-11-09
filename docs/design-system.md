@@ -49,6 +49,7 @@ All custom properties, with the rule for each. Values: `tokens.json` (and the ga
 | `--color-accent` | Primary buttons, the selected tab or segment, focus ring, the sign-in brand panel (a fill: the same deep blue in both themes) | Text (use `link`), status |
 | `--color-link` | Links and other blue text. Dark: a lighter tint of the accent so text reads on near-black; light: the accent | Fills |
 | `--color-on-accent` | Text and icons on `accent` | |
+| `--color-accent-subtle` | A quiet blue tint: hovered secondary buttons, selected rows, a highlighted card. `text`, `text-muted` and `link` read on it | Buttons' main fill (use `accent`), large page areas |
 | `--color-danger` | Failing, errors, destructive actions, the incident threshold | Anything that isn't a problem |
 | `--color-on-danger` | Text on a `danger` fill (the incident badge) | |
 | `--color-warning` | Degraded, caveats (`Callout` default) | Errors |
@@ -56,6 +57,8 @@ All custom properties, with the rule for each. Values: `tokens.json` (and the ga
 | `--color-info` | Neutral notices and hints | Status |
 | `--color-neutral` | No data, idle rings, empty bars | Text |
 | `--color-qr-background` | Behind QR codes (always white so scanners read them) | Anything else |
+| `--color-highlight` | Marketing only (the website): one warm block per page, such as the final call to action | Anything in the product UI, text, status |
+| `--color-on-highlight` | Text and icons on `highlight` | |
 
 ### Chart series
 
@@ -116,7 +119,7 @@ Layout helpers in `styles.css`: `.page-h` (page title row), `.form` (two-column 
 
 ## Accessibility
 
-- **Contrast**: text tokens (`text`, `text-muted`, `text-secondary`, `link`, `danger`, `warning`, `healthy`, `info`) are ≥ 4.5:1 on `background`, `surface` and `surface-alt` in both themes, and `on-accent`/`on-danger` on their fills; the focus colour is ≥ 3:1. `packages/design/test/tokens.test.ts` checks every pair, so a token change that breaks contrast fails CI.
+- **Contrast**: text tokens (`text`, `text-muted`, `text-secondary`, `link`, `danger`, `warning`, `healthy`, `info`) are ≥ 4.5:1 on `background`, `surface` and `surface-alt` in both themes, `on-accent`/`on-danger`/`on-highlight` on their fills, and `text`, `text-muted` and `link` on `accent-subtle`; the focus colour is ≥ 3:1. `packages/design/test/tokens.test.ts` checks every pair, so a token change that breaks contrast fails CI.
 - **Focus visible**: `:focus-visible` draws the focus ring on every interactive element; never remove outlines.
 - **Touch targets**: on coarse pointers (`@media (pointer: coarse)`) buttons, inputs, tabs, segments and legend entries are at least 44 px tall.
 - **Not colour alone**: status dots carry a text label (visible or screen-reader); legend entries carry the series name; incident badges carry words.
