@@ -31,7 +31,10 @@ export type ColorName =
   | 'on-accent'
   | 'on-danger'
   | 'qr-background'
-  | 'link';
+  | 'link'
+  | 'accent-subtle'
+  | 'highlight'
+  | 'on-highlight';
 
 export interface Tokens {
   color: Record<ThemeName, Record<ColorName, string>>;
