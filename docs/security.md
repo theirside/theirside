@@ -8,7 +8,7 @@ When nobody can sign in yet, the dashboard shows a **setup page** that creates t
 
 ### Zero-config (neither `THEIRSIDE_BOOTSTRAP_API_KEY` nor `THEIRSIDE_ADMIN_TOKEN` set)
 
-This is what `docker compose -f docker/docker-compose.yml up -d` does since collector 0.3.2.
+This is what the self-host compose file (`docker/compose.selfhost.yml`, served as theirside.dev/compose.yml) does, and `docker compose -f docker/docker-compose.yml up -d` without `docker/dev.env`, since collector 0.3.2.
 
 - **API key.** If the install has no API key yet (revoked ones count), the first start creates the org and project and generates a project key (`tsd_live_` + 32 random characters; ingest and read). It is never logged. After the first account is created, the dashboard shows it on the **Connect your app** screen with the `npm install` command and the `init()` line filled in. Admins can see it again under Settings → API keys; members can't. Unlike every other key, this one is stored readable (`api_keys.visible_key`) as well as hashed, because nobody has seen it yet. Revoking it erases the readable copy, and a restart doesn't generate a new one.
 - **Setup link.** Each start logs one line until the first account exists:

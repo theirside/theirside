@@ -1,0 +1,72 @@
+# Theirside collector 0.3, self-hosted: the collector plus its Postgres.
+# This is the user-facing compose file. theirside.dev serves it as /compose.yml (from the
+# latest release) for the Quick start: https://theirside.dev/#start
+# docker/docker-compose.yml is the dev/demo file for working on this repo; don't point users at it.
+#
+#   mkdir theirside && cd theirside
+#   curl -fsSLO https://theirside.dev/compose.yml
+#   docker compose -f compose.yml up -d --wait
+#   docker compose -f compose.yml logs collector | grep -m1 "/setup"
+#
+# Nothing to configure: the first start generates your project API key and logs a one-time
+# link to create the first account. After setup the dashboard shows the key and the
+# init() line for your app. Everything below is optional.
+# The image follows the 0.3 line: docker compose -f compose.yml pull, then up -d again, gets
+# the newest 0.3.x. Pin an exact version (e.g. :0.3.2) if you prefer.
+# Help with ECS, Kubernetes or anything else: hello@theirside.dev
+name: theirside-selfhost
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: theirside
+      # Postgres is only reachable by the collector (no published port).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-theirside}
+      POSTGRES_DB: theirside
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U theirside -d theirside']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  collector:
+    image: ghcr.io/theirside/collector:0.3
+    environment:
+      DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside}@postgres:5432/theirside
+      THEIRSIDE_DEPLOYMENT_MODE: self_hosted
+      # Where people open the dashboard; used for the setup link and links in alerts.
+      THEIRSIDE_PUBLIC_URL: ${THEIRSIDE_PUBLIC_URL:-http://localhost:4318}
+      # Optional: set your own project API key (tsd_live_ plus at least 16 characters) and a
+      # break-glass admin token instead of the generated key and setup link.
+      THEIRSIDE_BOOTSTRAP_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-}
+      # Optional, needed for two-factor sign-in: openssl rand -base64 32. Back it up.
+      THEIRSIDE_SECRET_KEY: ${THEIRSIDE_SECRET_KEY:-}
+      # Optional, for email alerts (Slack and webhooks need nothing here), e.g.
+      # smtp://user:pass@smtp.example.com:587 and alerts@example.com
+      THEIRSIDE_SMTP_URL: ${THEIRSIDE_SMTP_URL:-}
+      THEIRSIDE_SMTP_FROM: ${THEIRSIDE_SMTP_FROM:-}
+    ports:
+      - '4318:4318'
+    # --wait returns once this passes (same check as the image's HEALTHCHECK).
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4318/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

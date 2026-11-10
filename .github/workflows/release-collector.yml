@@ -1,7 +1,12 @@
 # Collector image release: ghcr.io/theirside/collector, linux/amd64 + linux/arm64.
 #   git tag v0.3.2 && git push origin v0.3.2
 # or Actions → "Release collector image" → Run workflow (builds the selected ref).
-# Tags: <version>, <major>.<minor> and latest; a prerelease (0.2.0-rc.1) gets only <version>.
+# Tags: <version>; for a stable version also <major>.<minor> (if it is the newest patch of that
+# minor) and latest (if it is the newest stable version overall, by git tags). A prerelease
+# (0.2.0-rc.1) gets only <version>. docker/compose.selfhost.yml (what theirside.dev serves)
+# pulls <major>.<minor>, so the self-host Quick start must pass before anything is pushed.
+# Retag only (no build): Run workflow with "retag" ticked points <major>.<minor> and latest at
+# the already-published <version>, under the same newest-version rules (e.g. a backfill).
 name: Release collector image
 
 on:
@@ -13,6 +18,11 @@ on:
         description: 'Version to publish, e.g. 0.2.0 or 0.3.0-rc.1 (builds the selected ref)'
         required: true
         type: string
+      retag:
+        description: 'Only point <major>.<minor> and latest at the published <version>; no build'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,7 +41,14 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+      minor: ${{ steps.v.outputs.minor }}
+      move_minor: ${{ steps.v.outputs.move_minor }}
+      move_latest: ${{ steps.v.outputs.move_latest }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - id: v
         env:
           RAW: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
@@ -43,12 +60,28 @@ jobs:
           fi
           prerelease=false
           [[ "$version" == *-* ]] && prerelease=true
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "Publishing $version (prerelease: $prerelease)"
+          minor="${version%.*}"
+          # newest stable versions from the git tags, this one included (a dispatch may not be tagged)
+          stable="$( { git tag -l 'v*.*.*' | sed 's/^v//'; echo "$version"; } | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV)"
+          move_minor=false
+          move_latest=false
+          if [ "$prerelease" = false ]; then
+            [ "$(grep -E "^${minor//./\\.}\.[0-9]+$" <<<"$stable" | tail -1)" = "$version" ] && move_minor=true
+            [ "$(tail -1 <<<"$stable")" = "$version" ] && move_latest=true
+          fi
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "minor=$minor"
+            echo "move_minor=$move_minor"
+            echo "move_latest=$move_latest"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing $version (prerelease: $prerelease; $minor: $move_minor; latest: $move_latest)"
 
   test:
     name: Collector tests
+    needs: version
+    if: ${{ !inputs.retag }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -74,9 +107,27 @@ jobs:
       - run: pnpm build
       - run: pnpm vitest run --project collector
 
+  selfhost-quickstart:
+    name: Self-host Quick start (compose.selfhost.yml)
+    needs: version
+    if: ${{ !inputs.retag }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # the image this release pushes, built for the runner's arch and loaded locally
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.collector
+          load: true
+          tags: ghcr.io/theirside/collector:quickstart
+          cache-from: type=gha
+      - run: docker/selfhost-quickstart.sh ghcr.io/theirside/collector:quickstart
+
   publish:
     name: Build and push (amd64 + arm64)
-    needs: [version, test]
+    needs: [version, test, selfhost-quickstart]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,11 +154,11 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           flavor: latest=false
-          # semver {{major}}.{{minor}} is skipped for prereleases by metadata-action
+          # <major>.<minor> and latest only move forward (see the version job)
           tags: |
             type=semver,pattern={{version}},value=${{ env.VERSION }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }}
-            type=raw,value=latest,enable=${{ needs.version.outputs.prerelease == 'false' }}
+            type=raw,value=${{ needs.version.outputs.minor }},enable=${{ needs.version.outputs.move_minor == 'true' }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.move_latest == 'true' }}
           # FCL is not on the SPDX list (LICENSING.md); GitHub can't detect it from LICENSE
           labels: |
             org.opencontainers.image.title=Theirside collector
@@ -154,3 +205,36 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  retag:
+    name: Retag published version (no build)
+    needs: version
+    if: ${{ inputs.retag }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      MINOR: ${{ needs.version.outputs.minor }}
+      MOVE_MINOR: ${{ needs.version.outputs.move_minor }}
+      MOVE_LATEST: ${{ needs.version.outputs.move_latest }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          tags=()
+          [ "$MOVE_MINOR" = true ] && tags+=(-t "$IMAGE:$MINOR")
+          [ "$MOVE_LATEST" = true ] && tags+=(-t "$IMAGE:latest")
+          if [ ${#tags[@]} -eq 0 ]; then
+            echo "::error::$VERSION is a prerelease or not the newest version of its line; nothing to retag"
+            exit 1
+          fi
+          # copies the multi-arch index as is: same digest, signatures and attestations stay valid
+          docker buildx imagetools create "${tags[@]}" "$IMAGE:$VERSION"
+          docker buildx imagetools inspect "$IMAGE:$VERSION" | head -3
+          echo "### ${IMAGE}:${VERSION} → ${tags[*]}" >> "$GITHUB_STEP_SUMMARY"

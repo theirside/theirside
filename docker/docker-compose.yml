@@ -1,6 +1,9 @@
-# Self-hosted collector + Postgres, from the released image (ghcr.io/theirside/collector):
+# Dev/demo compose file for working on this repo: collector + Postgres, plus the demo and e2e
+# profiles. Self-hosting users get docker/compose.selfhost.yml instead (what theirside.dev
+# serves as /compose.yml); keep user-facing settings and comments there.
+# Collector + Postgres from a released image (ghcr.io/theirside/collector):
 #   THEIRSIDE_VERSION=0.3.2 docker compose -f docker/docker-compose.yml up -d
-# Nothing else is required: the first start generates the project API key and logs a one-time
+# Without docker/dev.env the first start generates the project API key and logs a one-time
 # link to create the first account (docker compose -f docker/docker-compose.yml logs collector).
 # A release version is pulled, never built: if the pull fails, or with --build, it stops
 # with an error. THEIRSIDE_VERSION=local (the default; demo, dev, CI) builds the collector

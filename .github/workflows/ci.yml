@@ -106,6 +106,25 @@ jobs:
       # fails on a clear upward heap trend; the 60-minute run is manual (docs/benchmarks.md)
       - run: pnpm --filter @theirside/soak soak:ci --collector ${{ matrix.collector }}
 
+  # The theirside.dev Quick start against docker/compose.selfhost.yml with this commit's image.
+  # Release tags run the same check in release-collector.yml before anything is pushed.
+  selfhost-quickstart:
+    name: Self-host Quick start (compose.selfhost.yml)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.collector
+          load: true
+          tags: ghcr.io/theirside/collector:quickstart
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: docker/selfhost-quickstart.sh ghcr.io/theirside/collector:quickstart
+
   smoke:
     name: Playwright smoke (docker compose demo stack)
     runs-on: ubuntu-latest

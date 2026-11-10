@@ -11,15 +11,18 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3.2` on port 4318, amd64 and arm64):
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3` on port 4318, amd64 and arm64). Needs Docker, no clone:
 
 ```sh
-git clone <this repo> theirside && cd theirside
-THEIRSIDE_VERSION=0.3.2 docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml logs collector | grep setup
+mkdir theirside && cd theirside
+curl -fsSLO https://theirside.dev/compose.yml
+docker compose -f compose.yml up -d --wait
+docker compose -f compose.yml logs collector | grep -m1 "/setup"
 ```
 
-Nothing to configure: the first start generates your project API key and logs a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. On a host other people can reach, create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. A release version is always pulled, never built: if the pull fails (wrong version, no access to ghcr.io), compose stops with an error. To build the image from this checkout instead, use `THEIRSIDE_VERSION=local` (the default when unset) and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+`compose.yml` is [`docker/compose.selfhost.yml`](docker/compose.selfhost.yml) from the latest release; every setting in it is optional and commented. Nothing to configure: the first start generates your project API key and the last line prints a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. Running it on a server? Set `THEIRSIDE_PUBLIC_URL` to its address in `compose.yml` first, and create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. The image tag `0.3` follows patch releases (`docker compose -f compose.yml pull`, then `up -d --wait` again); pin `0.3.2` if you prefer. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+
+> Maintainers: theirside.dev serves this file from the latest release, so change `docker/compose.selfhost.yml` only for new settings or a new minor version (then bump its image tag). `docker/docker-compose.yml` is the dev/demo file for working on this repo.
 
 Prefer to choose the values yourself? Set `THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16)` (your project API key) and/or `THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 24)` (creates the first account and is the break-glass sign-in). With either one set, the setup page asks for the admin token or the setup code from the log instead of a link.
 
