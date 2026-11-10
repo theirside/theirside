@@ -12,7 +12,7 @@
 # link to create the first account. After setup the dashboard shows the key and the
 # init() line for your app. Everything below is optional.
 # The image follows the 0.3 line: docker compose -f compose.yml pull, then up -d again, gets
-# the newest 0.3.x. Pin an exact version (e.g. :0.3.2) if you prefer.
+# the newest 0.3.x. Pin an exact version (e.g. :0.3.3) if you prefer.
 # Help with ECS, Kubernetes or anything else: hello@theirside.dev
 name: theirside-selfhost
 
