@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/integrations-monitor.iml" filepath="$PROJECT_DIR$/integrations-monitor.iml" />
+      <module fileurl="file://$PROJECT_DIR$/theirside.iml" filepath="$PROJECT_DIR$/theirside.iml" />
     </modules>
   </component>
 </project>
