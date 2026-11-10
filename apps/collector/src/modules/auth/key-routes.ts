@@ -14,9 +14,13 @@ const keyInput = z.object({
     .transform((s) => [...new Set(s)]),
 });
 
-/** Never includes the key or its hash: only the display prefix. */
-function view(k: ApiKeyRecord) {
+/**
+ * Never includes the hash, and the key only for admins and only the key a zero-config first
+ * start generated (visibleKey); every other key shows its display prefix.
+ */
+function view(k: ApiKeyRecord, admin = false) {
   return {
+    ...(admin && k.visibleKey && !k.revokedAt ? { key: k.visibleKey } : {}),
     id: k.id,
     name: k.name,
     keyPrefix: k.keyPrefix,
@@ -30,7 +34,8 @@ function view(k: ApiKeyRecord) {
 /**
  * Project API keys (Settings → API keys): one key per service, rotation by
  * creating a new key and revoking the old one. The full key is returned once,
- * at creation; only its SHA-256 hash is stored.
+ * at creation; only its SHA-256 hash is stored. The exception is the key a zero-config
+ * first start generated: nobody has seen it, so admins can read it until it is revoked.
  */
 export async function registerApiKeyRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const auth = { preHandler: requireAdmin(ctx) };
@@ -38,7 +43,10 @@ export async function registerApiKeyRoutes(app: FastifyInstance, ctx: AppContext
   app.get('/v1/admin/api-keys', auth, async (req, reply) => {
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
-    return { apiKeys: (await ctx.storage.config.listApiKeys(tenant)).map(view) };
+    const admin = req.principal?.role === 'admin';
+    return {
+      apiKeys: (await ctx.storage.config.listApiKeys(tenant)).map((k) => view(k, admin)),
+    };
   });
 
   app.post('/v1/admin/api-keys', auth, async (req, reply) => {

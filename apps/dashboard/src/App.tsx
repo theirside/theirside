@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, setUnauthorizedHandler, type AuthStatus, type Me } from './api';
 import { Account } from './pages/Account';
+import { Connect } from './pages/Connect';
 import {
   AcceptInvite,
   EnrolTwoFactor,
@@ -70,7 +71,18 @@ export function App() {
   if (section === 'design') return status.designGallery ? <DesignGallery /> : <NotFound />;
   if (me === null) {
     if (section === 'forgot') return <ForgotPassword />;
-    if (status.setupRequired) return <Setup onDone={signedIn} />;
+    if (status.setupRequired)
+      return (
+        <Setup
+          status={status}
+          {...(section === 'setup' && arg ? { token: arg } : {})}
+          onDone={() => {
+            // the first account goes on to connect an app (the project key, the SDK snippet)
+            window.location.hash = href('connect');
+            void loadMe();
+          }}
+        />
+      );
     return <Login status={status} onDone={signedIn} />;
   }
   if (me.twoFactor.enrollmentRequired)
@@ -82,6 +94,7 @@ export function App() {
   else if (section === 'incidents') page = <Incidents />;
   else if (section === 'settings')
     page = <Settings tab={arg ?? 'providers'} {...(route[2] ? { sub: route[2] } : {})} me={me} />;
+  else if (section === 'connect') page = <Connect me={me} />;
   else if (section === 'account') page = <Account me={me} onSignedOut={() => setMe(null)} />;
   else page = <Overview environment={environment} />;
 

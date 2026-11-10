@@ -11,6 +11,15 @@ if (!url) {
   console.error('demo-seed: DATABASE_URL is required');
   process.exit(1);
 }
+// the compose demo profile: its app and load generator use the key and admin token from
+// docker/dev.env; without them the collector makes up its own and the demo stays empty
+if (process.env.DEMO_STACK && !process.env.THEIRSIDE_API_KEY) {
+  console.error(
+    'demo-seed: refused: start the demo with the dev values: ' +
+      'docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build',
+  );
+  process.exit(2);
+}
 const { storage, pool } = createPgStorage({ connectionString: url });
 try {
   const t0 = Date.now();

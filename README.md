@@ -11,17 +11,21 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3.1` on port 4318, amd64 and arm64):
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3.2` on port 4318, amd64 and arm64):
 
 ```sh
 git clone <this repo> theirside && cd theirside
-THEIRSIDE_VERSION=0.3.1 THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16) THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 24) \
-  docker compose -f docker/docker-compose.yml up -d
+THEIRSIDE_VERSION=0.3.2 docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml logs collector | grep setup
 ```
 
-Note the two values: `THEIRSIDE_BOOTSTRAP_API_KEY` is your project API key, `THEIRSIDE_ADMIN_TOKEN` creates the first account and is the break-glass sign-in. For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up ([security](docs/security.md)). A release version is always pulled, never built: if the pull fails (wrong version, no access to ghcr.io), compose stops with an error. To build the image from this checkout instead, use `THEIRSIDE_VERSION=local` (the default when unset) and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+Nothing to configure: the first start generates your project API key and logs a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. On a host other people can reach, create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. A release version is always pulled, never built: if the pull fails (wrong version, no access to ghcr.io), compose stops with an error. To build the image from this checkout instead, use `THEIRSIDE_VERSION=local` (the default when unset) and add `--build`. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
 
-**2. Add the SDK** at the very top of your app's entry point (for NestJS: `main.ts`, before `NestFactory.create`):
+Prefer to choose the values yourself? Set `THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_$(openssl rand -hex 16)` (your project API key) and/or `THEIRSIDE_ADMIN_TOKEN=$(openssl rand -hex 24)` (creates the first account and is the break-glass sign-in). With either one set, the setup page asks for the admin token or the setup code from the log instead of a link.
+
+**2. Open the link and create your account.** The dashboard then shows **Connect your app**: your API key with a copy button, the install command and the `init()` line with the key and this collector's URL already filled in. Admins can find the key again under **Settings → API keys**.
+
+**3. Add the SDK** (`npm install @theirside/sdk`) at the very top of your app's entry point (for NestJS: `main.ts`, before `NestFactory.create`):
 
 ```ts
 import { init } from '@theirside/sdk';
@@ -31,9 +35,9 @@ init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: 'http://localhost:4318' 
 
 That's all: every third-party API the app calls is discovered, grouped into providers (`api.stripe.com` → Stripe, `api.acme.com` + `files.acme.com` → `acme.com`) and monitored. Loopback, private networks, internal names and telemetry hosts are never recorded. Optional: `service`, `environment`, and `providers` to set names and routes in code.
 
-**3. Open <http://localhost:4318>**, create your account on the setup page (with the admin token), invite your team under **Settings → Users**, add a Slack/email/webhook channel under **Settings → Alert channels** and press **Send test alert**. Your providers appear under **Providers** within a minute of the first calls; rename, merge or hide them under **Settings → Providers**. When one breaks, you get the alert.
+**4. Invite your team** under **Settings → Users**, add a Slack/email/webhook channel under **Settings → Alert channels** and press **Send test alert**. Your providers appear under **Providers** within a minute of the first calls; rename, merge or hide them under **Settings → Providers**. When one breaks, you get the alert.
 
-Want to see it first? `docker compose -f docker/docker-compose.yml --profile demo up --build` runs a NestJS demo app against fake providers you can break on demand: [docs/demo.md](docs/demo.md).
+Want to see it first? `docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build` runs a NestJS demo app against fake providers you can break on demand: [docs/demo.md](docs/demo.md).
 
 ## Docs
 

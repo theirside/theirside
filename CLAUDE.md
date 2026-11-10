@@ -42,20 +42,20 @@ pnpm workspaces (pnpm 12, via corepack). Keep this list accurate:
 - SDK collector-down benchmark (queue bound, app latency): `pnpm --filter @theirside/sdk bench:collector-down -- --minutes 10`
 - SDK memory soak (built SDK; `pnpm --filter @theirside/sdk build` first): `pnpm --filter @theirside/soak soak -- --minutes 60 --collector up|down|cycle` (5-minute CI gate: `pnpm --filter @theirside/soak soak:ci -- --collector up`; snapshot diff: `pnpm --filter @theirside/soak diff a.heapsnapshot b.heapsnapshot`)
 - SDK overnight soak, three variants in parallel with SUMMARY.md (collector stack and built SDK first): `tools/soak/overnight.sh --hours 8` (results in `tools/soak/results/<date>/`, git-ignored)
-- collector stack (postgres + collector on :4318): `docker compose -f docker/docker-compose.yml up -d --build`
+- collector stack (postgres + collector on :4318) with the well-known dev key and admin token that the demo, e2e, smoke, soak and ingest bench expect: `docker compose --env-file docker/dev.env -f docker/docker-compose.yml up -d --build`. Without `--env-file` it is the zero-config self-host path: a generated key and a setup link in `docker compose -f docker/docker-compose.yml logs collector`
 - collector dev (needs `DATABASE_URL`): `pnpm --filter @theirside/collector dev`
 - ingest load test: `pnpm --filter @theirside/collector bench:ingest -- --seconds 60`
 - dev licence: `pnpm --filter @theirside/collector licence sign` (verify only with `THEIRSIDE_ALLOW_DEV_LICENSE=1`)
-- alerting end-to-end in docker (~25 min: warm-up, 40% failure for 6 min, open + resolve checks): `docker compose -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit --exit-code-from e2e e2e`
+- alerting end-to-end in docker (~25 min: warm-up, 40% failure for 6 min, open + resolve checks): `docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit --exit-code-from e2e e2e`
 - chaos provider locally: `pnpm --filter @theirside/chaos-provider dev` (admin API `/__chaos`, alert sink `/__alerts`)
 - dashboard dev server (proxies the API to a collector on :4318; builds the design tokens first): `pnpm --filter @theirside/dashboard dev`; build into the collector: `pnpm --filter @theirside/dashboard build`
 - design tokens (`packages/design/dist/tokens.css` from `tokens.json`): `pnpm --filter @theirside/design build`; contrast and no-raw-colour tests: `pnpm vitest run --project design`; gallery: `http://localhost:4318/#/design` on the compose stack (`THEIRSIDE_DESIGN_GALLERY=1`)
 - Playwright smoke against a running stack (`--profile demo`; start it with a throwaway `THEIRSIDE_SECRET_KEY` to cover 2FA, as CI does): `THEIRSIDE_ADMIN_TOKEN=change-me-admin-token pnpm --filter @theirside/dashboard smoke` (first time: `pnpm --filter @theirside/dashboard exec playwright install chromium`). It completes the setup page on a fresh stack and signs in as `smoke@example.test` after that; it also checks the `#/design` gallery and saves screenshots of both themes in `apps/dashboard/test-results/`
-- demo stack (postgres, collector, chaos provider, NestJS demo on :3000, loadgen; seeds 7 days of demo data on first start; see `docs/demo.md`): `docker compose -f docker/docker-compose.yml --profile demo up --build`
+- demo stack (postgres, collector, chaos provider, NestJS demo on :3000, loadgen; seeds 7 days of demo data on first start; see `docs/demo.md`): `docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build`
 - demo data by hand (empty demo database only; refuses anything else): `DATABASE_URL=… pnpm demo:seed`
 - rebuild the path-word vocabulary (`packages/shared/src/vocabulary-words.ts`; see `tools/vocabulary/README.md`): `cd tools/vocabulary && node src/fetch.mjs && node src/build.mjs`
 - SDK tarball for installing into another service: `cd packages/sdk && pnpm pack`
-- collector image release (maintainer; CI builds and pushes `ghcr.io/theirside/collector`, amd64 + arm64, after the collector tests): `git tag v0.3.0 && git push origin v0.3.0`, or run the "Release collector image" workflow with a version. Compose pulls a release with `THEIRSIDE_VERSION=0.3.0` (pull failure = error, never a source build); `THEIRSIDE_VERSION=local`, the default, builds from source.
+- collector image release (maintainer; CI builds and pushes `ghcr.io/theirside/collector`, amd64 + arm64, after the collector tests): `git tag v0.3.2 && git push origin v0.3.2`, or run the "Release collector image" workflow with a version. Compose pulls a release with `THEIRSIDE_VERSION=0.3.2` (pull failure = error, never a source build); `THEIRSIDE_VERSION=local`, the default, builds from source.
 - SDK publish (maintainer): `cd packages/sdk && pnpm publish` (pnpm, not npm: it applies `publishConfig.exports`; `prepublishOnly` builds, runs the SDK tests and the compat smoke). `@theirside/shared` is private, bundled into the SDK.
 
 ## Design system

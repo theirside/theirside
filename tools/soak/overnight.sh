@@ -2,7 +2,7 @@
 # Start the overnight soak (src/overnight.mjs) detached: survives the terminal
 # closing (nohup) and keeps the Mac from idle-sleeping (caffeinate -i; -s also
 # blocks system sleep while on AC power). Needs the collector stack running:
-#   docker compose -f docker/docker-compose.yml up -d --build
+#   docker compose --env-file docker/dev.env -f docker/docker-compose.yml up -d --build
 # and the built SDK: pnpm --filter @theirside/sdk build
 #
 #   tools/soak/overnight.sh [--hours 8] [any other overnight.mjs option]

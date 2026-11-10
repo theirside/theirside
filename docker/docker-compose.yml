@@ -1,14 +1,16 @@
 # Self-hosted collector + Postgres, from the released image (ghcr.io/theirside/collector):
-#   THEIRSIDE_VERSION=0.3.0 docker compose -f docker/docker-compose.yml up -d
+#   THEIRSIDE_VERSION=0.3.2 docker compose -f docker/docker-compose.yml up -d
+# Nothing else is required: the first start generates the project API key and logs a one-time
+# link to create the first account (docker compose -f docker/docker-compose.yml logs collector).
 # A release version is pulled, never built: if the pull fails, or with --build, it stops
 # with an error. THEIRSIDE_VERSION=local (the default; demo, dev, CI) builds the collector
 # from this checkout as ghcr.io/theirside/collector:local, a tag that is never published.
-# Demo stack (chaos provider, NestJS demo app, load generator):
-#   docker compose -f docker/docker-compose.yml --profile demo up
+# Demo stack (chaos provider, NestJS demo app, load generator), with the well-known dev key
+# and admin token from docker/dev.env so its services can reach the collector:
+#   docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up
 #
 # Settings come from the shell or an env file: cp .env.example .env, edit it, then
 #   docker compose --env-file .env -f docker/docker-compose.yml up -d
-# Change THEIRSIDE_BOOTSTRAP_API_KEY and THEIRSIDE_ADMIN_TOKEN before exposing this anywhere.
 name: theirside
 
 services:
@@ -40,8 +42,10 @@ services:
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
       THEIRSIDE_DEPLOYMENT_MODE: self_hosted
-      THEIRSIDE_BOOTSTRAP_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
-      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      # both optional: unset, the first start generates the key and logs a setup link
+      # (docs/security.md); set, they work as before 0.3.2
+      THEIRSIDE_BOOTSTRAP_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-}
       THEIRSIDE_PUBLIC_URL: ${THEIRSIDE_PUBLIC_URL:-http://localhost:${COLLECTOR_PORT:-4318}}
       THEIRSIDE_LICENSE_KEY: ${THEIRSIDE_LICENSE_KEY:-}
       # user accounts (docs/nestjs-integration.md): 2FA key, proxy sign-in, load balancers
@@ -78,6 +82,8 @@ services:
     restart: unless-stopped
 
   # ---- demo / e2e helpers -------------------------------------------------
+  # Start them with --env-file docker/dev.env: their key and admin token must match the
+  # collector's, and a zero-config collector makes up its own.
 
   # Fake providers (Acme Cards, KYCo, BankCo) + alert sink at /__alerts.
   chaos:
@@ -120,7 +126,7 @@ services:
     environment:
       PORT: 3000
       THEIRSIDE_COLLECTOR_URL: http://collector:4318
-      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
+      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
       THEIRSIDE_ENVIRONMENT: demo
       # zero-config SDK: no provider list, see examples/nestjs-demo/src/instrumentation.ts
       SAASCO_TARGET: chaos
@@ -141,6 +147,9 @@ services:
     command: ['node', 'dist/demo-seed.js']
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside-local-only}@postgres:5432/theirside
+      # refuses without docker/dev.env, so the demo can't start with keys that don't match
+      DEMO_STACK: '1'
+      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
     depends_on:
       collector:
         condition: service_healthy
@@ -160,7 +169,7 @@ services:
       DEMO_URL: http://demo:3000
       RPS: ${RPS:-20}
       THEIRSIDE_COLLECTOR_URL: http://collector:4318
-      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-}
       SINK_URL: http://chaos:4010/__alerts
       SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}
     depends_on:
@@ -171,7 +180,7 @@ services:
     restart: unless-stopped
 
   # Phase 3 acceptance: SDK traffic, injected failure, alert assertions.
-  #   docker compose -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit e2e
+  #   docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit e2e
   e2e:
     profiles: ['e2e']
     build:
@@ -183,8 +192,8 @@ services:
     command: ['node', 'dist/e2e.js']
     environment:
       THEIRSIDE_COLLECTOR_URL: http://collector:4318
-      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-tsd_live_localdemo0000000000000000}
-      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-change-me-admin-token}
+      THEIRSIDE_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
+      THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-}
       CHAOS_URL: http://chaos:4010
       CHAOS_PORT: 4010
       SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}

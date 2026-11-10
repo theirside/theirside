@@ -30,9 +30,29 @@ export function isPublicPath(path: string): boolean {
 }
 
 /** Builds the HTTP app. Stateless: any number of replicas can serve it. */
+/** Request log line; the zero-config setup link's token never reaches the log. */
+export function logRequest(req: {
+  method: string;
+  url: string;
+  host?: string;
+  ip?: string;
+  socket?: { remotePort?: number };
+}) {
+  return {
+    method: req.method,
+    url: req.url.replace(/^(\/setup)\?.*$/, '$1?[redacted]'),
+    host: req.host,
+    remoteAddress: req.ip,
+    remotePort: req.socket?.remotePort,
+  };
+}
+
 export async function buildApp(ctx: AppContext, opts: BuildOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: opts.logger ?? false,
+    logger:
+      typeof opts.logger === 'object'
+        ? { ...opts.logger, serializers: { req: logRequest } }
+        : (opts.logger ?? false),
     // a hop count trusts that many proxies nearest to the collector
     trustProxy:
       typeof ctx.config.trustProxy === 'number'

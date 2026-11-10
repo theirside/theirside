@@ -48,6 +48,13 @@ async function signIn(page: Page, request: APIRequestContext) {
     await expect(page.getByText('That setup code or admin token is not valid.')).toBeVisible();
     await page.getByLabel('Setup code or admin token').fill(THEIRSIDE_ADMIN_TOKEN);
     await page.getByRole('button', { name: 'Create account' }).click();
+    // the first account goes on to "Connect your app"; the demo's key comes from
+    // THEIRSIDE_BOOTSTRAP_API_KEY (docker/dev.env), so the snippet has a placeholder
+    await expect(page.getByRole('heading', { name: 'Connect your app' })).toBeVisible();
+    await expect(page.getByTestId('connect-snippet')).toContainText(
+      `endpoint: '${new URL(page.url()).origin}'`,
+    );
+    await page.getByRole('link', { name: 'Go to the dashboard' }).click();
     return;
   }
   const smoke = (await users(request)).find((u) => u.email === SMOKE_EMAIL);

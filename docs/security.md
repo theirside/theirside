@@ -4,7 +4,30 @@ How people sign in to a self-hosted collector, and what to set up and keep safe.
 
 ## First run
 
-When nobody can sign in yet, the dashboard shows a **setup page** that creates the first account. It asks for one of:
+When nobody can sign in yet, the dashboard shows a **setup page** that creates the first account (always an admin). How it proves you run the collector depends on how the collector was started.
+
+### Zero-config (neither `THEIRSIDE_BOOTSTRAP_API_KEY` nor `THEIRSIDE_ADMIN_TOKEN` set)
+
+This is what `docker compose -f docker/docker-compose.yml up -d` does since collector 0.3.2.
+
+- **API key.** If the install has no API key yet (revoked ones count), the first start creates the org and project and generates a project key (`tsd_live_` + 32 random characters; ingest and read). It is never logged. After the first account is created, the dashboard shows it on the **Connect your app** screen with the `npm install` command and the `init()` line filled in. Admins can see it again under Settings → API keys; members can't. Unlike every other key, this one is stored readable (`api_keys.visible_key`) as well as hashed, because nobody has seen it yet. Revoking it erases the readable copy, and a restart doesn't generate a new one.
+- **Setup link.** Each start logs one line until the first account exists:
+  ```
+  Open http://localhost:4318/setup?token=… to create the first account
+  ```
+  It uses `THEIRSIDE_PUBLIC_URL` when set. Find it with `docker compose -f docker/docker-compose.yml logs collector | grep setup`. Only a SHA-256 hash of the token is stored (32 random base62 characters, about 165 bits once case is folded). The link doesn't expire with time, but every token stops working the moment the first account exists. `/setup` sends the token on to the dashboard in the URL fragment, which browsers never send to a server, and the collector's request log shows `/setup?[redacted]`.
+- **Loopback.** A request from the collector's own machine can create the first account without the token. That means the TCP peer and the client address are both loopback (`127.0.0.0/8`, `::1`), and there is no `X-Forwarded-For`, `Forwarded`, `X-Real-IP` or `X-Forwarded-Host` header. A reverse proxy on the same host connects from `127.0.0.1` for everyone it serves, which is why forwarded requests never count. Docker's published ports never count either, because the collector sees the bridge gateway's address, so under Docker you always use the logged link. Wrong tokens count against the address like wrong passwords (see Brute-force protection).
+
+**Risk on a public host.** Until the first account exists, anyone who has the setup link can create the first admin. On a host reachable from the internet:
+
+- Create the account right after the first start, before you point DNS at the collector or open the port.
+- Treat the collector's log as a secret until then, including log shipping (CloudWatch, Datadog…), which may keep the link.
+- If the collector is only reachable through a reverse proxy, make sure the proxy adds `X-Forwarded-For`; most do by default. A proxy that strips forwarding headers and connects over loopback makes every visitor look local.
+- Or skip zero-config: set `THEIRSIDE_ADMIN_TOKEN` (and `THEIRSIDE_BOOTSTRAP_API_KEY` if you want to choose the key), as below.
+
+### With `THEIRSIDE_BOOTSTRAP_API_KEY` or `THEIRSIDE_ADMIN_TOKEN` set
+
+First run works as it did before 0.3.2: no key is generated, loopback gets no shortcut, and the setup page asks for one of:
 
 - the **setup code** each collector prints to its log at start (valid 24 hours, upper-case, e.g. `K7QM-2XRD-9BTW`):
   ```sh
@@ -12,7 +35,9 @@ When nobody can sign in yet, the dashboard shows a **setup page** that creates t
   ```
 - or the collector's **`THEIRSIDE_ADMIN_TOKEN`**.
 
-Then name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup page also creates the org and project; create API keys under Settings → API keys afterwards. Installs that used the admin token before keep their data: the setup page turns the old placeholder admin into your account.
+Then it asks for your name, email and password. Without `THEIRSIDE_BOOTSTRAP_API_KEY` the setup page also creates the org and project; create API keys under Settings → API keys afterwards. Installs that used the admin token before keep their data: the setup page turns the old placeholder admin into your account.
+
+Setting either variable later on an install that started zero-config is fine. The generated key keeps working, a bootstrap key is added next to it, and the setup flow follows the variables from then on.
 
 ## Accounts
 
@@ -57,7 +82,7 @@ The collector enforces this on every request (403 "Only admins can …"); the da
 ## Brute-force protection
 
 - **Per email and address**: 4 wrong passwords or 2FA codes for one email from one address are free; after that, each failure makes that email wait at that address 1 second, then 2, 4, 8… up to 15 minutes, even for the right password. A success, or a day, starts the count over. Because the address is part of the key, someone guessing from their own address never slows the real user down at theirs, and nobody can lock an account. Emails without an account are delayed exactly the same way, so the answers never reveal who has one. Confirming your password for a sensitive change counts the same way.
-- **Per address**: 30 failures from one address within 15 minutes block that address for 15 minutes, whatever the email (passwords, 2FA codes, admin token, setup code, unknown links). This is the hard limit on guessing many accounts, or one account, from one place; it never affects other addresses.
+- **Per address**: 30 failures from one address within 15 minutes block that address for 15 minutes, whatever the email (passwords, 2FA codes, admin token, setup code or link, unknown links). This is the hard limit on guessing many accounts, or one account, from one place; it never affects other addresses.
 - 3 reset emails per email address per hour.
 - Counts are kept in Postgres, so they hold across replicas, and are forgotten after a day.
 - Someone guessing from many addresses gets 4 free tries and then slowly growing delays at each, besides the per-address limit; long passwords (12+ characters, hashed with argon2id) and 2FA are what make that hopeless.

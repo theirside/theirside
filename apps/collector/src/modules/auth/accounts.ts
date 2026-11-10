@@ -9,7 +9,7 @@ import type {
 } from '../../storage/types.js';
 import type { Clock } from '../../util/clock.js';
 import { HttpProblem } from '../../util/http-problem.js';
-import { newId, safeEqual, sha256Hex } from '../../util/ids.js';
+import { newId, randomBase62, safeEqual, sha256Hex } from '../../util/ids.js';
 import type { EntitlementsResolver } from '../entitlements/types.js';
 import type { Mailer } from '../mail/mailer.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
@@ -25,6 +25,8 @@ export const RESET_TTL_MS = 3600_000;
 export const MFA_TTL_MS = 5 * 60_000;
 const SETUP_CODE_TTL_MS = 24 * 3600_000;
 const SETUP_CODE_META = 'setup_code:';
+/** Zero-config setup links don't expire: they die when the first account exists. */
+const NO_EXPIRY = 'until-setup';
 /** The THEIRSIDE_ADMIN_TOKEN break-glass principal: a system user, never listed or signed in otherwise. */
 export const ADMIN_TOKEN_USER_ID = 'usr_admin_token';
 
@@ -128,6 +130,30 @@ export class Accounts {
     return code;
   }
 
+  /**
+   * Zero-config first start (config.zeroConfig): a one-time setup token for the link the
+   * collector logs (/setup?token=…). Stored hashed like setup codes, valid until the first
+   * account exists; each start adds one, all are deleted when setup completes.
+   */
+  async issueSetupToken(): Promise<string | null> {
+    if (!(await this.setupRequired())) return null;
+    // base62 in a URL; checked case-insensitively like the codes (~165 bits after folding)
+    const token = randomBase62(32);
+    await this.storage.config.setMeta(
+      `${SETUP_CODE_META}${sha256Hex(token.toUpperCase())}`,
+      NO_EXPIRY,
+    );
+    return token;
+  }
+
+  /**
+   * Zero-config only: a request from this machine (loopback, not forwarded) can create the
+   * first account without the token. Docker's port mapping never looks like loopback.
+   */
+  setupOpenTo(local: boolean): boolean {
+    return this.config.zeroConfig && local;
+  }
+
   private async setupSecretValid(input: { code?: unknown; adminToken?: unknown }) {
     const { code, adminToken } = input;
     // either one; the setup page sends what was typed as both
@@ -142,6 +168,7 @@ export class Accounts {
     const expires = await this.storage.config.getMeta(
       `${SETUP_CODE_META}${sha256Hex(code.trim().toUpperCase())}`,
     );
+    if (expires === NO_EXPIRY) return true;
     return !!expires && new Date(expires).getTime() > this.clock.now().getTime();
   }
 
@@ -153,16 +180,20 @@ export class Accounts {
     name: unknown;
     password: unknown;
     ip: string;
+    /** Loopback and not forwarded (routes.ts isLocalRequest). */
+    local?: boolean;
   }): Promise<string> {
     if (!(await this.setupRequired()))
       throw new HttpProblem(409, 'already_set_up', 'Setup is already complete. Sign in instead.');
     await this.refuseIfLocked([`ip:${input.ip}`]);
-    if (!(await this.setupSecretValid(input))) {
+    if (!this.setupOpenTo(!!input.local) && !(await this.setupSecretValid(input))) {
       await this.throttle.fail('ip', input.ip);
       throw new HttpProblem(
         401,
         'invalid_setup_code',
-        'That setup code or admin token is not valid. The setup code is in the collector log.',
+        this.config.zeroConfig
+          ? 'That setup link is not valid. Open the link from the collector log (restart the collector for a new one).'
+          : 'That setup code or admin token is not valid. The setup code is in the collector log.',
       );
     }
     const email = normalizeEmail(input.email);

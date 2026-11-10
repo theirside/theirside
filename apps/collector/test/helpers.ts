@@ -86,6 +86,7 @@ export async function startTestApp(
   const ctx = createContext(config, db.storage, { clock, ...opts.overrides });
   const boot = await bootstrap(db.storage, {
     apiKey: config.bootstrapApiKey,
+    generateKey: config.zeroConfig,
     orgName: config.bootstrapOrgName,
     projectName: config.bootstrapProjectName,
     entitlements: ctx.entitlements,

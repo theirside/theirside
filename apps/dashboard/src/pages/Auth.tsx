@@ -266,13 +266,36 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
 }
 
 /** First run: create the first account, with the setup code from the log or the admin token. */
-export function Setup({ onDone }: { onDone: () => void }) {
+/** The token from a pasted setup link (…/setup?token=… or …/#/setup/…), or the token itself. */
+function setupToken(raw: string): string {
+  const v = raw.trim();
+  return /[?&]token=([A-Za-z0-9]+)/.exec(v)?.[1] ?? /#\/setup\/([A-Za-z0-9]+)/.exec(v)?.[1] ?? v;
+}
+
+export function Setup({
+  status,
+  token,
+  onDone,
+}: {
+  status: AuthStatus;
+  /** From the setup link (#/setup/<token>). */
+  token?: string;
+  onDone: () => void;
+}) {
+  const mode = status.setup ?? 'code';
   const [secret, setSecret] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const fromLink = mode === 'link' && !!token;
+  const credentials =
+    mode === 'code'
+      ? { setupCode: secret.trim(), adminToken: secret.trim() }
+      : mode === 'link'
+        ? { setupCode: token ?? setupToken(secret) }
+        : {};
   return (
     <Shell
       title="Create the first account"
@@ -282,27 +305,54 @@ export function Setup({ onDone }: { onDone: () => void }) {
         setError('');
         api('/v1/auth/setup', {
           method: 'POST',
-          body: { setupCode: secret.trim(), adminToken: secret.trim(), name, email, password },
+          body: { ...credentials, name, email, password },
         }).then(onDone, (e) => setError(message(e)));
       }}
     >
-      <p className="muted">
-        Nobody can sign in yet. Enter the setup code from the collector's log (
-        <code>docker compose logs collector | grep "setup code"</code>) or its
-        THEIRSIDE_ADMIN_TOKEN.
-      </p>
-      <Field>
-        Setup code or admin token
-        <input
-          autoFocus
-          value={secret}
-          onChange={(e) => setSecret(e.target.value)}
-          name="setup-code"
-        />
-      </Field>
+      {mode === 'code' && (
+        <>
+          <p className="muted">
+            Nobody can sign in yet. Enter the setup code from the collector&apos;s log (
+            <code>docker compose logs collector | grep &quot;setup code&quot;</code>) or its
+            THEIRSIDE_ADMIN_TOKEN.
+          </p>
+          <Field>
+            Setup code or admin token
+            <input
+              autoFocus
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              name="setup-code"
+            />
+          </Field>
+        </>
+      )}
+      {mode === 'link' && !fromLink && (
+        <>
+          <p className="muted">
+            Nobody can sign in yet. Open the setup link from the collector&apos;s log (
+            <code>docker compose logs collector | grep setup</code>), or paste it here.
+          </p>
+          <Field>
+            Setup link
+            <input
+              autoFocus
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              name="setup-link"
+            />
+          </Field>
+        </>
+      )}
+      {(fromLink || mode === 'open') && (
+        <p className="muted">
+          Nobody can sign in yet. This account will be the first admin; it can invite everyone else.
+        </p>
+      )}
       <Field>
         Your name
         <input
+          autoFocus={fromLink || mode === 'open'}
           autoComplete="name"
           value={name}
           onChange={(e) => setName(e.target.value)}

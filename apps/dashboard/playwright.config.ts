@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Smoke test against a running stack with traffic, e.g.
- *   docker compose -f docker/docker-compose.yml --profile demo up -d --build
+ *   docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up -d --build
  *   pnpm --filter @theirside/dashboard smoke
  * Env: BASE_URL (http://localhost:4318), THEIRSIDE_ADMIN_TOKEN.
  */

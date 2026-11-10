@@ -38,11 +38,14 @@ async function main() {
   const ctx = createContext(config, storage, { log: app0Log });
   const boot = await bootstrap(storage, {
     apiKey: config.bootstrapApiKey,
+    generateKey: config.zeroConfig,
     orgName: config.bootstrapOrgName,
     projectName: config.bootstrapProjectName,
     entitlements: ctx.entitlements,
   });
   if (boot.created) app0Log(`bootstrapped org ${boot.orgId} / project ${boot.projectId}`);
+  // the key itself is never logged: the first account sees it on the "Connect your app" screen
+  if (boot.generatedKey) app0Log('generated the project API key (shown after the first sign-in)');
   await storage.events.ensurePartitions(ctx.clock.now(), config.partitionsAhead + 1);
 
   const app = await buildApp(ctx, { logger: { level: config.logLevel } });
@@ -51,7 +54,13 @@ async function main() {
       'THEIRSIDE_TRUST_PROXY=true believes X-Forwarded-For from any address: a client that reaches the ' +
         "collector directly can pick the IP its sign-in attempts are counted against. Set the load balancers' CIDRs instead.",
     );
-  if (!config.publicPathsOnly) {
+  if (!config.publicPathsOnly && config.zeroConfig) {
+    const token = await ctx.accounts.issueSetupToken();
+    if (token) {
+      const where = config.publicUrl ?? `http://localhost:${config.port}`;
+      app.log.warn(`Open ${where}/setup?token=${token} to create the first account`);
+    }
+  } else if (!config.publicPathsOnly) {
     const code = await ctx.accounts.issueSetupCode();
     if (code) {
       const where = config.publicUrl ?? `http://localhost:${config.port}`;

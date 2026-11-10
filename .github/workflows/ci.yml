@@ -120,7 +120,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # no --wait: the one-shot demo-seed container exits by design; `up -d` already
       # waits for it to complete before starting loadgen, and for the collector's healthcheck
-      - run: docker compose -f docker/docker-compose.yml --profile demo up -d --build
+      - run: docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up -d --build
         env:
           # a throwaway key so the smoke test can exercise two-factor sign-in
           THEIRSIDE_SECRET_KEY: ci-smoke-only-not-a-secret-0123456789

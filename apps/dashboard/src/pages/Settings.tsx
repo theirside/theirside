@@ -453,7 +453,8 @@ function ApiKeysTab() {
       <ErrorBox error={error} />
       <p className="muted">
         One key per service makes rotation easy: create a new key, deploy it, then revoke the old
-        one. Services need the <b>ingest</b> scope; <b>read</b> is for the health API.
+        one. Services need the <b>ingest</b> scope; <b>read</b> is for the health API.{' '}
+        <a href={href('connect')}>How to connect an app</a>
       </p>
       {created && (
         <Card
@@ -486,7 +487,16 @@ function ApiKeysTab() {
                 <td>
                   <b>{k.name}</b>
                 </td>
-                <td className="mono">{k.keyPrefix}…</td>
+                <td>
+                  {k.key ? (
+                    <span className="row" data-testid="visible-api-key">
+                      <span className="mono">{k.key}</span>
+                      <CopyButton text={k.key} label="Copy key" />
+                    </span>
+                  ) : (
+                    <span className="mono">{k.keyPrefix}…</span>
+                  )}
+                </td>
                 <td>
                   {k.scopes.map((s) => (
                     <Badge key={s}>{s}</Badge>

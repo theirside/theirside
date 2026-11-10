@@ -43,6 +43,20 @@ const ADMIN_AREAS: [RegExp, string][] = [
   [/^\/v1\/admin\/settings\/discovery/, 'change the new-provider digest'],
 ];
 
+const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;
+const FORWARDING_HEADERS = ['x-forwarded-for', 'forwarded', 'x-real-ip', 'x-forwarded-host'];
+
+/**
+ * A request from this machine: the TCP peer and the client address are loopback and no proxy
+ * forwarded it (a reverse proxy on the same host connects from 127.0.0.1 for remote users).
+ * Docker's published ports never count: the peer is the bridge gateway, not loopback.
+ */
+export function isLocalRequest(req: FastifyRequest): boolean {
+  const peer = req.socket?.remoteAddress ?? '';
+  if (!LOOPBACK.test(peer) || !LOOPBACK.test(req.ip ?? '')) return false;
+  return !FORWARDING_HEADERS.some((h) => req.headers[h] !== undefined);
+}
+
 export function adminOnly(what: string): HttpProblem {
   return new HttpProblem(
     403,
@@ -220,8 +234,14 @@ export function endSessionCookie(ctx: AppContext, req: FastifyRequest, reply: Fa
 
 export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   // what the sign-in page should offer; public
-  app.get('/v1/auth/status', async () => ({
+  app.get('/v1/auth/status', async (req) => ({
     setupRequired: await ctx.accounts.setupRequired(),
+    // zero-config first run: the setup page wants the logged link's token, unless opened locally
+    setup: ctx.config.zeroConfig
+      ? ctx.accounts.setupOpenTo(isLocalRequest(req))
+        ? 'open'
+        : 'link'
+      : 'code',
     emailEnabled: ctx.accounts.emailEnabled,
     adminTokenEnabled: !!ctx.config.adminToken,
     proxy: ctx.config.authProxy?.mode ?? null,
@@ -238,8 +258,17 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
       name: b.name,
       password: b.password,
       ip: req.ip,
+      local: isLocalRequest(req),
     });
     return startSession(ctx, req, reply, userId);
+  });
+
+  // the link a zero-config first start logs: hand the token to the dashboard in the URL
+  // fragment, which browsers never send to a server (request logs redact it: server.ts)
+  app.get('/setup', async (req, reply) => {
+    const token = (req.query as { token?: unknown }).token;
+    const t = typeof token === 'string' && /^[A-Za-z0-9]{1,64}$/.test(token) ? token : '';
+    return reply.header('cache-control', 'no-store').redirect(t ? `/#/setup/${t}` : '/#/setup');
   });
 
   app.post('/v1/auth/login', async (req, reply) => {

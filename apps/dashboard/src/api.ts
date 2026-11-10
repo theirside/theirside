@@ -258,6 +258,8 @@ export interface ApiKey {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** Admins only, and only for the key a zero-config first start generated. */
+  key?: string;
 }
 
 export type Role = 'admin' | 'member';
@@ -285,6 +287,11 @@ export interface AuthStatus {
   proxy: 'header' | 'alb' | null;
   /** The #/design gallery is on (THEIRSIDE_DESIGN_GALLERY). */
   designGallery?: boolean;
+  /**
+   * What the setup page asks for: `code` (setup code or admin token), `link` (the token from
+   * the setup link a zero-config first start logs) or `open` (zero-config, opened locally).
+   */
+  setup?: 'code' | 'link' | 'open';
 }
 
 export interface UserRow {

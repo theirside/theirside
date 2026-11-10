@@ -160,7 +160,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.3.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.3.2`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -191,12 +191,17 @@ From 0.2.4 to 0.3.0 (deploy it before your services move to SDK 0.2.0; older SDK
 - The doubled-slash routes 0.2.2 added for SDK 0.1.0 are removed (migration 011); ingest still collapses `//` from old SDKs.
 - Migrations 011–016 run on the first start: new columns (fast, no table rewrite), two small tables (`sdk_processes`, `service_templates`), the route cleanup.
 
+To 0.3.2: **first run is zero-config.** A collector started with neither `THEIRSIDE_BOOTSTRAP_API_KEY` nor `THEIRSIDE_ADMIN_TOKEN` generates the project API key and logs a one-time setup link ([security](security.md#first-run)). With either one set, nothing changes. The ECS setup below sets both, so it works as before. Migration 017 adds one nullable column (`api_keys.visible_key`).
+
+- **Compose users who never set the two variables**: the compose file used to default them to `tsd_live_localdemo0000000000000000` and `change-me-admin-token`, and now leaves them empty. An existing install keeps its data, its accounts and the localdemo key, which services may still be using. Rotate it under Settings → API keys. The admin token `change-me-admin-token` no longer works. Set `THEIRSIDE_ADMIN_TOKEN` if you want break-glass sign-in back, and set it to something else.
+- The demo, e2e and smoke stacks need `--env-file docker/dev.env` ([demo](demo.md)).
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.3.0
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.3.2
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -213,8 +218,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.3.0 .
-docker push <registry>/theirside-collector:0.3.0
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.3.2 .
+docker push <registry>/theirside-collector:0.3.2
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -237,7 +242,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.3.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.3.2` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -255,7 +260,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.3.0",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.3.2",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [
@@ -319,8 +324,8 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 | `DATABASE_URL` | required | `postgres://user:pass@host:5432/db` |
 | `PORT` | `4318` | |
 | `THEIRSIDE_PUBLIC_URL` | – | Dashboard URL for "Open in dashboard" links in alerts (no link when unset) and the session cookie's `Secure` flag; status page and embed URLs fall back to the request origin. |
-| `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, status page and this key (`tsd_live_` + ≥ 16 chars). The first user comes from the dashboard's setup page. |
-| `THEIRSIDE_ADMIN_TOKEN` | – | Completes the setup page (or use the setup code from the log) and is the break-glass sign-in (and `Bearer` for scripts). Unset to turn it off. |
+| `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, status page and this key (`tsd_live_` + ≥ 16 chars). The first user comes from the dashboard's setup page. Optional: with neither this nor `THEIRSIDE_ADMIN_TOKEN`, the first start generates a key and logs a setup link ([zero-config](security.md#first-run)). |
+| `THEIRSIDE_ADMIN_TOKEN` | – | Completes the setup page (or use the setup code from the log) and is the break-glass sign-in (and `Bearer` for scripts). Unset to turn it off. Optional, see the line above. |
 | `THEIRSIDE_SECRET_KEY` / `THEIRSIDE_SECRET_KEY_PREVIOUS` | – | Encrypts two-factor secrets (≥ 32 characters, `openssl rand -base64 32`); required for 2FA. Back it up; rotate by moving the old key to `_PREVIOUS` ([security.md](security.md)). |
 | `THEIRSIDE_TRUST_PROXY` | private ranges | Which proxies' `X-Forwarded-*` to believe (client IP for sign-in limits, https detection): by default those on private and loopback addresses; or the load balancers' CIDRs, a hop count, `false`, or `true` for any (logged as a warning). |
 | `THEIRSIDE_SESSION_MAX_AGE_HOURS` / `THEIRSIDE_SESSION_IDLE_HOURS` | `168` / `24` | Dashboard session lifetime and idle timeout. |

@@ -6,6 +6,11 @@ import { newId, randomBase62 } from './util/ids.js';
 
 export interface BootstrapOptions {
   apiKey: string | undefined;
+  /**
+   * Zero-config first start (config.zeroConfig): with no key in the install yet, generate
+   * the project's API key and keep it visible to admins. Ignored when `apiKey` is set.
+   */
+  generateKey?: boolean;
   orgName: string;
   projectName: string;
   entitlements: EntitlementsResolver;
@@ -13,6 +18,8 @@ export interface BootstrapOptions {
 
 export interface BootstrapResult {
   created: boolean;
+  /** A key was generated (zero-config). The key itself is never returned or logged. */
+  generatedKey?: boolean;
   orgId?: string;
   projectId?: string;
 }
@@ -44,6 +51,47 @@ export async function createDefaultOrg(
 }
 
 /**
+ * Zero-config first start: no THEIRSIDE_BOOTSTRAP_API_KEY and no key in the install yet
+ * (revoked ones count, so revoking it never brings a new one back on restart). Creates the
+ * default org if needed and a generated ingest + read key that stays visible to admins on
+ * the "Connect your app" screen and under Settings → API keys.
+ */
+async function generateFirstKey(
+  storage: Storage,
+  opts: BootstrapOptions,
+): Promise<BootstrapResult> {
+  return storage.transaction(async (tx) => {
+    if ((await tx.config.countApiKeys()) > 0) return existing(tx);
+    // replicas starting together: the second waits on this key, then sees it taken
+    const marker = newId('key');
+    if ((await tx.config.setMetaIfAbsent('first_run_key', marker)) !== marker) return existing(tx);
+    let orgId = (await tx.config.listOrgs())[0]?.id;
+    let projectId = orgId ? (await tx.config.listProjects(orgId))[0]?.id : undefined;
+    let created = false;
+    if (!orgId) {
+      ({ orgId, projectId } = await createDefaultOrg(tx, opts));
+      created = true;
+    }
+    if (!projectId) return { created: false, orgId };
+    await createApiKey(
+      tx.config,
+      { orgId, projectId },
+      'Default key',
+      ['ingest', 'read'],
+      undefined,
+      { keepVisible: true },
+    );
+    return { created, generatedKey: true, orgId, projectId };
+  });
+}
+
+async function existing(tx: Storage): Promise<BootstrapResult> {
+  const orgId = (await tx.config.listOrgs())[0]?.id;
+  const projectId = orgId ? (await tx.config.listProjects(orgId))[0]?.id : undefined;
+  return { created: false, ...(orgId ? { orgId } : {}), ...(projectId ? { projectId } : {}) };
+}
+
+/**
  * Self-hosted first start: with THEIRSIDE_BOOTSTRAP_API_KEY set and no org yet, create
  * the default org, a project, the API key (ingest + read) and a status page, so the
  * SDK can send data before anyone signs in. Idempotent; later starts only make sure
@@ -53,7 +101,7 @@ export async function bootstrap(
   storage: Storage,
   opts: BootstrapOptions,
 ): Promise<BootstrapResult> {
-  if (!opts.apiKey) return { created: false };
+  if (!opts.apiKey) return opts.generateKey ? generateFirstKey(storage, opts) : { created: false };
   if (!isWellFormedApiKey(opts.apiKey)) {
     throw new Error('THEIRSIDE_BOOTSTRAP_API_KEY must look like tsd_live_<at least 16 characters>');
   }

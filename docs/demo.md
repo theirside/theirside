@@ -15,8 +15,10 @@ loadgen ──▶ nestjs-demo ──(SDK, no provider list)──▶ collector �
 ## 1. Start
 
 ```sh
-docker compose -f docker/docker-compose.yml --profile demo up --build
+docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build
 ```
+
+`docker/dev.env` gives the stack a well-known API key and admin token (`tsd_live_localdemo…`, `change-me-admin-token`), so the demo app and load generator can reach the collector. Leave it out and the `demo-seed` service refuses to start, because a collector started without those values is zero-config and makes up its own key. They're public values: never use that file on a host anyone else can reach.
 
 First build takes a few minutes. When it settles:
 
@@ -101,7 +103,7 @@ docker compose -f docker/docker-compose.yml --profile demo down -v   # stop and 
 The same scenario runs as an automated acceptance check (SDK traffic, warm-up, 40% failure for 6 minutes, asserts exactly one open alert within 4 minutes naming the endpoint with "others OK", exactly one resolve, valid webhook signatures):
 
 ```sh
-docker compose -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit --exit-code-from e2e e2e
+docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile e2e up --build --abort-on-container-exit --exit-code-from e2e e2e
 ```
 
 It takes about 25 minutes, most of it waiting for the resolve.

@@ -28,9 +28,14 @@ export async function createApiKey(
   name: string,
   scopes: ApiKeyScope[],
   key = generateApiKey(),
-): Promise<{ key: string; record: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt'> }> {
+  opts: { keepVisible?: boolean } = {},
+): Promise<{
+  key: string;
+  record: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt' | 'visibleKey'>;
+}> {
   const record = { id: newId('key'), ...tenant, name, keyPrefix: keyPrefixForDisplay(key), scopes };
-  await config.createApiKey(record, hashApiKey(key));
+  // keepVisible: only the key a zero-config first start generates (bootstrap.ts)
+  await config.createApiKey(record, hashApiKey(key), opts.keepVisible ? key : undefined);
   return { key, record };
 }
 

@@ -35,6 +35,12 @@ export interface CollectorConfig {
   bootstrapOrgName: string;
   bootstrapProjectName: string;
   adminToken: string | undefined;
+  /**
+   * Self-hosted with neither THEIRSIDE_BOOTSTRAP_API_KEY nor THEIRSIDE_ADMIN_TOKEN: the first
+   * start generates the project API key and a one-time setup link (docs/security.md). With
+   * either set, first run works as it did before 0.3.2.
+   */
+  zeroConfig: boolean;
   licenseKey: string | undefined;
   /** Accept licences signed with the committed dev key (tests and local trials only). */
   allowDevLicense: boolean;
@@ -218,6 +224,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     bootstrapOrgName: env.THEIRSIDE_BOOTSTRAP_ORG_NAME || 'Default org',
     bootstrapProjectName: env.THEIRSIDE_BOOTSTRAP_PROJECT_NAME || 'Default project',
     adminToken: env.THEIRSIDE_ADMIN_TOKEN || undefined,
+    // a public status-page instance (THEIRSIDE_PUBLIC_PATHS_ONLY) never sets anything up
+    zeroConfig:
+      mode === 'self_hosted' &&
+      !bool(env, 'THEIRSIDE_PUBLIC_PATHS_ONLY', false) &&
+      !env.THEIRSIDE_BOOTSTRAP_API_KEY &&
+      !env.THEIRSIDE_ADMIN_TOKEN,
     licenseKey: env.THEIRSIDE_LICENSE_KEY || undefined,
     allowDevLicense: bool(env, 'THEIRSIDE_ALLOW_DEV_LICENSE', false),
     rawRetentionDays: int(env, 'THEIRSIDE_RAW_RETENTION_DAYS', 30, 1),

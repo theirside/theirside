@@ -229,6 +229,11 @@ export interface ApiKeyRecord extends Tenant {
   createdAt: Date;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
+  /**
+   * The full key, kept only for the key a zero-config first start generated (migration 017);
+   * null for every other key (hash only). Shown to admins, never logged.
+   */
+  visibleKey: string | null;
 }
 
 export type ProviderSource = 'configured' | 'discovered' | 'catalog';
@@ -410,9 +415,13 @@ export interface ConfigStore {
 
   // api keys
   createApiKey(
-    rec: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt'>,
+    rec: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt' | 'visibleKey'>,
     keyHash: string,
+    /** Only for the key a zero-config first start generates (see ApiKeyRecord.visibleKey). */
+    visibleKey?: string,
   ): Promise<void>;
+  /** Keys in the whole install, revoked ones included. */
+  countApiKeys(): Promise<number>;
   findApiKeyByHash(keyHash: string): Promise<ApiKeyRecord | null>;
   listApiKeys(tenant: Tenant): Promise<ApiKeyRecord[]>;
   revokeApiKey(tenant: Tenant, id: string): Promise<boolean>;

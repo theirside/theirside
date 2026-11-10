@@ -788,6 +788,7 @@ function rowToApiKey(r: Row): ApiKeyRecord {
     createdAt: r.created_at as Date,
     lastUsedAt: (r.last_used_at as Date | null) ?? null,
     revokedAt: (r.revoked_at as Date | null) ?? null,
+    visibleKey: (r.visible_key as string | null) ?? null,
   };
 }
 
@@ -944,14 +945,28 @@ class PgConfigStore implements ConfigStore {
   }
 
   async createApiKey(
-    rec: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt'>,
+    rec: Omit<ApiKeyRecord, 'createdAt' | 'lastUsedAt' | 'revokedAt' | 'visibleKey'>,
     keyHash: string,
+    visibleKey?: string,
   ) {
     await this.db.query(
-      `INSERT INTO api_keys (id, org_id, project_id, name, key_hash, key_prefix, scopes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [rec.id, rec.orgId, rec.projectId, rec.name, keyHash, rec.keyPrefix, rec.scopes],
+      `INSERT INTO api_keys (id, org_id, project_id, name, key_hash, key_prefix, scopes, visible_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        rec.id,
+        rec.orgId,
+        rec.projectId,
+        rec.name,
+        keyHash,
+        rec.keyPrefix,
+        rec.scopes,
+        visibleKey ?? null,
+      ],
     );
+  }
+  async countApiKeys() {
+    const { rows } = await this.db.query(`SELECT count(*)::int AS n FROM api_keys`);
+    return rows[0].n as number;
   }
   async findApiKeyByHash(keyHash: string) {
     const { rows } = await this.db.query(`SELECT * FROM api_keys WHERE key_hash = $1`, [keyHash]);
@@ -966,7 +981,7 @@ class PgConfigStore implements ConfigStore {
   }
   async revokeApiKey(t: Tenant, id: string) {
     const res = await this.db.query(
-      `UPDATE api_keys SET revoked_at = now() WHERE org_id = $1 AND project_id = $2 AND id = $3 AND revoked_at IS NULL`,
+      `UPDATE api_keys SET revoked_at = now(), visible_key = NULL WHERE org_id = $1 AND project_id = $2 AND id = $3 AND revoked_at IS NULL`,
       [t.orgId, t.projectId, id],
     );
     return (res.rowCount ?? 0) > 0;
