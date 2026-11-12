@@ -1,5 +1,5 @@
 import { compileRoute, type CatalogEntry } from '@theirside/shared';
-import type { ProviderRecord, Storage, Tenant } from '../../storage/types.js';
+import type { ProviderRecord, Storage, Tenant, WebhookCandidate } from '../../storage/types.js';
 import type { AlertPayload } from '../alerts/channels.js';
 import type { AlertDispatcher } from '../alerts/dispatcher.js';
 import type { Job } from '../scheduler/scheduler.js';
@@ -86,6 +86,51 @@ export function digestPayload(
   };
 }
 
+/** "POST /v1/example (suggested: example)". */
+const routeText = (c: WebhookCandidate) =>
+  `${c.method} ${c.endpoint}${c.suggestedName ? ` (suggested: ${c.suggestedName})` : ''}`;
+
+/**
+ * The one-time message for webhook routes discovered since the last one: routes that
+ * look like deliveries from a sender the SDK can't identify, to confirm or ignore on the
+ * Webhooks page. Sent with the hourly digest, at most once per route.
+ */
+export function webhookRoutesPayload(
+  routes: readonly WebhookCandidate[],
+  publicUrl: string | undefined,
+): AlertPayload {
+  const shown =
+    routes.slice(0, 10).map(routeText).join(', ') +
+    (routes.length > 10 ? `, and ${routes.length - 10} more` : '');
+  return {
+    event: 'discovery',
+    title:
+      routes.length === 1
+        ? `New webhook route discovered: ${shown}`
+        : `${routes.length} new webhook routes discovered: ${shown}`,
+    incidentId: null,
+    provider: routes.length === 1 ? (routes[0]!.suggestedName ?? 'webhooks') : 'webhooks',
+    environment: '',
+    status: 'test',
+    endpoints: [],
+    otherEndpointsOk: true,
+    otherEndpointsText:
+      'Not monitored until an admin confirms the route with the sender (link it to an existing provider or create one); ignore routes that are not webhooks. Turn these messages off in Settings → Providers.',
+    summary: routes
+      .map((c) => `${routeText(c)}${c.lastService ? `, received by ${c.lastService}` : ''}`)
+      .join('\n'),
+    url: publicUrl ? `${publicUrl}/#/webhooks` : null,
+    openedAt: null,
+    resolvedAt: null,
+    webhookRoutes: routes.map((c) => ({
+      method: c.method,
+      endpoint: c.endpoint,
+      suggestedName: c.suggestedName,
+      service: c.lastService,
+    })),
+  };
+}
+
 /**
  * Top of every hour (or the first tick after, e.g. on startup after downtime):
  * one "new providers discovered" message per project to its alert channels
@@ -124,10 +169,20 @@ export async function runDigest(
   // marking and enqueueing together: if the enqueue fails, the providers stay
   // undigested for the retry (a failed commit after it may send one twice)
   return storage.transaction(async (tx) => {
+    let sent = 0;
     const found = await tx.config.takeUndigestedProviders(tenant);
-    if (found.length === 0 || !(await tx.config.getDiscoveryDigest(tenant))) return 0;
-    await dispatcher.enqueue(tenant, digestPayload(found, publicUrl));
-    return found.length;
+    if (found.length > 0 && (await tx.config.getDiscoveryDigest(tenant))) {
+      await dispatcher.enqueue(tenant, digestPayload(found, publicUrl));
+      sent += found.length;
+    }
+    // new webhook routes: taken (marked) even when the message is off, like providers,
+    // so turning it on later doesn't announce old routes
+    const routes = await tx.inbound.takeUnnotifiedCandidates(tenant);
+    if (routes.length > 0 && (await tx.config.getWebhookRouteNotices(tenant))) {
+      await dispatcher.enqueue(tenant, webhookRoutesPayload(routes, publicUrl));
+      sent += routes.length;
+    }
+    return sent;
   });
 }
 

@@ -1330,6 +1330,20 @@ class PgConfigStore implements ConfigStore {
       [t.orgId, t.projectId, enabled],
     );
   }
+  async getWebhookRouteNotices(t: Tenant) {
+    const { rows } = await this.db.query(
+      `SELECT webhook_route_notices FROM settings WHERE org_id = $1 AND project_id = $2`,
+      [t.orgId, t.projectId],
+    );
+    return rows[0] ? Boolean(rows[0].webhook_route_notices) : true;
+  }
+  async setWebhookRouteNotices(t: Tenant, enabled: boolean) {
+    await this.db.query(
+      `INSERT INTO settings (org_id, project_id, webhook_route_notices) VALUES ($1, $2, $3)
+       ON CONFLICT (org_id, project_id) DO UPDATE SET webhook_route_notices = $3, updated_at = now()`,
+      [t.orgId, t.projectId, enabled],
+    );
+  }
   async takeUndigestedProviders(t: Tenant) {
     const { rows } = await this.db.query(
       `UPDATE providers SET digest_notified_at = now()

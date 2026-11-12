@@ -137,7 +137,16 @@ export function slackFallbackText(p: AlertPayload): string {
 }
 
 /** The hourly "new providers discovered" digest: a list, no incident fields. */
+/** The webhook-route message: one line per route ("POST /v1/x (suggested: x) · billing-api"). */
+function routeItems(p: AlertPayload, fmt: (s: string) => string): string[] {
+  return (p.webhookRoutes ?? []).map(
+    (r) =>
+      `${fmt(`${r.method} ${r.endpoint}`)}${r.suggestedName ? ` (suggested: ${r.suggestedName})` : ''}${r.service ? ` · received by ${r.service}` : ''}`,
+  );
+}
+
 function renderSlackDiscovery(p: AlertPayload): { text: string; blocks: unknown[] } {
+  if (p.webhookRoutes) return renderSlackRoutes(p);
   const items = (p.discovered ?? [])
     .slice(0, 40)
     .map(
@@ -174,6 +183,45 @@ function renderSlackDiscovery(p: AlertPayload): { text: string; blocks: unknown[
       type: 'actions',
       elements: [
         { type: 'button', text: { type: 'plain_text', text: 'Review providers' }, url: p.url },
+      ],
+    });
+  return { text: slackFallbackText(p), blocks };
+}
+
+function renderSlackRoutes(p: AlertPayload): { text: string; blocks: unknown[] } {
+  const items = routeItems(p, (s) => code(s)).slice(0, 40);
+  const more = (p.webhookRoutes?.length ?? 0) - items.length;
+  if (more > 0) items.push(`…and ${more} more`);
+  const blocks: unknown[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: cut(
+          p.webhookRoutes!.length === 1
+            ? 'New webhook route discovered'
+            : 'New webhook routes discovered',
+          SLACK_LIMITS.headerText,
+        ),
+        emoji: false,
+      },
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: cut(items.join('\n'), SLACK_LIMITS.sectionText) },
+    },
+    {
+      type: 'context',
+      elements: [
+        { type: 'mrkdwn', text: cut(slackText(p.otherEndpointsText), SLACK_LIMITS.sectionText) },
+      ],
+    },
+  ];
+  if (p.url)
+    blocks.push({
+      type: 'actions',
+      elements: [
+        { type: 'button', text: { type: 'plain_text', text: 'Review webhook routes' }, url: p.url },
       ],
     });
   return { text: slackFallbackText(p), blocks };
@@ -301,27 +349,36 @@ const html = (s: string) =>
   );
 
 function renderEmailDiscovery(p: AlertPayload): { subject: string; text: string; html: string } {
-  const items = (p.discovered ?? []).map(
-    (d) =>
-      `${d.label}${d.category ? ` (${d.category})` : ''}: ${d.hosts.slice(0, 3).join(', ')}${d.alertsEnabled ? '' : ' (alerts off)'}`,
-  );
+  const routes = !!p.webhookRoutes;
+  const heading = routes
+    ? p.webhookRoutes!.length === 1
+      ? 'New webhook route discovered'
+      : 'New webhook routes discovered'
+    : LABEL.discovery;
+  const button = routes ? 'Review webhook routes' : 'Review providers';
+  const items = routes
+    ? routeItems(p, (s) => s)
+    : (p.discovered ?? []).map(
+        (d) =>
+          `${d.label}${d.category ? ` (${d.category})` : ''}: ${d.hosts.slice(0, 3).join(', ')}${d.alertsEnabled ? '' : ' (alerts off)'}`,
+      );
   const text = [
     p.title,
     '',
     ...items.map((i) => `- ${i}`),
     '',
     p.otherEndpointsText,
-    ...(p.url ? ['', `Review providers: ${p.url}`] : []),
+    ...(p.url ? ['', `${button}: ${p.url}`] : []),
     '',
     `-- ${PRODUCT_NAME}`,
   ].join('\n');
   const body = `<!doctype html>
 <html><body style="margin:0;padding:24px;background:#f6f8fa;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2328">
 <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;padding:20px">
-<h1 style="font-size:18px;margin:0 0 14px">${html(LABEL.discovery)}</h1>
+<h1 style="font-size:18px;margin:0 0 14px">${html(heading)}</h1>
 <ul style="font-size:14px;padding-left:18px;margin:0 0 12px">${items.map((i) => `<li>${html(i)}</li>`).join('')}</ul>
 <p style="font-size:13px;color:#59636e;margin:0 0 14px">${html(p.otherEndpointsText)}</p>
-${p.url ? `<a href="${html(p.url)}" style="display:inline-block;background:#1f2328;color:#ffffff;text-decoration:none;font-size:14px;padding:8px 14px;border-radius:6px">Review providers</a>\n` : ''}</div>
+${p.url ? `<a href="${html(p.url)}" style="display:inline-block;background:#1f2328;color:#ffffff;text-decoration:none;font-size:14px;padding:8px 14px;border-radius:6px">${html(button)}</a>\n` : ''}</div>
 </body></html>`;
   return { subject: cut(`[${PRODUCT_NAME}] ${p.title}`, 200), text, html: body };
 }

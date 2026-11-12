@@ -337,6 +337,8 @@ export interface InboundStore {
   ): Promise<{ confirmed: { path: string; provider: string }[]; ignored: string[] }>;
   /** Drop day counts before `before`, and pending routes not seen since then. */
   pruneCandidates(before: Date): Promise<void>;
+  /** Pending routes not yet in a "new webhook route" notice; marks them notified. */
+  takeUnnotifiedCandidates(tenant: Tenant): Promise<WebhookCandidate[]>;
 }
 
 // ------------------------------------------------------------------ incidents
@@ -740,6 +742,9 @@ export interface ConfigStore {
   absorbProvider(tenant: Tenant, fromId: string, intoId: string): Promise<ProviderRecord | null>;
   getDiscoveryDigest(tenant: Tenant): Promise<boolean>;
   setDiscoveryDigest(tenant: Tenant, enabled: boolean): Promise<void>;
+  /** A one-time message to alert channels per newly discovered webhook route (default on). */
+  getWebhookRouteNotices(tenant: Tenant): Promise<boolean>;
+  setWebhookRouteNotices(tenant: Tenant, enabled: boolean): Promise<void>;
   /** Providers first seen and not yet in a digest; marks them notified. */
   takeUndigestedProviders(tenant: Tenant): Promise<ProviderRecord[]>;
 

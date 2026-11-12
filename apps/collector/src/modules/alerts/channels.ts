@@ -59,6 +59,13 @@ export interface AlertPayload {
     hosts: string[];
     alertsEnabled: boolean;
   }[];
+  /** event 'discovery': webhook routes discovered since the last message (instead of providers). */
+  webhookRoutes?: {
+    method: string;
+    endpoint: string;
+    suggestedName: string | null;
+    service: string | null;
+  }[];
   /** rate/latency doubled, another endpoint joined (spread), or a stronger kind took over (kind). */
   escalation?: 'rate' | 'latency' | 'spread' | 'kind';
   /** Inbound only: what the webhook alert is based on. */
