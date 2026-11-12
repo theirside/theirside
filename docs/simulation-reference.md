@@ -103,6 +103,14 @@ markedExpected: [400]
 | `id` | Source id for faults and expectations. | "<provider> webhooks <route>" |
 | `traffic` | How many deliveries, when (see Traffic patterns). |  |
 | `normal` | Normal rejection, handling and lag levels (see Normal levels, webhooks). |  |
+| `discovery` | A sender the SDK does not know yet: its deliveries go through the SDK’s webhook discovery rules with this request shape and become a candidate route; the source is monitored (as `provider`) only from `confirm`, as when an admin confirms the route in the dashboard. `method` (POST or PUT), `headers` (as the sender sends them: CloudEvents `ce-*`, signature headers, `host`), `confirm` (a time; absent: it stays a candidate). The candidate route is the `route` as written. |  |
+
+```yaml
+# discovery
+discovery:
+  headers: { ce-specversion: '1.0', ce-source: com.orbitpay, x-hmac-signature-sha-256: x }
+  confirm: day 1 10:00
+```
 
 <a id="patterns"></a>
 
@@ -258,7 +266,9 @@ Checked live on the page and at the end of `pnpm sim:run` (exit 1 when one fails
 | `from` | quiet: window start. |  |
 | `to` | quiet: window end. |  |
 | `irregular` | Webhook source `target` must be marked irregular (silence alerts off) by `by`. |  |
-| `by` | irregular: the latest time. |  |
+| `by` | irregular / discovered: the latest time. |  |
+| `discovered` | Webhook source `target` (one with `discovery`) must be a candidate route by `by`, with the suggested `name` if given. |  |
+| `name` | discovered: the name the SDK should suggest. |  |
 
 ```yaml
 # incident
@@ -270,6 +280,9 @@ expect:
 # irregular
 expect:
   - irregular: { target: NotifyCo webhooks /webhooks/notifyco, by: day 6 }
+# discovered
+expect:
+  - discovered: { target: OrbitPay webhooks /v1/orbitpay, by: day 0 01:00, name: orbitpay }
 ```
 
 <a id="kinds"></a>

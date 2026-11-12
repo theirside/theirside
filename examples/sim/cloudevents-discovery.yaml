@@ -1,0 +1,42 @@
+name: cloudevents-discovery
+description: >-
+  Webhook discovery: a sender posts CloudEvents (binary mode) with an HMAC signature header
+  to a custom route, /v1/orbitpay, on a webhook host. The SDK doesn't know it, so the route
+  must be discovered as a candidate named after ce-source, then monitored once an admin
+  confirms it: our app answering 500 to every delivery must alert.
+start: 2026-01-05T00:00:00Z
+duration: 2d
+seed: 1
+webhooks:
+  - provider: OrbitPay
+    route: /v1/orbitpay
+    traffic: { pattern: steady, rate: 3 }
+    discovery:
+      method: POST
+      headers:
+        host: webhook.shop.test
+        content-type: application/json
+        ce-specversion: '1.0'
+        ce-id: evt-1
+        ce-source: com.orbitpay
+        ce-type: com.orbitpay.payment.settled
+        ce-time: '2026-01-05T00:00:00Z'
+        x-hmac-signature-sha-256: not-a-real-signature
+      confirm: day 0 06:00
+faults:
+  - id: handler-broken
+    target: OrbitPay webhooks /v1/orbitpay
+    at: day 1 10:00
+    duration: 30m
+    type: rejected
+    size: 1
+expect:
+  - discovered: { target: OrbitPay webhooks /v1/orbitpay, by: day 0 00:10, name: orbitpay }
+  - incident:
+      {
+        kind: webhook_rejections,
+        target: OrbitPay webhooks /v1/orbitpay,
+        fault: handler-broken,
+        within: 10m,
+      }
+  - quiet: { from: day 0 06:00, to: day 1 10:00 }

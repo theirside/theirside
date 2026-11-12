@@ -156,6 +156,19 @@ export interface ResolvedConfig {
   inboundOptIn: boolean;
   /** Webhook discovery: candidate routes are reported (`webhookDiscovery !== false`). */
   webhookDiscovery: boolean;
+  /** THEIRSIDE_DEBUG=inbound: log what became of each incoming request, and why. */
+  debugInbound: boolean;
+}
+
+/** `THEIRSIDE_DEBUG` (comma-separated topics) holds `topic`; false where there is no process env. */
+export function debugTopic(topic: string): boolean {
+  try {
+    const v = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+      ?.env?.THEIRSIDE_DEBUG;
+    return typeof v === 'string' && v.split(/[,\s]+/).some((t) => t.trim().toLowerCase() === topic);
+  } catch {
+    return false;
+  }
 }
 
 function clampInt(v: unknown, min: number, max: number, dflt: number): number {
@@ -242,6 +255,7 @@ export function resolveConfig(
     webhooksEnabled: opts.webhooks !== false,
     inboundOptIn: opts.inbound === true,
     webhookDiscovery: opts.webhookDiscovery !== false,
+    debugInbound: debugTopic('inbound'),
     webhookRoutes: (Array.isArray(opts.webhooks) ? opts.webhooks : [])
       .filter(
         (w) => !!w && typeof w.path === 'string' && w.path !== '' && typeof w.provider === 'string',

@@ -28,9 +28,9 @@ End-to-end loopback latency (10,000 calls each; context only, dominated by loopb
 
 ### Incoming requests (webhook check)
 
-Every request the app serves passes the inbound webhook check (`http.server.request.start`). Script: `pnpm --filter @theirside/sdk bench:inbound` (`packages/sdk/bench/inbound.ts`): `InboundRecorder.begin` for an ordinary API GET and POST with eight typical headers, and begin + end for a Stripe delivery (detection, timestamp parse, templating, queueing). A POST or PUT also goes through webhook discovery: a regex pre-check of the path for route words, and a scan of the header names for a generic signature header. Not included: the diagnostics channel dispatch itself, and the response's emit wrapper for a delivery (a closure call per event).
+Every request the app serves passes the inbound webhook check (`http.server.request.start`). Script: `pnpm --filter @theirside/sdk bench:inbound` (`packages/sdk/bench/inbound.ts`): `InboundRecorder.begin` for an ordinary API GET and POST with eight typical headers, and begin + end for a Stripe delivery (detection, timestamp parse, templating, queueing). A POST or PUT also goes through webhook discovery: a regex pre-check of the path for route words, a scan of the header names for a signature or HMAC header, the CloudEvents headers, and the `content-type` and `host` values. Not included: the diagnostics channel dispatch itself, and the response's emit wrapper for a delivery (a closure call per event).
 
-2026-11-10, Node v24.13.0, macOS x64 (with webhook discovery): **0.59 µs** per ordinary GET (only header names are checked), **0.80 µs** per ordinary POST, **1.68 µs** per webhook delivery. Before webhook discovery the ordinary request was 0.46 µs. All far under the 100 µs target.
+2026-11-10, Node v24.13.0, macOS x64 (with webhook discovery): **0.59 µs** per ordinary GET (only header names are checked), **0.80 µs** per ordinary POST, **1.68 µs** per webhook delivery. Before webhook discovery the ordinary request was 0.46 µs. 2026-11-12, with the wider discovery rules (signature or HMAC names, CloudEvents, webhook hosts, version-path names): **0.53 µs** per ordinary GET, **1.53 µs** per ordinary POST (0.77 µs before them), **1.71 µs** per webhook delivery. All far under the 100 µs target.
 
 ## SDK memory soak
 

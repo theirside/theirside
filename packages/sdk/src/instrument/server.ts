@@ -57,7 +57,7 @@ export class ServerInstrumentation {
   }
 
   handleStart(message: unknown): void {
-    if (!this.inbound.active) return;
+    if (!this.inbound.active && !this.inbound.trace) return;
     safely(this.log, 'webhook start', () => {
       const m = message as { request?: http.IncomingMessage; response?: http.ServerResponse };
       const req = m?.request;

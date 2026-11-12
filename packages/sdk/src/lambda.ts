@@ -43,6 +43,10 @@ function headerLookup(event: Obj): Pick<LambdaHttpRequest, 'has' | 'get' | 'anyN
     if (!from) continue;
     for (const key of Object.keys(from)) names.set(key.toLowerCase(), { from, key });
   }
+  // payload 2.0 moves the Cookie header to `cookies`: the request still carried one, so
+  // the rules see the same request as on a Node server (presence only, never a value)
+  if (!names.has('cookie') && Array.isArray(event.cookies) && event.cookies.length > 0)
+    names.set('cookie', { from: { cookie: '' }, key: 'cookie' });
   return {
     anyName: (test) => {
       for (const name of names.keys()) if (test(name)) return true;

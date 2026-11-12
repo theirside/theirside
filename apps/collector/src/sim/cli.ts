@@ -136,9 +136,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
           ? color(33, 'FAULT ')
           : e.type === 'alert'
             ? color(36, 'ALERT ')
-            : e.type === 'resolved'
-              ? color(32, 'OK    ')
-              : color(31, 'INCID ');
+            : e.type === 'discovery'
+              ? color(36, 'FOUND ')
+              : e.type === 'resolved'
+                ? color(32, 'OK    ')
+                : color(31, 'INCID ');
       console.log(`${formatTime(e.at, start).padEnd(14)} ${tag} ${e.text}`);
     },
   });

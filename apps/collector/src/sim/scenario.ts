@@ -155,12 +155,27 @@ export const providerSchema = z.object({
   endpoints: z.array(endpointSchema).min(1),
 });
 
+/**
+ * A webhook source the SDK doesn't know yet (webhook discovery): each minute's deliveries
+ * go through the SDK's own discovery rules (`classifyWebhookCandidate`) with this request
+ * shape; a candidate is stored like one reported at ingest, and the source is monitored
+ * (as `provider`) only once confirmed at `confirm` (as an admin does in the dashboard).
+ */
+export const discoverySchema = z.object({
+  method: z.enum(['POST', 'PUT']).default('POST'),
+  /** Request headers as the sender sends them (names and values: CloudEvents, signature, host). */
+  headers: z.record(z.string(), z.string()).default({}),
+  /** When the route is confirmed in the dashboard (absent: never; it stays a candidate). */
+  confirm: time.optional(),
+});
+
 export const webhookSchema = z.object({
   id: z.string().min(1).optional(),
   provider: z.string().min(1).max(64),
   route: z.string().startsWith('/'),
   traffic: trafficSchema,
   normal: inboundNormalSchema.default({}),
+  discovery: discoverySchema.optional(),
 });
 
 export const faultSchema = z.object({
@@ -196,6 +211,15 @@ export const expectSchema = z.union([
   }),
   z.object({
     irregular: z.object({ target: z.string(), by: time }),
+  }),
+  z.object({
+    discovered: z.object({
+      /** A webhook source with `discovery`. */
+      target: z.string(),
+      by: time,
+      /** The name the SDK should suggest. */
+      name: z.string().optional(),
+    }),
   }),
 ]);
 
@@ -247,6 +271,7 @@ export interface InboundSource {
   endpoint: string;
   traffic: Traffic;
   normal: z.infer<typeof inboundNormalSchema>;
+  discovery?: z.infer<typeof discoverySchema>;
 }
 export type Source = OutboundSource | InboundSource;
 
@@ -278,6 +303,7 @@ export function sourcesOf(s: Scenario): Source[] {
       endpoint: w.route,
       traffic: w.traffic,
       normal: w.normal,
+      ...(w.discovery ? { discovery: w.discovery } : {}),
     });
   return out;
 }
@@ -343,13 +369,21 @@ export function validateScenario(input: unknown): {
       parseTime(e.quiet.to, start);
       if (e.quiet.target && !findSource(scenario, e.quiet.target))
         throw new Error(`expect: no source "${e.quiet.target}"`);
-    } else {
+    } else if ('irregular' in e) {
       const src = findSource(scenario, e.irregular.target);
       if (!src || src.kind !== 'inbound')
         throw new Error(`expect: "${e.irregular.target}" is not a webhook source`);
       parseTime(e.irregular.by, start);
+    } else {
+      const src = findSource(scenario, e.discovered.target);
+      if (!src || src.kind !== 'inbound' || !src.discovery)
+        throw new Error(`expect: "${e.discovered.target}" is not a webhook source with discovery`);
+      parseTime(e.discovered.by, start);
     }
   }
+  for (const src of sourcesOf(scenario))
+    if (src.kind === 'inbound' && src.discovery?.confirm !== undefined)
+      parseTime(src.discovery.confirm, start);
   return { scenario, start, end, faults };
 }
 
