@@ -20,6 +20,7 @@ import type {
 import { floorMinute, utcDay } from '../util/clock.js';
 import type { SimClock, Speed } from './clock.js';
 import { Arrivals, InboundGenerator, OutboundGenerator, activeFaults } from './generate.js';
+import { isExpectable } from '../modules/scoring/expected.js';
 import { resetSimDatabase } from './guard.js';
 import { seedOf } from './random.js';
 import {
@@ -248,6 +249,20 @@ export class SimEngine {
       hosts,
       new Date(this.start),
     );
+    // statuses marked expected from the dashboard, per endpoint (as the provider row stores them)
+    const marks = new Map<string, Record<string, number[]>>();
+    for (const src of sourcesOf(s))
+      if (src.kind === 'outbound' && src.markedExpected?.length) {
+        const m = marks.get(src.provider) ?? {};
+        m[`${src.method} ${src.endpoint}`] = src.markedExpected.filter(isExpectable);
+        marks.set(src.provider, m);
+      }
+    if (marks.size === 0) return;
+    for (const p of await this.deps.storage.config.listProviders(this.tenant!)) {
+      const m = marks.get(p.name);
+      if (m)
+        await this.deps.storage.config.updateProvider(this.tenant!, p.id, { expectedStatuses: m });
+    }
   }
 
   // ---------------------------------------------------------------- traffic

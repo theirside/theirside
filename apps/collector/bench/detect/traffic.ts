@@ -269,6 +269,12 @@ export class OutboundTraffic {
         add(400, 'http_4xx', r.lognormal(60, 0.3));
         continue;
       }
+      // an outage answers nothing, business answers included
+      if (fault === 'outage') {
+        if (r.next() < 0.3) add(null, 'timeout', r.uniform(10000, 30000));
+        else add(503, 'http_5xx', r.lognormal(40, 0.3));
+        continue;
+      }
       if (expectedShare > 0 && r.next() < expectedShare) {
         // a business answer: tagged in code (successful) or a plain 400
         const ms = r.lognormal(150, 0.5);
@@ -278,11 +284,6 @@ export class OutboundTraffic {
           h[bucketIndex(ms)]!++;
           sum += ms;
         } else add(400, 'http_4xx', ms);
-        continue;
-      }
-      if (fault === 'outage') {
-        if (r.next() < 0.3) add(null, 'timeout', r.uniform(10000, 30000));
-        else add(503, 'http_5xx', r.lognormal(40, 0.3));
         continue;
       }
       if (fault === 'auth') {

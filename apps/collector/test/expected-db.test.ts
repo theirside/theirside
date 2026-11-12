@@ -179,7 +179,7 @@ describe('marked from the dashboard', () => {
   });
 
   it('a higher share of 400 stays quiet; the overview lists the mark', async () => {
-    await run(15, (m) => minute(m, '/v1/consent', 30)); // 75% < max(80%, 4 × 20%)
+    await run(15, (m) => minute(m, '/v1/consent', 30)); // 75% < max(80%, 20% + 80% / 2 = 60%)
     expect((await incidents('/v1/consent')).filter((i) => i.status === 'open')).toEqual([]);
     const o = await t.app.inject({
       method: 'GET',
@@ -192,10 +192,11 @@ describe('marked from the dashboard', () => {
     expect(ep).toMatchObject({ expectedStatuses: [400], rate4xx: 0, status: 'green' });
   });
 
-  it('the safety net: 400 taking over opens a behaviour incident after 10 minutes', async () => {
+  it('the safety net: 400 taking over opens a behaviour incident after about 10 minutes', async () => {
     await run(8, (m) => minute(m, '/v1/consent', 40)); // every call
     expect((await incidents('/v1/consent')).filter((i) => i.status === 'open')).toEqual([]);
-    await run(3, (m) => minute(m, '/v1/consent', 40));
+    // the windows must clear the limit with confidence, then hold 10 minutes: open at minute 12
+    await run(4, (m) => minute(m, '/v1/consent', 40));
     const open = (await incidents('/v1/consent')).filter((i) => i.status === 'open');
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({ kind: 'behaviour' });

@@ -142,6 +142,11 @@ export const endpointSchema = z.object({
   path: z.string().startsWith('/'),
   traffic: trafficSchema,
   normal: outboundNormalSchema.default({}),
+  /**
+   * Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409,
+   * 422): counted as successful when scoring, with the safety net. Set from the start.
+   */
+  markedExpected: z.array(z.number().int()).optional(),
 });
 
 export const providerSchema = z.object({
@@ -233,6 +238,7 @@ export interface OutboundSource {
   endpoint: string;
   traffic: Traffic;
   normal: z.infer<typeof outboundNormalSchema>;
+  markedExpected?: number[];
 }
 export interface InboundSource {
   kind: 'inbound';
@@ -262,6 +268,7 @@ export function sourcesOf(s: Scenario): Source[] {
         endpoint: e.path,
         traffic: e.traffic,
         normal: e.normal,
+        ...(e.markedExpected ? { markedExpected: e.markedExpected } : {}),
       });
   for (const w of s.webhooks)
     out.push({

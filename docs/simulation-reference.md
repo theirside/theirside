@@ -85,6 +85,12 @@ history: { mode: seeded, days: 8 }
 | `path` | Path template, e.g. /v1/charges/:id. |  |
 | `traffic` | How many calls, when (see Traffic patterns). |  |
 | `normal` | Normal error and latency levels (see Normal levels, outgoing). |  |
+| `markedExpected` | Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409, 422): counted as successful, with the safety net. Pair with `normal.expected` and `expectedTagged: false`. |  |
+
+```yaml
+# markedExpected
+markedExpected: [400]
+```
 
 <a id="webhooks"></a>
 

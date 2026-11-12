@@ -1,6 +1,7 @@
 import { emptyStatusCounts, type StatusCounts } from '@theirside/shared';
 import type { ProviderRecord, RollupKey } from '../../storage/types.js';
 import type { RollupCounts } from './evaluate.js';
+import type { Thresholds } from './thresholds.js';
 
 /**
  * Expected outcomes marked from the dashboard (docs/scoring.md "Expected outcomes"):
@@ -80,17 +81,17 @@ export function applyExpected<T extends RollupCounts>(
 }
 
 /**
- * Safety net: a marked status whose share of calls exceeds max(80%, 4 × its normal share)
- * for this many minutes in a row opens a behaviour incident anyway ("400 (marked
- * expected) now 95% of calls, normally 10%"): everything answering 400 is not a business
- * answer any more.
+ * Safety net: a marked status whose share of calls exceeds max(80%, normal + (100% −
+ * normal) / 2) for this many minutes in a row opens a behaviour incident anyway ("400
+ * (marked expected) now 95% of calls, normally 10%"): everything answering 400 is not a
+ * business answer any more. Halfway from the normal share to 100% keeps the limit
+ * reachable for any normal share (30% → 80%, 85% → 92.5%); it is never below 80%.
  */
 export const EXPECTED_SURGE_MINUTES = 10;
 export const EXPECTED_SURGE_MIN_SHARE = 0.8;
-export const EXPECTED_SURGE_FACTOR = 4;
 
 export const surgeLimit = (normalShare: number) =>
-  Math.max(EXPECTED_SURGE_MIN_SHARE, EXPECTED_SURGE_FACTOR * normalShare);
+  Math.max(EXPECTED_SURGE_MIN_SHARE, normalShare + (1 - normalShare) / 2);
 
 /** A marked status over its limit in one window. */
 export interface ExpectedSurge {
@@ -101,15 +102,30 @@ export interface ExpectedSurge {
   normalShare: number;
 }
 
+/** z of the one-sided 99.9% bound the share must clear the limit by (`surgeIn`). */
+export const EXPECTED_SURGE_Z = 3.09;
+
+/** Wilson score lower bound of a share x / n. */
+export function shareLowerBound(x: number, n: number, z = EXPECTED_SURGE_Z): number {
+  if (n <= 0) return 0;
+  const p = x / n;
+  const z2 = z * z;
+  return (p + z2 / (2 * n) - z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / (1 + z2 / n);
+}
+
 /**
- * The marked status most over its limit in this window, or null. Needs enough calls
- * (`minCalls`) and at least `minErrors` of them with the status, like every other rule.
+ * The marked status most over its limit in this window, or null. The share must be
+ * above the limit with confidence: its 99.9% lower bound clears it, so a share that
+ * drifts close to the limit, or a few calls that happen to all be 400, don't trip it.
+ * It also needs enough calls (`minCalls`) and `minErrors` answers with the status, like
+ * every other rule, and the status's normal share learned (`normal` has it): before,
+ * it isn't known what "taken over" means for the endpoint.
  */
 export function surgeIn(
   stats: { calls: number; marked?: StatusCounts },
   statuses: readonly ExpectableStatus[],
   normal: Partial<Record<string, number>> | undefined,
-  t: { minCalls: number; minErrors: number },
+  t: Pick<Thresholds, 'minCalls' | 'minErrors'>,
 ): ExpectedSurge | null {
   if (statuses.length === 0 || !stats.marked || stats.calls < t.minCalls) return null;
   let best: ExpectedSurge | null = null;
@@ -117,8 +133,9 @@ export function surgeIn(
     const count = stats.marked[KEY_OF[status]] ?? 0;
     if (count < t.minErrors) continue;
     const share = count / stats.calls;
-    const normalShare = normal?.[String(status)] ?? 0;
-    if (share <= surgeLimit(normalShare)) continue;
+    const normalShare = normal?.[String(status)];
+    if (normalShare === undefined) continue;
+    if (shareLowerBound(count, stats.calls) <= surgeLimit(normalShare)) continue;
     if (!best || share - surgeLimit(normalShare) > best.share - surgeLimit(best.normalShare))
       best = { status, count, share, normalShare };
   }

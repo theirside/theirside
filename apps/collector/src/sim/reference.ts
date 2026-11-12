@@ -251,6 +251,12 @@ export const REFERENCE: RefSection[] = [
       { key: 'path', summary: 'Path template, e.g. /v1/charges/:id.' },
       { key: 'traffic', summary: 'How many calls, when (see Traffic patterns).' },
       { key: 'normal', summary: 'Normal error and latency levels (see Normal levels, outgoing).' },
+      {
+        key: 'markedExpected',
+        summary:
+          'Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409, 422): counted as successful, with the safety net. Pair with `normal.expected` and `expectedTagged: false`.',
+        example: 'markedExpected: [400]',
+      },
     ],
   },
   {

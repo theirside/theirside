@@ -11,11 +11,15 @@ import { Badge, Button, Callout, ErrorBox } from '../components/ui';
 /** The statuses rollups count one by one: the only ones the dashboard can mark. */
 export const EXPECTABLE_STATUSES = [400, 401, 403, 404, 409, 422] as const;
 
-/** Statuses a status-class incident is about (its kind), most common first. */
+/**
+ * Statuses an incident of this kind may be about, most common first. A behaviour change
+ * (e.g. while an endpoint's per-status mix is still being learned) may be any of them.
+ */
 export const STATUSES_OF_KIND: Record<string, number[]> = {
   validation: [400, 422, 409],
   auth: [401, 403],
   not_found: [404],
+  behaviour: [...EXPECTABLE_STATUSES],
 };
 
 export interface MarkResult {
@@ -43,7 +47,7 @@ export function ExpectedNote() {
       than marking in code (<code>markExpected('reason')</code> in the SDK), which tags only the
       answers your code read as normal, so a provider that starts answering it to everything still
       alerts. Here a safety net opens an incident when the status takes over (above 80% of calls, or
-      4× its normal share, for 10 minutes).
+      halfway from its normal share to every call if that is higher, for 10 minutes).
     </p>
   );
 }

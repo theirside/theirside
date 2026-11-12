@@ -87,8 +87,10 @@ export function Incident({ id, markExpected = false }: { id: string; markExpecte
   );
   // a status-class incident: the status may be a normal answer for the endpoint
   const statuses = inc ? STATUSES_OF_KIND[inc.kind] : undefined;
+  // not for the safety net's own incidents: that status is already marked and has taken over
+  const surge = inc?.summary.includes('(marked expected)') ?? false;
   const markable =
-    inc && statuses && inc.status === 'open' && inc.direction !== 'inbound'
+    inc && statuses && !surge && inc.status === 'open' && inc.direction !== 'inbound'
       ? inc.endpoints.filter((e) => !e.recoveredAt)
       : [];
   return (

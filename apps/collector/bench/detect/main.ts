@@ -52,16 +52,32 @@ import {
  * outbound / inbound: one endpoint or webhook source. expected / marked: a consent-style
  * endpoint whose 400s are often normal business answers (docs/scoring.md "Expected
  * outcomes"): tagged in code (10–40% of calls, counted as successful), or plain 400s
- * marked expected from the dashboard (5–15% of calls: the safety net's limit is
- * max(80%, 4 × normal), which only a share under 25% can exceed).
+ * marked expected from the dashboard, normally ~10%, ~30% or ~85% of calls (the safety
+ * net's limit, max(80%, normal + (100% − normal) / 2), is 80%, 80% and 92.5%).
  */
-type Direction = 'outbound' | 'inbound' | 'expected' | 'marked';
-const DIRECTIONS: readonly Direction[] = ['outbound', 'inbound', 'expected', 'marked'];
+type Direction = 'outbound' | 'inbound' | 'expected' | 'marked' | 'marked30' | 'marked85';
+const DIRECTIONS: readonly Direction[] = [
+  'outbound',
+  'inbound',
+  'expected',
+  'marked',
+  'marked30',
+  'marked85',
+];
+/** Share of calls answering 400 as a business answer, drifting hour by hour inside the range. */
+const EXPECTED_RANGE: Partial<Record<Direction, { range: [number, number]; tagged: boolean }>> = {
+  expected: { range: [0.1, 0.4], tagged: true },
+  marked: { range: [0.05, 0.15], tagged: false },
+  marked30: { range: [0.25, 0.35], tagged: false },
+  marked85: { range: [0.8, 0.9], tagged: false },
+};
 const DIRECTION_LABEL: Record<Direction, string> = {
   outbound: 'Outgoing calls',
   inbound: 'Incoming webhooks',
   expected: 'Expected outcomes tagged in code (10–40% of calls answer 400, tagged)',
   marked: 'Expected outcomes marked from the dashboard (5–15% of calls answer 400, 400 marked)',
+  marked30: 'Expected outcomes marked from the dashboard (25–35% of calls answer 400, 400 marked)',
+  marked85: 'Expected outcomes marked from the dashboard (80–90% of calls answer 400, 400 marked)',
 };
 /** Profiles each direction runs (expected outcomes: the volumes where their rules apply). */
 const PROFILES_OF: Record<Direction, readonly ProfileName[]> = {
@@ -69,12 +85,16 @@ const PROFILES_OF: Record<Direction, readonly ProfileName[]> = {
   inbound: PROFILES,
   expected: ['steady', 'medium', 'bursts'],
   marked: ['steady', 'medium', 'bursts'],
+  marked30: ['steady', 'medium', 'bursts'],
+  marked85: ['steady', 'medium', 'bursts'],
 };
 const FAULTS_OF: Record<Direction, readonly Fault[]> = {
   outbound: OUTBOUND_FAULTS,
   inbound: INBOUND_FAULTS,
   expected: EXPECTED_FAULTS,
   marked: EXPECTED_FAULTS,
+  marked30: EXPECTED_FAULTS,
+  marked85: EXPECTED_FAULTS,
 };
 
 /**
@@ -120,6 +140,22 @@ const EXPECTED: Record<Direction, Record<ProfileName, Partial<Record<Fault, numb
     rare: {},
     bursty: {},
   },
+  marked30: {
+    steady: { contract400: 16, outage: 5 },
+    medium: { contract400: 30, outage: 10 },
+    low: {},
+    bursts: { contract400: 16, outage: 5 },
+    rare: {},
+    bursty: {},
+  },
+  marked85: {
+    steady: { contract400: 16, outage: 5 },
+    medium: { contract400: 30, outage: 10 },
+    low: {},
+    bursts: { contract400: 16, outage: 5 },
+    rare: {},
+    bursty: {},
+  },
 };
 
 /**
@@ -129,6 +165,10 @@ const EXPECTED: Record<Direction, Record<ProfileName, Partial<Record<Fault, numb
  */
 const NOT_RELIABLE: readonly [Direction, ProfileName, Fault][] = [
   ['outbound', 'bursty', 'errors10'],
+  // a status normally ~85% of calls: telling "every call answers 400" from "90% do" with
+  // confidence takes ~60 calls in a window, more than a 30-minute change brings at ~4/min
+  // (decided 2026-11-12, docs/benchmarks.md)
+  ['marked85', 'medium', 'contract400'],
 ];
 
 /** The `--ci` preset's cells (direction, profile, scenario): one per rule family and volume. */
@@ -147,6 +187,9 @@ const CI_CELLS: readonly [Direction, ProfileName, Fault | 'no fault'][] = [
   ['expected', 'steady', 'contract400'],
   ['marked', 'steady', 'no fault'],
   ['marked', 'steady', 'contract400'],
+  ['marked30', 'steady', 'contract400'],
+  ['marked85', 'steady', 'no fault'],
+  ['marked85', 'steady', 'contract400'],
 ];
 
 /** Silence is judged after 21 days of history (`silenceMinHistoryDays`): its faults warm up longer. */
@@ -321,17 +364,13 @@ async function run(
     mem.tenant,
     outKey,
     seedOf(s, 'traffic'),
-    direction === 'expected'
-      ? { range: [0.1, 0.4], tagged: true }
-      : direction === 'marked'
-        ? { range: [0.05, 0.15], tagged: false }
-        : undefined,
+    EXPECTED_RANGE[direction],
   );
   const inb = new InboundTraffic(inKey, seedOf(s, 'traffic'));
   if (outbound) mem.addOutbound(outKey);
   else mem.addInbound(inKey);
   // marked: 400 is an expected answer of the endpoint (a provider row, as the dashboard stores it)
-  if (direction === 'marked')
+  if (EXPECTED_RANGE[direction]?.tagged === false)
     mem.providers = [
       {
         name: outKey.provider,

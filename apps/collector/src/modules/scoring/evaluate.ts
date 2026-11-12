@@ -529,7 +529,7 @@ export function evaluateAt(
   let surge: ExpectedSurge | null = null;
   for (let j = 0; j < span; j++) {
     const s = sums.window(end - j * MINUTE, windows[0]!);
-    const hit = surgeIn(s, marked, b.model?.expected, t);
+    const hit = b.learning ? null : surgeIn(s, marked, b.model?.expected, t);
     if (!hit) return result;
     if (j === 0) surge = hit;
   }

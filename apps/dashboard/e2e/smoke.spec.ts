@@ -513,3 +513,84 @@ test('design gallery: open without sign-in, every token and component in both th
     await testInfo.attach(name, { path, contentType: 'image/png' });
   }
 });
+
+/**
+ * Expected outcomes from the dashboard: a provider endpoint starts answering 404 (the chaos
+ * provider), a not_found incident opens, "Mark 404 as expected" on the incident page
+ * resolves it with a note, and the mark is taken off again from the endpoint row. Needs the
+ * demo stack's chaos provider (CHAOS_URL, default http://localhost:4010); takes a few
+ * minutes for the incident to open.
+ */
+const CHAOS_URL = process.env.CHAOS_URL ?? 'http://localhost:4010';
+const MARK_PROVIDER = 'acmecards.test';
+const MARK_ENDPOINT = '/v2/cards/:id/activate';
+
+test('expected outcomes: mark a status as expected from an incident, then unmark it', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(15 * 60_000);
+  const rule = await (
+    await request.post(`${CHAOS_URL}/__chaos/rules`, {
+      data: {
+        path: MARK_ENDPOINT,
+        method: 'POST',
+        errorRate: 0.6,
+        errorStatus: 404,
+        durationSeconds: 900,
+      },
+    })
+  ).json();
+  try {
+    // the incident: not_found, or behaviour on a fresh demo stack (its seeded history has no
+    // per-status counts, so for a day every unsuccessful call is judged as one class)
+    let incidentId: string | undefined;
+    for (let i = 0; i < 80 && !incidentId; i++) {
+      const { incidents } = await (
+        await request.get(`/v1/admin/incidents?status=open&provider=${MARK_PROVIDER}`, {
+          headers: auth,
+        })
+      ).json();
+      incidentId = incidents.find(
+        (x: { kind: string; endpoints: { endpoint: string }[] }) =>
+          (x.kind === 'not_found' || x.kind === 'behaviour') &&
+          x.endpoints.some((e) => e.endpoint === MARK_ENDPOINT),
+      )?.id;
+      if (!incidentId) await new Promise((r) => setTimeout(r, 10_000));
+    }
+    expect(incidentId, 'an incident opened on the 404s').toBeTruthy();
+
+    await signIn(page, request);
+    // the alerts' "Mark as expected" link opens the incident with the panel highlighted
+    await page.goto(`/#/incidents/${incidentId}/expected`);
+    const panel = page.getByTestId('incident-mark-expected');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('less precise than marking in code');
+    // a behaviour incident offers every markable status: pick 404
+    const status = panel.getByLabel('Status');
+    if (await status.count()) await status.selectOption('404');
+    await panel
+      .getByRole('button', { name: `Mark 404 as expected for POST ${MARK_ENDPOINT}` })
+      .click();
+    await expect(page.getByTestId('mark-expected-done')).toContainText(
+      'the open incident was resolved',
+    );
+    await page.reload();
+    await expect(page.getByTestId('resolution-note')).toContainText(
+      `Resolved: 404 marked as an expected answer for POST ${MARK_ENDPOINT}`,
+    );
+    await expect(page.getByText('resolved', { exact: true }).first()).toBeVisible();
+  } finally {
+    await request.delete(`${CHAOS_URL}/__chaos/rules/${rule.id}`);
+  }
+
+  // unmark it from the endpoint row
+  await page.goto(`/#/providers/${MARK_PROVIDER}`);
+  const row = page.getByTestId('endpoints').getByRole('row', { name: new RegExp(MARK_ENDPOINT) });
+  await expect(row.getByText('404 expected')).toBeVisible();
+  await row.getByRole('button', { name: 'Unmark' }).click();
+  await expect(row.getByText('404 expected')).toHaveCount(0);
+  const providers = (await (await request.get('/v1/admin/providers', { headers: auth })).json())
+    .providers as { name: string; expectedStatuses?: Record<string, number[]> }[];
+  expect(providers.find((p) => p.name === MARK_PROVIDER)?.expectedStatuses ?? {}).toEqual({});
+});

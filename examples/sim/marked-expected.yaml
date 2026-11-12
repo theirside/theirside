@@ -1,0 +1,53 @@
+name: marked-expected
+description: >-
+  Expected outcomes marked from the dashboard: two consent endpoints whose 400s are normal
+  answers, normally ~30% and ~85% of calls, with 400 marked expected for each. Their everyday
+  variation stays quiet; a contract change that makes every call answer 400 must still alert
+  (the safety net: above max(80%, halfway from the normal share to 100%) for 10 minutes).
+  Starts with 8 days of seeded history, so the normal shares are learned.
+start: 2026-01-05T00:00:00Z
+duration: 3d
+seed: 1
+history: { mode: seeded, days: 8 }
+providers:
+  - name: ConsentCo
+    host: api.consentco.test
+    endpoints:
+      - method: GET
+        path: /v1/consent
+        traffic: { pattern: daily, rate: 50 }
+        normal: { expected: [0.25, 0.35], expectedTagged: false, latencyMs: 90 }
+        markedExpected: [400]
+      - method: GET
+        path: /v1/consent/status
+        traffic: { pattern: daily, rate: 50 }
+        normal: { expected: [0.8, 0.9], expectedTagged: false, latencyMs: 80 }
+        markedExpected: [400]
+faults:
+  - id: contract-change-30
+    target: ConsentCo GET /v1/consent
+    at: day 1 10:00
+    duration: 45m
+    type: validation
+    status: 400
+    size: 1
+  - id: contract-change-85
+    target: ConsentCo GET /v1/consent/status
+    at: day 2 10:00
+    duration: 45m
+    type: validation
+    status: 400
+    size: 1
+expect:
+  - incident:
+      { kind: behaviour, target: ConsentCo GET /v1/consent, fault: contract-change-30, within: 20m }
+  - incident:
+      {
+        kind: behaviour,
+        target: ConsentCo GET /v1/consent/status,
+        fault: contract-change-85,
+        within: 20m,
+      }
+  - quiet: { from: day 0 00:00, to: day 1 10:00 }
+  - quiet: { from: day 1 12:00, to: day 2 10:00 }
+  - quiet: { from: day 2 12:00, to: day 3 00:00 }
