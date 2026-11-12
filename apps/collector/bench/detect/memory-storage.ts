@@ -30,6 +30,7 @@ import {
   type InboundKind,
   type InboundQuery,
   type InboundRollupRow,
+  type ProviderRecord,
   type RollupKey,
   type RollupQuery,
   type Storage,
@@ -457,6 +458,9 @@ export class MemoryStorage {
     this.inb.get(inboundKeyId(key))!.put(minute, row);
   }
 
+  /** Provider rows (none by default: project defaults); the marked direction sets one. */
+  providers: ProviderRecord[] = [];
+
   allIncidents(): AnyIncident[] {
     return this.incidents.map(clone);
   }
@@ -670,7 +674,7 @@ export class MemoryStorage {
     const config = {
       // project defaults: no overrides, no provider rows, no SDK processes to blame
       getThresholds: async () => ({}),
-      listProviders: async () => [],
+      listProviders: async () => self.providers,
       getMeta: async () => null,
       listSdkInstances: async () => [],
       listServicesCalling: async () => [],

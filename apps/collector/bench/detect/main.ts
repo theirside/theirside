@@ -24,10 +24,12 @@ import { spawn } from 'node:child_process';
 import { availableParallelism } from 'node:os';
 import { incidentJob } from '../../src/modules/incidents/job.js';
 import { inboundJob } from '../../src/modules/incidents/inbound.js';
+import type { ProviderRecord } from '../../src/storage/types.js';
 import { MemoryStorage } from './memory-storage.js';
 import {
   Arrivals,
   DAY,
+  EXPECTED_FAULTS,
   FAULT_LABEL,
   FAULT_MINUTES,
   HOUR,
@@ -46,7 +48,34 @@ import {
   type ProfileName,
 } from './traffic.js';
 
-type Direction = 'outbound' | 'inbound';
+/**
+ * outbound / inbound: one endpoint or webhook source. expected / marked: a consent-style
+ * endpoint whose 400s are often normal business answers (docs/scoring.md "Expected
+ * outcomes"): tagged in code (10–40% of calls, counted as successful), or plain 400s
+ * marked expected from the dashboard (5–15% of calls: the safety net's limit is
+ * max(80%, 4 × normal), which only a share under 25% can exceed).
+ */
+type Direction = 'outbound' | 'inbound' | 'expected' | 'marked';
+const DIRECTIONS: readonly Direction[] = ['outbound', 'inbound', 'expected', 'marked'];
+const DIRECTION_LABEL: Record<Direction, string> = {
+  outbound: 'Outgoing calls',
+  inbound: 'Incoming webhooks',
+  expected: 'Expected outcomes tagged in code (10–40% of calls answer 400, tagged)',
+  marked: 'Expected outcomes marked from the dashboard (5–15% of calls answer 400, 400 marked)',
+};
+/** Profiles each direction runs (expected outcomes: the volumes where their rules apply). */
+const PROFILES_OF: Record<Direction, readonly ProfileName[]> = {
+  outbound: PROFILES,
+  inbound: PROFILES,
+  expected: ['steady', 'medium', 'bursts'],
+  marked: ['steady', 'medium', 'bursts'],
+};
+const FAULTS_OF: Record<Direction, readonly Fault[]> = {
+  outbound: OUTBOUND_FAULTS,
+  inbound: INBOUND_FAULTS,
+  expected: EXPECTED_FAULTS,
+  marked: EXPECTED_FAULTS,
+};
 
 /**
  * Expected result per profile and fault: the fixed time-to-alert target in
@@ -73,6 +102,24 @@ const EXPECTED: Record<Direction, Record<ProfileName, Partial<Record<Fault, numb
     rare: { silence: null, rejections401: null, rejections5xx: null, slow: null, lag: null },
     bursty: { silence: 180, rejections401: 25, rejections5xx: 30, slow: 15, lag: 15 },
   },
+  // untagged 400s are a validation change like any other
+  expected: {
+    steady: { contract400: 6, outage: 5 },
+    medium: { contract400: 12, outage: 10 },
+    low: {},
+    bursts: { contract400: 6, outage: 5 },
+    rare: {},
+    bursty: {},
+  },
+  // the safety net: the marked status above its limit for 10 minutes, after the window fills
+  marked: {
+    steady: { contract400: 16, outage: 5 },
+    medium: { contract400: 30, outage: 10 },
+    low: {},
+    bursts: { contract400: 16, outage: 5 },
+    rare: {},
+    bursty: {},
+  },
 };
 
 /**
@@ -96,6 +143,10 @@ const CI_CELLS: readonly [Direction, ProfileName, Fault | 'no fault'][] = [
   ['inbound', 'steady', 'rejections401'],
   ['inbound', 'medium', 'lag'],
   ['inbound', 'bursts', 'no fault'],
+  ['expected', 'steady', 'no fault'],
+  ['expected', 'steady', 'contract400'],
+  ['marked', 'steady', 'no fault'],
+  ['marked', 'steady', 'contract400'],
 ];
 
 /** Silence is judged after 21 days of history (`silenceMinHistoryDays`): its faults warm up longer. */
@@ -117,6 +168,7 @@ const EFFECT_SHARE: Partial<Record<Fault, number>> = {
   errors10: 0.1,
   latency3x: 0.05,
   auth: 0.5,
+  contract400: 1,
   rejections401: 1,
   rejections5xx: 0.5,
   slow: 1,
@@ -264,14 +316,33 @@ async function run(
     method: 'POST',
   };
   const inKey = { environment: 'production', provider: 'Acme', endpoint: '/webhooks/acme' };
-  const out = new OutboundTraffic(mem.tenant, outKey, seedOf(s, 'traffic'));
+  const outbound = direction !== 'inbound';
+  const out = new OutboundTraffic(
+    mem.tenant,
+    outKey,
+    seedOf(s, 'traffic'),
+    direction === 'expected'
+      ? { range: [0.1, 0.4], tagged: true }
+      : direction === 'marked'
+        ? { range: [0.05, 0.15], tagged: false }
+        : undefined,
+  );
   const inb = new InboundTraffic(inKey, seedOf(s, 'traffic'));
-  if (direction === 'outbound') mem.addOutbound(outKey);
+  if (outbound) mem.addOutbound(outKey);
   else mem.addInbound(inKey);
-  const job =
-    direction === 'outbound'
-      ? incidentJob(mem.storage, mem.dispatcher, { publicUrl: undefined })
-      : inboundJob(mem.storage, mem.dispatcher, { publicUrl: undefined });
+  // marked: 400 is an expected answer of the endpoint (a provider row, as the dashboard stores it)
+  if (direction === 'marked')
+    mem.providers = [
+      {
+        name: outKey.provider,
+        thresholds: {},
+        alertsEnabled: true,
+        expectedStatuses: { [`${outKey.method} ${outKey.endpoint}`]: [400] },
+      } as unknown as ProviderRecord,
+    ];
+  const job = outbound
+    ? incidentJob(mem.storage, mem.dispatcher, { publicUrl: undefined })
+    : inboundJob(mem.storage, mem.dispatcher, { publicUrl: undefined });
 
   let faultStart: number | null = null;
   let faultEnd: number | null = null;
@@ -291,7 +362,7 @@ async function run(
     }
     const active = faultStart !== null && m >= faultStart && m < faultEnd!;
     if (faultStart !== null) faultArrivals.push(n);
-    if (direction === 'outbound')
+    if (outbound)
       mem.putOutbound(outKey, m, out.row(m, n, active ? (fault as OutboundFault) : null));
     else mem.putInbound(inKey, m, inb.row(m, n, active ? (fault as InboundFault) : null));
     mem.now = m + MIN + 1000;
@@ -482,9 +553,9 @@ async function main() {
   const started = Date.now();
   const cells: Cell[] = [];
   const tasks: { cell: Cell; task: Task }[] = [];
-  for (const direction of ['outbound', 'inbound'] as const) {
-    const faults = direction === 'outbound' ? OUTBOUND_FAULTS : INBOUND_FAULTS;
-    for (const profile of PROFILES) {
+  for (const direction of DIRECTIONS) {
+    const faults = FAULTS_OF[direction];
+    for (const profile of PROFILES_OF[direction]) {
       for (const scenario of ['no fault' as const, ...faults]) {
         if (!wanted(direction, profile, scenario)) continue;
         const fault = scenario === 'no fault' ? null : scenario;
@@ -584,9 +655,9 @@ async function main() {
 
 function markdown(cells: Cell[], args: Args): string {
   const lines: string[] = [];
-  for (const direction of ['outbound', 'inbound'] as const) {
+  for (const direction of DIRECTIONS) {
     lines.push(
-      `\n**${direction === 'outbound' ? 'Outgoing calls' : 'Incoming webhooks'}** (no-fault runs ${args.weeks} weeks × ${args.noFaultSeeds} seed(s); fault runs ${args.seeds} seeds, ${args.warmupDays} days of warm-up, ${SILENCE_WARMUP_DAYS} for silence)\n`,
+      `\n**${DIRECTION_LABEL[direction]}** (no-fault runs ${args.weeks} weeks × ${args.noFaultSeeds} seed(s); fault runs ${args.seeds} seeds, ${args.warmupDays} days of warm-up, ${SILENCE_WARMUP_DAYS} for silence)\n`,
     );
     lines.push(
       '| profile | scenario | target | time to alert (median, p90) | detected | false alarms | result |',

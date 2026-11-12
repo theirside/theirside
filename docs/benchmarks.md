@@ -164,6 +164,7 @@ Script: `pnpm bench:detect` (`apps/collector/bench/detect/`). It generates per-m
 - **Faults**, starting at a random weekday minute between 10:00 and 16:00 UTC (for the bursts profile, 10 minutes into a test burst):
   - outgoing: full outage (30 min), 30% and 10% 5xx (60 min), latency 3× (15 min), 50% 401/403 (30 min);
   - webhooks: deliveries stop (12 h), our app answers 401 to all or 5xx to half (30 min), handler p95 ~8 s (30 min), deliveries ~8 min late (60 min).
+- **Expected outcomes** (docs/scoring.md "Expected outcomes"), two more directions on the steady, medium and bursts profiles, the same noise: `expected`, a consent-style endpoint where 10–40% of calls answer 400 tagged in code (the share drifts hour by hour), and `marked`, where 5–15% answer plain 400s and 400 is marked expected for the endpoint from the dashboard. Faults: a contract change answering untagged 400 to every call (30 min; for `marked` only the safety net can catch it), and the full outage. `marked` keeps its share under 25% because the safety net's limit, max(80%, 4 × the normal share), can't be exceeded above that.
 - **Expected results** (`EXPECTED` in `main.ts`): a time-to-alert target per profile and fault, from the fault's first minute to the alert, or "not detectable by design". Examples of the latter: fewer than `minCalls` calls in the widest window, or a source with too few deliveries for silence. They were written down from docs/scoring.md before the first run.
 - **Runs**: a no-fault run of `--weeks` weeks per profile (`--no-fault-seeds`, default 1), and `--seeds` runs per fault (default 5): `--warmup` days of noise (21; 23 for silence faults, which are judged after 21 days of history), then the fault.
 - **Pass/fail** (decided 2026-11-11):
@@ -171,7 +172,22 @@ Script: `pnpm bench:detect` (`apps/collector/bench/detect/`). It generates per-m
   - **Fault cells**: the **median over seeds** of (time to alert − that seed's target) must be ≤ 0, a miss counting as +∞; the table shows the median and p90 time to alert. Seeds whose fault brought too few calls for the rule are not required, and cells listed in `NOT_RELIABLE` (bursty 10% 5xx: the fault's effect sits at the count test's minimum, so it depends on how many calls the hour brings) are reported but never required.
   - Exit code 1 when either fails. Seeds are fixed; `--explain` prints each false alarm's alert; `--markdown` prints the table below.
 - **Targets scale with traffic** (`targetFor` in `main.ts`): no rule can fire before its window holds the calls it needs, so a rate fault's target is max(the fixed target, minutes until the fault's own calls reach max(`minCalls`, `minExcess` / the fault's effect share) + `openAfterMinutes`). Effect shares follow from the faults: 100% for an outage, 30% or 10% for 5xx, 50% for 401/403, and 5% for a 3× slowdown (exactly the calls above the old p95 end up slower than 3 × the normal p95). A fault that never brings that many calls before it ends is "not detectable at this volume" (not required). This is the expected-value time: when the fault's failures arrive later than average, the alert can come a few minutes after it.
-- **Cost and CI**: cells run in parallel worker processes (`--jobs`, default cores − 1). The full sweep (1,348 simulated weeks with 5 seeds per fault) takes about 22 minutes on 12 cores; it runs **nightly** (`.github/workflows/detection-nightly.yml`, the table kept as an artifact) and as a **required job before a release pushes images** (`release-collector.yml`). **Pushes to main and pull requests** run `--ci` (`detection-ci.yml`): ten key profile × scenario cells (`CI_CELLS`: steady and bursts no-fault, steady outage and 3× latency, medium 30% 5xx, bursty 401/403; webhooks steady silence and 401s, medium lag, bursts no-fault), 3-week no-fault runs, 9 days of warm-up (23 for silence), one fixed seed: 24 simulated weeks, under 30 s on 12 cores, about a minute on a 4-core runner. (`--fast` is an alias.)
+- **Cost and CI**: cells run in parallel worker processes (`--jobs`, default cores − 1). The full sweep (1,348 simulated weeks with 5 seeds per fault) takes about 22 minutes on 12 cores; it runs **nightly** (`.github/workflows/detection-nightly.yml`, the table kept as an artifact) and as a **required job before a release pushes images** (`release-collector.yml`). **Pushes to main and pull requests** run `--ci` (`detection-ci.yml`): fourteen key profile × scenario cells (`CI_CELLS`: steady and bursts no-fault, steady outage and 3× latency, medium 30% 5xx, bursty 401/403; webhooks steady silence and 401s, medium lag, bursts no-fault), 3-week no-fault runs, 9 days of warm-up (23 for silence), one fixed seed: 24 simulated weeks, under 30 s on 12 cores, about a minute on a 4-core runner. (`--fast` is an alias.)
+
+### Expected outcomes, 26-week sweep, 2026-11-12 (5 seeds per fault): all pass
+
+`pnpm bench:detect --only expected,marked`: 18 cells, 358 simulated weeks, 445 s on 12 cores.
+
+| direction | profile | no fault (false alarms) | contract change, untagged 400 to all (median, p90) | outage (median, p90) |
+|---|---|---|---|---|
+| expected (10–40% tagged 400) | steady | 0 in 60 source-weeks | 3 min, 3 min (target 6) | 3 min, 3 min |
+| expected | medium | 2 in 60 source-weeks = 0.87 per 6 months (an `errors` and a `not_found` window of the everyday noise; none from the tagged 400s) | 4 min, 4 min (12) | 4 min, 5 min |
+| expected | bursts | 0 in 60 | 3 min, 3 min (6) | 3 min, 3 min |
+| marked (5–15% plain 400, marked) | steady | 0 in 60 | 13 min, 13 min (16: the safety net's 10 minutes after the window fills) | 3 min, 3 min |
+| marked | medium | 0 in 59 | 26 min, missed in 1 of 5 seeds (30; the 15-minute low-traffic window fills slowly) | 4 min, 6 min |
+| marked | bursts | 0 in 59 | 14 min, 14 min (16) | 3 min, 3 min |
+
+Tagged business answers cost nothing in false alarms or time to alert; a dashboard mark trades a slower alert for a contract change (the safety net) for not having to change code.
 
 ### Results, 26-week sweep, 2026-11-11 (5 seeds per fault): all pass
 
