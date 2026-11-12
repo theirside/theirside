@@ -5,7 +5,7 @@ import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import { isStorageUnavailable } from '../../storage/postgres.js';
-import type { Incident, Tenant } from '../../storage/types.js';
+import type { AnyIncident, Tenant } from '../../storage/types.js';
 import { bearerToken } from '../auth/api-keys.js';
 import { adminOnly, requireAdmin } from '../auth/routes.js';
 import { OTHER_PROVIDER } from '../discovery/directory.js';
@@ -19,7 +19,11 @@ import {
   PROVIDER_THRESHOLD_LIMITS,
   resolveThresholds,
   type ProviderThresholdKey,
+  WEBHOOK_THRESHOLD_KEYS,
+  WEBHOOK_THRESHOLD_LIMITS,
+  type WebhookThresholdKey,
 } from '../scoring/thresholds.js';
+import { registerWebhookRoutes } from './webhooks.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
 
 const OPENAPI_PATH = fileURLToPath(new URL('../../../openapi.yaml', import.meta.url));
@@ -45,9 +49,10 @@ function requireReadKey(ctx: AppContext) {
   };
 }
 
-export function incidentView(i: Incident) {
+export function incidentView(i: AnyIncident, now: Date) {
   return {
     id: i.id,
+    direction: i.direction ?? 'outbound',
     environment: i.environment,
     provider: i.provider,
     scope: i.scope,
@@ -55,9 +60,7 @@ export function incidentView(i: Incident) {
     status: i.status,
     openedAt: i.openedAt.toISOString(),
     resolvedAt: i.resolvedAt?.toISOString() ?? null,
-    durationMinutes: Math.round(
-      ((i.resolvedAt ?? new Date()).getTime() - i.openedAt.getTime()) / 60_000,
-    ),
+    durationMinutes: Math.round(((i.resolvedAt ?? now).getTime() - i.openedAt.getTime()) / 60_000),
     peakErrorRate: i.peakErrorRate,
     peakP95Ms: i.peakP95Ms,
     alertsMuted: i.alertsMuted,
@@ -112,6 +115,24 @@ const providerThresholds = z
 const sameThresholds = (a: Record<string, number>, b: Record<string, number>) =>
   PROVIDER_THRESHOLD_KEYS.every((k) => a[k] === b[k]);
 
+/** A provider's webhook threshold overrides: the whole set, like `thresholds`. */
+const webhookThresholds = z
+  .object(
+    Object.fromEntries(
+      WEBHOOK_THRESHOLD_KEYS.map((k) => {
+        const lim = WEBHOOK_THRESHOLD_LIMITS[k];
+        let n = z.number().min(lim.min).max(lim.max);
+        if (lim.integer) n = n.int();
+        return [k, n.optional()];
+      }),
+    ) as Record<WebhookThresholdKey, z.ZodOptional<z.ZodNumber>>,
+  )
+  .strict()
+  .transform((o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)));
+
+const sameWebhookThresholds = (a: Record<string, number>, b: Record<string, number>) =>
+  WEBHOOK_THRESHOLD_KEYS.every((k) => a[k] === b[k]);
+
 const providerPatch = z.object({
   hostPatterns: z.array(z.string().min(1).max(255)).max(50).optional(),
   explicitRoutes: z.array(z.string().min(1).max(512)).max(500).optional(),
@@ -131,6 +152,10 @@ const providerPatch = z.object({
   pathPrivacy: z.enum(['strict', 'balanced']).nullable().optional(),
   /** Threshold overrides (admins only); `{}` = the project's for every key. */
   thresholds: providerThresholds.optional(),
+  /** Webhook threshold overrides (admins only); `{}` = the project's. */
+  webhookThresholds: webhookThresholds.optional(),
+  /** Show this provider's webhooks on the public status page (admins only; off by default). */
+  webhooksPublic: z.boolean().optional(),
   /** Words the SDK may send as-is in strict path privacy. */
   allowedPathWords: z
     .array(
@@ -170,7 +195,7 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
       ...(q.data.provider ? { provider: q.data.provider } : {}),
       limit: q.data.limit ?? 50,
     });
-    return { incidents: list.map(incidentView) };
+    return { incidents: list.map((i) => incidentView(i, ctx.clock.now())) };
   });
 
   app.get('/v1/openapi.yaml', async (_req, reply) => {
@@ -200,7 +225,7 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     const day = ctx.clock.now().getTime() - 24 * 3600_000;
     return {
       ...health,
-      openIncidents: open.map(incidentView),
+      openIncidents: open.map((i) => incidentView(i, ctx.clock.now())),
       environments: [...new Set(envs.map((s) => s.environment))].sort(),
       discovery: {
         // "Discovered" notice: providers first seen in the last 24 h
@@ -258,14 +283,14 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
       ...(q.data.provider ? { provider: q.data.provider } : {}),
       limit: q.data.limit ?? 100,
     });
-    return { incidents: list.map(incidentView) };
+    return { incidents: list.map((i) => incidentView(i, ctx.clock.now())) };
   });
 
   app.get('/v1/admin/incidents/:id', auth, async (req, reply) => {
     const tenant = await tenantOf(req, reply);
     if (!tenant) return;
     const inc = await ctx.storage.incidents.get(tenant, (req.params as { id: string }).id);
-    return inc ? incidentView(inc) : reply.code(404).send({ error: 'not found' });
+    return inc ? incidentView(inc, ctx.clock.now()) : reply.code(404).send({ error: 'not found' });
   });
 
   app.get('/v1/admin/providers', auth, async (req, reply) => {
@@ -303,6 +328,21 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
         !sameThresholds(patch.thresholds as Record<string, number>, current.thresholds)
       )
         throw adminOnly('change alert thresholds');
+      if (
+        current &&
+        patch.webhookThresholds !== undefined &&
+        !sameWebhookThresholds(
+          patch.webhookThresholds as Record<string, number>,
+          current.webhookThresholds,
+        )
+      )
+        throw adminOnly('change alert thresholds');
+      if (
+        current &&
+        patch.webhooksPublic !== undefined &&
+        patch.webhooksPublic !== current.webhooksPublic
+      )
+        throw adminOnly('change what the status page shows');
     }
     const before = (await ctx.storage.config.listProviders(tenant)).find((p) => p.id === id);
     let updated = await ctx.storage.config.updateProvider(tenant, id, patch);
@@ -323,6 +363,8 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     ctx.directory.invalidate(tenant);
     return updated ?? reply.code(404).send({ error: 'not found' });
   });
+
+  await registerWebhookRoutes(app, ctx, { auth, members, tenantOf });
 
   app.get('/v1/admin/sdk-instances', auth, async (req, reply) => {
     const tenant = await tenantOf(req, reply);

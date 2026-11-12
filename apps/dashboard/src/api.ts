@@ -103,7 +103,20 @@ export interface Incident {
   environment: string;
   provider: string;
   scope: 'endpoint' | 'provider';
-  kind: 'errors' | 'latency' | 'auth' | 'not_found' | 'validation' | 'rate_limited' | 'behaviour';
+  kind:
+    | 'errors'
+    | 'latency'
+    | 'auth'
+    | 'not_found'
+    | 'validation'
+    | 'rate_limited'
+    | 'behaviour'
+    | 'webhook_silence'
+    | 'webhook_rejections'
+    | 'webhook_slow'
+    | 'webhook_lag';
+  /** inbound: about webhooks the app receives; its one endpoint is the route. */
+  direction?: 'outbound' | 'inbound';
   windowMinutes?: number;
   deployHint?: string | null;
   status: 'open' | 'resolved';
@@ -187,6 +200,10 @@ export interface Provider {
   allowedPathWords: string[];
   /** Threshold overrides for this provider; missing keys use the project's. */
   thresholds: Record<string, number>;
+  /** Overrides for this provider's inbound webhooks. */
+  webhookThresholds: Record<string, number>;
+  /** Show its webhooks on the public status page (off by default). */
+  webhooksPublic: boolean;
   /** Latest call seen; null = never called. */
   lastCallAt: string | null;
 }
@@ -287,6 +304,8 @@ export interface AuthStatus {
   proxy: 'header' | 'alb' | null;
   /** The #/design gallery is on (THEIRSIDE_DESIGN_GALLERY). */
   designGallery?: boolean;
+  /** Simulation mode (THEIRSIDE_SIM=1): banner on every page and the Simulation page. */
+  simulation?: boolean;
   /**
    * What the setup page asks for: `code` (setup code or admin token), `link` (the token from
    * the setup link a zero-config first start logs) or `open` (zero-config, opened locally).
@@ -328,4 +347,89 @@ export interface TwoFactorStatus {
   recoveryCodesLeft: number;
   required: boolean;
   available: boolean;
+}
+
+export type WebhookStatus = 'incident' | 'quiet' | 'learning' | 'irregular' | 'all_quiet' | 'ok';
+
+/** One webhook source (provider + route) in /v1/admin/webhooks. */
+export interface WebhookSource {
+  environment: string;
+  endpoint: string;
+  firstSeenAt: string;
+  lastDeliveryAt: string;
+  lastService: string | null;
+  expectedQuiet: boolean;
+  status: WebhookStatus;
+  silenceLearning: boolean;
+  /** Normal gaps too irregular to judge silence (test-driven traffic): silence alerts off. */
+  silenceIrregular: boolean;
+  /** Silence alerts switched on anyway for an irregular source. */
+  silenceForced: boolean;
+  /** Longest normal gap between deliveries in the last 4 weeks, minutes (null while learning). */
+  longestNormalGapMinutes: number | null;
+  deliveries: number;
+  /** Deliveries in the last hour. */
+  deliveriesPerHour: number;
+  /** Learned deliveries per hour at this hour of the week (null while learning). */
+  normalPerHour: number | null;
+  rejectionRate: number | null;
+  authRate: number | null;
+  normalRejectionRate: number | null;
+  p95Ms: number | null;
+  normalP95Ms: number | null;
+  lagP95S: number | null;
+  normalLagP95S: number | null;
+  incident: { id: string; kind: Incident['kind']; openedAt: string } | null;
+}
+
+export interface WebhookProvider {
+  provider: string;
+  displayName: string | null;
+  providerId: string | null;
+  alertsEnabled: boolean;
+  webhooksPublic: boolean;
+  status: 'incident' | 'ok';
+  sources: WebhookSource[];
+}
+
+export interface WebhooksResponse {
+  range: Range;
+  /** Every source of the project quiet at once: silence alerts are held. */
+  allQuiet: boolean;
+  providers: WebhookProvider[];
+}
+
+/** Webhook discovery: a route the SDK reported as a possible delivery from an unidentified sender. */
+export interface WebhookCandidate {
+  endpoint: string;
+  method: string;
+  suggestedName: string | null;
+  status: 'pending' | 'confirmed' | 'ignored';
+  provider: string | null;
+  deliveriesPerDay: number;
+  deliveries7d: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastService: string | null;
+  decidedAt: string | null;
+}
+
+export interface WebhookCandidatesResponse {
+  candidates: WebhookCandidate[];
+  pending: number;
+  maxPending: number;
+}
+
+export interface WebhookSeries {
+  range: Range;
+  bucketMinutes: number;
+  points: {
+    t: string;
+    deliveries: number;
+    expected: number | null;
+    rejected: number;
+    rejectionRate: number | null;
+    p95Ms: number | null;
+    lagP95S: number | null;
+  }[];
 }

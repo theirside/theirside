@@ -157,12 +157,7 @@ describe('provider actions', () => {
     });
     // normalized the way the SDK compares path segments: `_ah` → `ah`, camelCase kept whole
     const rpc = await admin('PATCH', `/v1/admin/providers/${kyco.id}`, {
-      allowedPathWords: [
-        '_ah',
-        'getLatestOrdSumStatus',
-        'getAcctLoginToken',
-        'order_sum-status',
-      ],
+      allowedPathWords: ['_ah', 'getLatestOrdSumStatus', 'getAcctLoginToken', 'order_sum-status'],
     });
     expect(rpc.json().allowedPathWords).toEqual([
       'ah',

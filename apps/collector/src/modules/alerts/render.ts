@@ -89,22 +89,31 @@ function duration(p: AlertPayload): string | null {
     : `${p.durationMinutes} min (since ${since})`;
 }
 
-/** "POST /v1/x: errors 38% (normal 0.2%), p95 2.5 s (normal 180 ms)" */
-function endpointLine(e: AlertPayload['endpoints'][number]): string {
+/** Who the alert is about: `Stripe`, or `Stripe webhooks` for inbound ones. */
+const subject = (p: AlertPayload) =>
+  p.direction === 'inbound' ? `${p.provider} webhooks` : p.provider;
+
+/**
+ * "POST /v1/x: errors 38% (normal 0.2%), p95 2.5 s (normal 180 ms)"; inbound:
+ * "POST /webhooks/stripe: rejected 38% (normal 0.2%), handler p95 …"
+ */
+function endpointLine(e: AlertPayload['endpoints'][number], inbound = false): string {
   const parts: string[] = [];
   if (e.errorRate !== null)
     parts.push(
-      `errors ${pct(e.errorRate)}${e.normalErrorRate !== null ? ` (normal ${pct(e.normalErrorRate)})` : ''}`,
+      `${inbound ? 'rejected' : 'errors'} ${pct(e.errorRate)}${e.normalErrorRate !== null ? ` (normal ${pct(e.normalErrorRate)})` : ''}`,
     );
   if (e.p95Ms !== null && e.p95Ms !== undefined)
     parts.push(
-      `p95 ${ms(e.p95Ms)}${e.normalP95Ms !== null && e.normalP95Ms !== undefined ? ` (normal ${ms(e.normalP95Ms)})` : ''}`,
+      `${inbound ? 'handler p95' : 'p95'} ${ms(e.p95Ms)}${e.normalP95Ms !== null && e.normalP95Ms !== undefined ? ` (normal ${ms(e.normalP95Ms)})` : ''}`,
     );
   return `${e.method} ${e.endpoint}${parts.length ? `: ${parts.join(', ')}` : ''}`;
 }
 
 function endpointLines(p: AlertPayload): string[] {
-  const shown = p.endpoints.slice(0, MAX_ENDPOINTS_LISTED).map(endpointLine);
+  const shown = p.endpoints
+    .slice(0, MAX_ENDPOINTS_LISTED)
+    .map((e) => endpointLine(e, p.direction === 'inbound'));
   const more = p.endpoints.length - shown.length;
   if (more > 0) shown.push(`…and ${more} more endpoint${more === 1 ? '' : 's'}`);
   return shown;
@@ -178,7 +187,7 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
       text: {
         type: 'plain_text',
         // plain text, so no code spans: with emoji off, `:id:` stays text here
-        text: cut(`${LABEL[p.event]}: ${p.provider}`, SLACK_LIMITS.headerText),
+        text: cut(`${LABEL[p.event]}: ${subject(p)}`, SLACK_LIMITS.headerText),
         emoji: false,
       },
     },

@@ -11,12 +11,14 @@ import {
 } from '@theirside/shared';
 import { decide, type AlertEvent, type EndpointView } from '../src/modules/incidents/engine.js';
 import { evaluateKeys } from '../src/modules/incidents/job.js';
-import { baselineFrom } from '../src/modules/scoring/baseline.js';
+import { baselineFrom, outboundModel } from '../src/modules/scoring/baseline.js';
 import type { BaselineView, RollupCounts } from '../src/modules/scoring/evaluate.js';
 import { DEFAULT_THRESHOLDS, type Thresholds } from '../src/modules/scoring/thresholds.js';
 import type { Incident, RollupKey } from '../src/storage/types.js';
 
 export const MIN = 60_000;
+/** Read once: a re-exported binding is a getter call per read in the hot loop below. */
+const BUCKETS = LATENCY_BUCKET_COUNT;
 
 /** Deterministic PRNG (mulberry32). */
 export function rng(seed: number): () => number {
@@ -143,7 +145,7 @@ export class Sim {
               to: (e.recoveredAt ?? i.resolvedAt)?.getTime() ?? Infinity,
             })),
         );
-      const sum = (since: number) => {
+      const empty = (): RollupCounts => {
         const c: RollupCounts = {
           total: 0,
           status429: 0,
@@ -152,17 +154,38 @@ export class Sim {
           latencyHistogram: emptyHistogram(),
         };
         for (const o of OUTCOMES) c.outcomes[o] = 0;
+        return c;
+      };
+      const add = (c: RollupCounts, r: RollupRow) => {
+        c.total += r.total;
+        c.status429 += r.status429;
+        for (const k of STATUS_COUNT_KEYS) c.statusCounts![k] += r.statusCounts?.[k] ?? 0;
+        for (const o of OUTCOMES) c.outcomes[o] += r.outcomes[o];
+        const ch = c.latencyHistogram;
+        const rh = r.latencyHistogram;
+        for (let i = 0; i < BUCKETS; i++) ch[i]! += rh[i]!;
+      };
+      const HOUR = 60 * MIN;
+      const hourly = new Map<number, RollupCounts>();
+      const sum = (since: number) => {
+        const c = empty();
         let first = Infinity;
         for (const [minute, r] of per) {
           if (minute < since || minute >= to) continue;
           if (windows.some((w) => minute >= w.from && minute <= w.to)) continue;
           first = Math.min(first, minute);
-          c.total += r.total;
-          c.status429 += r.status429;
-          for (const k of STATUS_COUNT_KEYS) c.statusCounts![k] += r.statusCounts?.[k] ?? 0;
-          for (const o of OUTCOMES) c.outcomes[o] += r.outcomes[o];
-          for (let i = 0; i < LATENCY_BUCKET_COUNT; i++)
-            c.latencyHistogram[i]! += r.latencyHistogram[i]!;
+          add(c, r);
+          // the count tests' hours (whole hours, none an incident touched)
+          const h = Math.floor(minute / HOUR) * HOUR;
+          if (
+            since === from &&
+            h + HOUR <= to &&
+            !windows.some((w) => w.from < h + HOUR && w.to > h)
+          ) {
+            let hc = hourly.get(h);
+            if (!hc) hourly.set(h, (hc = empty()));
+            add(hc, r);
+          }
         }
         return { c, first };
       };
@@ -177,7 +200,10 @@ export class Sim {
               minutes: Math.max(0, Math.floor((to - mixSince) / MIN)),
             }
           : undefined;
-      next.set(id, baselineFrom(key, c, new Date(first), new Date(now), t, split));
+      next.set(id, {
+        ...baselineFrom(key, c, new Date(first), new Date(now), t, split),
+        model: outboundModel(c, [...hourly.values()], t),
+      });
     }
     this.baselines = next;
   }

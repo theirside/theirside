@@ -113,8 +113,14 @@ export async function freePort(): Promise<number> {
 
 export interface FakeCollector extends TestServer {
   batches: IngestBatch[];
-  requests: { headers: http.IncomingHttpHeaders }[];
+  requests: { headers: http.IncomingHttpHeaders; path: string }[];
+  /** Path each stored batch was posted to (same order as `batches`). */
+  batchPaths: string[];
   events(): CallEvent[];
+  /** Answer POST /v1/ingest/inbound with 404, like a collector older than 0.4.0. */
+  noInboundRoute: boolean;
+  /** Answer GET /v1/sdk-config this much later (ms); -1: never. */
+  configDelayMs: number;
   /** Status to answer with (default 202). */
   status: number;
   /** Served on GET /v1/sdk-config (an empty config while undefined; null: 404, like an older collector). */
@@ -126,14 +132,33 @@ export interface FakeCollector extends TestServer {
 
 export async function startCollector(): Promise<FakeCollector> {
   const batches: IngestBatch[] = [];
-  const requests: { headers: http.IncomingHttpHeaders }[] = [];
-  const state: { status: number; sdkConfig: unknown } = { status: 202, sdkConfig: undefined };
+  const requests: { headers: http.IncomingHttpHeaders; path: string }[] = [];
+  const batchPaths: string[] = [];
+  const state = {
+    status: 202,
+    sdkConfig: undefined as unknown,
+    noInboundRoute: false,
+    configDelayMs: 0,
+  };
   const configRequests: { ifNoneMatch: string | undefined; url?: string }[] = [];
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url?.startsWith('/v1/sdk-config')) {
       req.resume();
       const inm = req.headers['if-none-match'];
       configRequests.push({ ifNoneMatch: typeof inm === 'string' ? inm : undefined, url: req.url });
+      if (state.configDelayMs !== 0) {
+        if (state.configDelayMs < 0) return; // never answers
+        const config = state.sdkConfig;
+        setTimeout(() => {
+          res.setHeader('content-type', 'application/json');
+          if (config === null) {
+            res.statusCode = 404;
+            return res.end();
+          }
+          res.end(JSON.stringify(config ?? {}));
+        }, state.configDelayMs);
+        return;
+      }
       if (state.sdkConfig === null) {
         res.statusCode = 404;
         return res.end();
@@ -159,11 +184,17 @@ export async function startCollector(): Promise<FakeCollector> {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
-      requests.push({ headers: req.headers });
+      const path = req.url ?? '/';
+      requests.push({ headers: req.headers, path });
+      if (state.noInboundRoute && path === '/v1/ingest/inbound') {
+        res.statusCode = 404;
+        return res.end();
+      }
       if (state.status < 300) {
         const body = Buffer.concat(chunks);
         const raw = req.headers['content-encoding'] === 'gzip' ? gunzipSync(body) : body;
         batches.push(JSON.parse(raw.toString('utf8')) as IngestBatch);
+        batchPaths.push(path);
       }
       res.statusCode = state.status;
       res.end();
@@ -176,6 +207,7 @@ export async function startCollector(): Promise<FakeCollector> {
     port,
     host: `127.0.0.1:${port}`,
     batches,
+    batchPaths,
     requests,
     configRequests,
     events,
@@ -187,6 +219,18 @@ export async function startCollector(): Promise<FakeCollector> {
     },
     get status() {
       return state.status;
+    },
+    get noInboundRoute() {
+      return state.noInboundRoute;
+    },
+    set noInboundRoute(v: boolean) {
+      state.noInboundRoute = v;
+    },
+    get configDelayMs() {
+      return state.configDelayMs;
+    },
+    set configDelayMs(v: number) {
+      state.configDelayMs = v;
     },
     set status(v: number) {
       state.status = v;

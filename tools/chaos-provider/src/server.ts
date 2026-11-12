@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
+import type { WebhookSender } from './webhooks.js';
 
 /**
  * A fake third-party provider for demos and tests. Every path answers like a
@@ -10,6 +11,9 @@ import http from 'node:http';
  *   POST   /__chaos/rules         add a rule, returns it with its id
  *   DELETE /__chaos/rules/:id     remove one rule
  *   DELETE /__chaos/rules         remove all rules
+ * Webhook sender (when started with WEBHOOK_TARGET; see webhooks.ts):
+ *   GET    /__webhooks            mode, rate, counts of the target's answers
+ *   PUT    /__webhooks            {mode?: normal|silent|slow|rejected|late, ratePerMin?, delayMs?, lagSeconds?}
  * Alert sink (collector webhook channel target):
  *   POST   /__alerts              record a webhook; verifies x-theirside-signature when SINK_SECRET is set
  *   GET    /__alerts              recorded alerts, oldest first
@@ -50,6 +54,8 @@ export interface ChaosOptions {
   sinkSecret?: string;
   random?: () => number;
   now?: () => number;
+  /** Webhook sender controlled through /__webhooks (none: 404). */
+  webhooks?: WebhookSender;
 }
 
 function matchPath(pattern: string, path: string): boolean {
@@ -130,6 +136,23 @@ export function createChaosServer(opts: ChaosOptions = {}) {
     if (del && method === 'DELETE') {
       rules = rules.filter((r) => r.id !== del[1]);
       return json(res, 200, { rules });
+    }
+
+    // ---- webhook sender
+    if (path === '/__webhooks') {
+      if (!opts.webhooks)
+        return json(res, 404, { error: 'no webhook sender (set WEBHOOK_TARGET)' });
+      if (method === 'GET') return json(res, 200, opts.webhooks.state);
+      if (method === 'PUT') {
+        try {
+          const err = opts.webhooks.set(JSON.parse((await readBody(req)) || '{}'));
+          if (err) return json(res, 400, { error: err });
+          console.log(`[webhooks] mode ${opts.webhooks.state.mode}`);
+          return json(res, 200, opts.webhooks.state);
+        } catch {
+          return json(res, 400, { error: 'invalid JSON' });
+        }
+      }
     }
 
     // ---- alert sink

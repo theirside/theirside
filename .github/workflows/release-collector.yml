@@ -1,5 +1,5 @@
 # Collector image release: ghcr.io/theirside/collector, linux/amd64 + linux/arm64.
-#   git tag v0.3.3 && git push origin v0.3.3
+#   git tag v0.4.0 && git push origin v0.4.0
 # or Actions → "Release collector image" → Run workflow (builds the selected ref).
 # Tags: <version>; for a stable version also <major>.<minor> (if it is the newest patch of that
 # minor) and latest (if it is the newest stable version overall, by git tags). A prerelease
@@ -107,6 +107,24 @@ jobs:
       - run: pnpm build
       - run: pnpm vitest run --project collector
 
+  # The full 26-week detection sweep (docs/benchmarks.md "Detection"): a release must not
+  # alert more, or later, than the documented budget and targets.
+  detection:
+    name: Detection bench (full sweep)
+    needs: version
+    if: ${{ !inputs.retag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm bench:detect --markdown --explain
+
   selfhost-quickstart:
     name: Self-host Quick start (compose.selfhost.yml)
     needs: version
@@ -127,7 +145,7 @@ jobs:
 
   publish:
     name: Build and push (amd64 + arm64)
-    needs: [version, test, selfhost-quickstart]
+    needs: [version, test, detection, selfhost-quickstart]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -53,12 +53,12 @@ export class FetchSender implements Sender {
     }
   }
 
-  async post(batch: IngestBatch): Promise<SendResult> {
+  async post(batch: IngestBatch, path: string = INGEST_PATH): Promise<SendResult> {
     try {
       const json = JSON.stringify(batch);
       const gz = await gzipped(json);
       const signal = this.timeoutSignal();
-      const res = await this.call(new URL(INGEST_PATH, this.cfg.endpoint), {
+      const res = await this.call(new URL(path, this.cfg.endpoint), {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

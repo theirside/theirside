@@ -11,8 +11,8 @@ export type GetResult = { status: number; etag?: string; body?: string } | { err
  * captured before the SDK wrapped it. Implementations never reject.
  */
 export interface Sender {
-  /** POST one ingest batch (gzip when the runtime can). */
-  post(batch: IngestBatch): Promise<SendResult>;
+  /** POST one ingest batch (gzip when the runtime can); `path` defaults to INGEST_PATH. */
+  post(batch: IngestBatch, path?: string): Promise<SendResult>;
   /** GET a small JSON document (remote config); bodies over `maxBytes` are discarded. */
   get(path: string, headers: Record<string, string>, maxBytes: number): Promise<GetResult>;
   /** While true, requests keep a short-lived process alive (Node: referenced sockets). */

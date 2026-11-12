@@ -1,4 +1,4 @@
-# Theirside collector 0.3, self-hosted: the collector plus its Postgres.
+# Theirside collector 0.4, self-hosted: the collector plus its Postgres.
 # This is the user-facing compose file. theirside.dev serves it as /compose.yml (from the
 # latest release) for the Quick start: https://theirside.dev/#start
 # docker/docker-compose.yml is the dev/demo file for working on this repo; don't point users at it.
@@ -11,8 +11,8 @@
 # Nothing to configure: the first start generates your project API key and logs a one-time
 # link to create the first account. After setup the dashboard shows the key and the
 # init() line for your app. Everything below is optional.
-# The image follows the 0.3 line: docker compose -f compose.yml pull, then up -d again, gets
-# the newest 0.3.x. Pin an exact version (e.g. :0.3.3) if you prefer.
+# The image follows the 0.4 line: docker compose -f compose.yml pull, then up -d again, gets
+# the newest 0.4.x. Pin an exact version (e.g. :0.4.0) if you prefer.
 # Help with ECS, Kubernetes or anything else: hello@theirside.dev
 name: theirside-selfhost
 
@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   collector:
-    image: ghcr.io/theirside/collector:0.3
+    image: ghcr.io/theirside/collector:0.4
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside}@postgres:5432/theirside
       THEIRSIDE_DEPLOYMENT_MODE: self_hosted

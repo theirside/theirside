@@ -86,16 +86,12 @@ describe('vocabulary data', () => {
   });
 });
 
-describe('allowed path words (RPC APIs: camelCase methods, `_ah`)', () => {
+describe('allowed path words (camelCase RPC methods, `_ah`)', () => {
   // what the dashboard stores for what people typed
   const ALLOWED = new Set(
-    [
-      'orderendpoint',
-      'accountsendpoint',
-      'getLatestOrdSumStatus',
-      'getAcctLoginToken',
-      '_ah',
-    ].map(normalizePathWord),
+    ['orderendpoint', 'accountsendpoint', 'getLatestOrdSumStatus', 'getAcctLoginToken', '_ah'].map(
+      normalizePathWord,
+    ),
   );
 
   it.each([

@@ -1,10 +1,16 @@
 import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
 import {
+  COARSE_HIST_COLUMNS,
   COUNTER_COLUMNS,
   KEY_COLUMNS,
+  MERGE_COLUMNS,
   STATUS_COLUMNS,
   SUM_SELECT,
+  LATENCY_COLUMNS,
+  fineValues,
+  mergeSet,
+  prepared,
   rowToRollup,
 } from './columns.js';
 import type {
@@ -19,8 +25,10 @@ import type {
   ConfigStore,
   EventSample,
   EventStore,
-  Incident,
+  AnyIncident,
   IncidentListQuery,
+  InboundKey,
+  InboundKind,
   IncidentStore,
   MembershipRecord,
   ProviderInput,
@@ -39,6 +47,7 @@ import type {
   UsageStore,
 } from './types.js';
 import { newId } from '../util/ids.js';
+import { PgInboundStore } from './postgres-inbound.js';
 
 type Queryable = pg.Pool | pg.PoolClient;
 type Row = Record<string, unknown>;
@@ -89,7 +98,8 @@ class PgEventStore implements EventStore {
   async moveEndpoint(tenant: Tenant, m: EndpointMove) {
     const { rowCount } = await this.db.query(
       `UPDATE events SET endpoint = $6
-        WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND method = $4 AND endpoint = $5`,
+        WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND method = $4 AND endpoint = $5
+          AND direction = 'outbound'`,
       [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to],
     );
     return rowCount ?? 0;
@@ -97,7 +107,7 @@ class PgEventStore implements EventStore {
 
   async insert(tenant: Tenant, receivedAt: Date, events: StoredEvent[]): Promise<void> {
     if (events.length === 0) return;
-    const cols: unknown[][] = Array.from({ length: 14 }, () => []);
+    const cols: unknown[][] = Array.from({ length: 16 }, () => []);
     for (const e of events) {
       cols[0]!.push(e.ts);
       cols[1]!.push(e.service);
@@ -113,14 +123,17 @@ class PgEventStore implements EventStore {
       cols[11]!.push(e.errorCode);
       cols[12]!.push(e.correlationId);
       cols[13]!.push(e.providerRequestId);
+      cols[14]!.push(e.direction ?? 'outbound');
+      cols[15]!.push(e.sentAt ?? null);
     }
     const sql = `
       INSERT INTO events (org_id, project_id, received_at, ts, service, environment, sdk_version, provider,
                           host, method, endpoint, status, duration_ms, outcome, error_code, correlation_id,
-                          provider_request_id)
+                          provider_request_id, direction, sent_at)
       SELECT $1, $2, $3, u.*
       FROM unnest($4::timestamptz[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::text[],
-                  $11::text[], $12::smallint[], $13::real[], $14::text[], $15::text[], $16::text[], $17::text[]) AS u`;
+                  $11::text[], $12::smallint[], $13::real[], $14::text[], $15::text[], $16::text[], $17::text[],
+                  $18::text[], $19::timestamptz[]) AS u`;
     const params = [tenant.orgId, tenant.projectId, receivedAt, ...cols];
     try {
       await this.db.query(sql, params);
@@ -169,6 +182,7 @@ class PgEventStore implements EventStore {
          FROM events
         WHERE org_id = $1 AND project_id = $2 AND environment = $3 AND provider = $4
           AND received_at >= $5 AND ts >= $5 AND outcome NOT IN ('ok', 'aborted')
+          AND direction = 'outbound'
           ${endpointFilter}
         ORDER BY (provider_request_id IS NULL), ts DESC
         LIMIT $6`,
@@ -232,7 +246,13 @@ class PgEventStore implements EventStore {
 
 // ------------------------------------------------------------------ rollups
 
-const UPSERT_COLUMNS = [...KEY_COLUMNS, 'minute', ...COUNTER_COLUMNS, 'latency_sum_ms'];
+const UPSERT_COLUMNS = [
+  ...KEY_COLUMNS,
+  'minute',
+  ...COUNTER_COLUMNS,
+  ...LATENCY_COLUMNS,
+  'latency_sum_ms',
+];
 
 function rollupWhere(tenant: Tenant, q: RollupQuery, params: unknown[]): string {
   params.push(tenant.orgId, tenant.projectId, q.from, q.to);
@@ -268,8 +288,8 @@ class PgRollupStore implements RollupStore {
         d.total,
         ...Object.values(pickOutcomes(d)),
         d.status429,
-        ...d.latencyHistogram,
         ...STATUS_COLUMNS.map(([k]) => d.statusCounts?.[k] ?? 0),
+        ...fineValues(d.latencyHistogram),
         d.latencySumMs,
       ];
       values.forEach((v, i) => arrays[i]!.push(v));
@@ -284,23 +304,29 @@ class PgRollupStore implements RollupStore {
             : 'int[]',
     );
     const unnest = types.map((t, i) => `$${i + 3}::${t}`).join(', ');
-    const updates = [...COUNTER_COLUMNS, 'latency_sum_ms']
-      .map((c) => `${c} = rollups_1m.${c} + EXCLUDED.${c}`)
-      .join(', ');
+    const updates = mergeSet(
+      'rollups_1m',
+      [...COUNTER_COLUMNS, ...LATENCY_COLUMNS, 'latency_sum_ms'],
+      LATENCY_COLUMNS,
+    );
     await this.db.query(
-      `INSERT INTO rollups_1m (org_id, project_id, ${UPSERT_COLUMNS.join(', ')})
+      prepared(
+        `INSERT INTO rollups_1m (org_id, project_id, ${UPSERT_COLUMNS.join(', ')})
        SELECT $1, $2, u.* FROM unnest(${unnest}) AS u
        ON CONFLICT (org_id, project_id, environment, provider, endpoint, method, minute)
        DO UPDATE SET ${updates}`,
-      [tenant.orgId, tenant.projectId, ...arrays],
+        [tenant.orgId, tenant.projectId, ...arrays],
+      ),
     );
   }
 
   async query(tenant: Tenant, q: RollupQuery) {
     const params: unknown[] = [];
     const { rows } = await this.db.query(
-      `SELECT * FROM rollups_1m WHERE ${rollupWhere(tenant, q, params)} ORDER BY minute`,
-      params,
+      prepared(
+        `SELECT * FROM rollups_1m WHERE ${rollupWhere(tenant, q, params)} ORDER BY minute`,
+        params,
+      ),
     );
     return rows.map(rowToRollup);
   }
@@ -308,11 +334,13 @@ class PgRollupStore implements RollupStore {
   async aggregateByKey(tenant: Tenant, q: RollupQuery) {
     const params: unknown[] = [];
     const { rows } = await this.db.query(
-      `SELECT org_id, project_id, environment, provider, endpoint, method, min(minute) AS minute,
+      prepared(
+        `SELECT org_id, project_id, environment, provider, endpoint, method, min(minute) AS minute,
               max(minute) AS last_minute, count(*)::int AS minutes, ${SUM_SELECT}
          FROM rollups_1m WHERE ${rollupWhere(tenant, q, params)}
         GROUP BY org_id, project_id, environment, provider, endpoint, method`,
-      params,
+        params,
+      ),
     );
     return rows.map((r: Row) => ({
       ...rowToRollup(r),
@@ -336,8 +364,27 @@ class PgRollupStore implements RollupStore {
     return rows.map(rowToRollup);
   }
 
+  async hourly(tenant: Tenant, key: RollupKey, from: Date, to: Date) {
+    const params: unknown[] = [];
+    const where = rollupWhere(tenant, { from, to, ...key }, params);
+    const { rows } = await this.db.query(
+      prepared(
+        `SELECT date_trunc('hour', minute) AS hour, ${SUM_SELECT}
+         FROM rollups_1m WHERE ${where}
+        GROUP BY 1 ORDER BY 1`,
+        params,
+      ),
+    );
+    return rows.map((r: Row) => ({
+      ...rowToRollup({ ...r, ...key, minute: r.hour }),
+      orgId: tenant.orgId,
+      projectId: tenant.projectId,
+      hour: r.hour as Date,
+    }));
+  }
+
   async moveProvider(tenant: Tenant, from: string, to: string) {
-    const cols = [...COUNTER_COLUMNS, 'latency_sum_ms'];
+    const cols = MERGE_COLUMNS;
     const { rowCount } = await this.db.query(
       `WITH moved AS (
          DELETE FROM rollups_1m WHERE org_id = $1 AND project_id = $2 AND provider = $3 RETURNING *
@@ -346,7 +393,7 @@ class PgRollupStore implements RollupStore {
        SELECT org_id, project_id, environment, $4, endpoint, method, minute, ${cols.join(', ')} FROM moved
        ORDER BY environment, endpoint, method, minute
        ON CONFLICT (org_id, project_id, environment, provider, endpoint, method, minute) DO UPDATE SET
-         ${cols.map((c) => `${c} = rollups_1m.${c} + EXCLUDED.${c}`).join(', ')}`,
+         ${mergeSet('rollups_1m', cols, [...COARSE_HIST_COLUMNS, ...LATENCY_COLUMNS])}`,
       [tenant.orgId, tenant.projectId, from, to],
     );
     return rowCount ?? 0;
@@ -376,7 +423,7 @@ class PgRollupStore implements RollupStore {
   }
 
   async moveEndpoint(tenant: Tenant, m: EndpointMove) {
-    const cols = [...COUNTER_COLUMNS, 'latency_sum_ms'];
+    const cols = MERGE_COLUMNS;
     const { rowCount } = await this.db.query(
       `WITH moved AS (
          DELETE FROM rollups_1m
@@ -387,7 +434,7 @@ class PgRollupStore implements RollupStore {
        SELECT org_id, project_id, environment, provider, $6, method, minute, ${cols.join(', ')} FROM moved
        ORDER BY environment, minute
        ON CONFLICT (org_id, project_id, environment, provider, endpoint, method, minute) DO UPDATE SET
-         ${cols.map((c) => `${c} = rollups_1m.${c} + EXCLUDED.${c}`).join(', ')}`,
+         ${mergeSet('rollups_1m', cols, [...COARSE_HIST_COLUMNS, ...LATENCY_COLUMNS])}`,
       [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to],
     );
     return rowCount ?? 0;
@@ -458,6 +505,9 @@ function rowToBaseline(r: Row): Baseline {
     sampleSize: Number(r.sample_size),
     historyMinutes: Number(r.history_minutes),
     learning: Boolean(r.learning),
+    ...(r.model && typeof r.model === 'object' && 'rho' in (r.model as object)
+      ? { model: r.model as Baseline['model'] }
+      : {}),
     computedAt: r.computed_at as Date,
   };
 }
@@ -479,7 +529,7 @@ class PgIncidentStore implements IncidentStore {
 
   async moveEndpoint(tenant: Tenant, m: EndpointMove) {
     const p = [tenant.orgId, tenant.projectId, m.provider, m.method, m.from, m.to];
-    const ofProvider = `incident_id IN (SELECT id FROM incidents WHERE org_id = $1 AND project_id = $2 AND provider = $3)`;
+    const ofProvider = `incident_id IN (SELECT id FROM incidents WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND direction = 'outbound')`;
     // an incident with both: one row for `to`, from the earliest sighting, the worst peak,
     // recovered only when both had recovered
     await this.db.query(
@@ -509,6 +559,7 @@ class PgIncidentStore implements IncidentStore {
     await this.db.query(
       `UPDATE incidents i SET scope = 'endpoint', updated_at = now()
         WHERE org_id = $1 AND project_id = $2 AND provider = $3 AND scope = 'provider'
+          AND direction = 'outbound'
           AND (SELECT count(*) FROM incident_endpoints e WHERE e.incident_id = i.id) = 1`,
       p.slice(0, 3),
     );
@@ -532,13 +583,13 @@ class PgIncidentStore implements IncidentStore {
       await this.db.query(
         `INSERT INTO baselines (org_id, project_id, environment, provider, endpoint, method, provider_error_rate,
                                 rate_4xx, rate_429, p50_ms, p95_ms, sample_size, history_minutes, learning, computed_at,
-                                status_mix)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                                status_mix, model)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          ON CONFLICT (org_id, project_id, environment, provider, endpoint, method) DO UPDATE SET
            provider_error_rate = EXCLUDED.provider_error_rate, rate_4xx = EXCLUDED.rate_4xx,
            rate_429 = EXCLUDED.rate_429, p50_ms = EXCLUDED.p50_ms, p95_ms = EXCLUDED.p95_ms,
            sample_size = EXCLUDED.sample_size, history_minutes = EXCLUDED.history_minutes,
-           status_mix = EXCLUDED.status_mix,
+           status_mix = EXCLUDED.status_mix, model = EXCLUDED.model,
            learning = EXCLUDED.learning, computed_at = EXCLUDED.computed_at`,
         [
           tenant.orgId,
@@ -560,6 +611,7 @@ class PgIncidentStore implements IncidentStore {
             ...(b.statusMix ?? {}),
             ...(b.statusMixLearning ? { learning: 1 } : {}),
           }),
+          JSON.stringify(b.model ?? {}),
         ],
       );
     }
@@ -570,7 +622,7 @@ class PgIncidentStore implements IncidentStore {
       `SELECT e.first_seen_at AS from_ts, coalesce(e.recovered_at, i.resolved_at) AS to_ts
          FROM incident_endpoints e JOIN incidents i ON i.id = e.incident_id
         WHERE e.org_id = $1 AND e.project_id = $2 AND i.environment = $3 AND i.provider = $4
-          AND e.endpoint = $5 AND e.method = $6
+          AND e.endpoint = $5 AND e.method = $6 AND i.direction = 'outbound'
           AND (coalesce(e.recovered_at, i.resolved_at) IS NULL OR coalesce(e.recovered_at, i.resolved_at) >= $7)`,
       [
         tenant.orgId,
@@ -588,14 +640,50 @@ class PgIncidentStore implements IncidentStore {
     }));
   }
 
-  private async hydrate(rows: Row[]): Promise<Incident[]> {
+  async inboundIncidentWindows(tenant: Tenant, key: InboundKey, since: Date, kind?: InboundKind) {
+    const params: unknown[] = [
+      tenant.orgId,
+      tenant.projectId,
+      key.environment,
+      key.provider,
+      key.endpoint,
+      since,
+    ];
+    if (kind) params.push(kind);
+    const { rows } = await this.db.query(
+      `SELECT i.opened_at AS from_ts, i.resolved_at AS to_ts
+         FROM incidents i JOIN incident_endpoints e ON e.incident_id = i.id
+        WHERE i.org_id = $1 AND i.project_id = $2 AND i.environment = $3 AND i.provider = $4
+          AND e.endpoint = $5 AND i.direction = 'inbound'
+          AND (i.resolved_at IS NULL OR i.resolved_at >= $6)
+          ${kind ? 'AND i.kind = $7' : ''}`,
+      params,
+    );
+    return rows.map((r: Row) => ({
+      from: r.from_ts as Date,
+      to: (r.to_ts as Date | null) ?? null,
+    }));
+  }
+
+  async lastInboundResolvedAt(tenant: Tenant, key: InboundKey, kind: InboundKind) {
+    const { rows } = await this.db.query(
+      `SELECT max(i.resolved_at) AS at
+         FROM incidents i JOIN incident_endpoints e ON e.incident_id = i.id
+        WHERE i.org_id = $1 AND i.project_id = $2 AND i.environment = $3 AND i.provider = $4
+          AND e.endpoint = $5 AND i.direction = 'inbound' AND i.kind = $6`,
+      [tenant.orgId, tenant.projectId, key.environment, key.provider, key.endpoint, kind],
+    );
+    return (rows[0]?.at as Date | null) ?? null;
+  }
+
+  private async hydrate(rows: Row[]): Promise<AnyIncident[]> {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id as string);
     const { rows: eps } = await this.db.query(
       `SELECT * FROM incident_endpoints WHERE incident_id = ANY($1::text[]) ORDER BY first_seen_at`,
       [ids],
     );
-    const byId = new Map<string, Incident['endpoints']>();
+    const byId = new Map<string, AnyIncident['endpoints']>();
     for (const e of eps as Row[]) {
       const list = byId.get(e.incident_id as string) ?? [];
       list.push({
@@ -609,13 +697,14 @@ class PgIncidentStore implements IncidentStore {
     }
     return rows.map((r) => ({
       id: r.id as string,
+      ...(r.direction === 'inbound' ? { direction: 'inbound' as const } : {}),
       orgId: r.org_id as string,
       projectId: r.project_id as string,
       environment: r.environment as string,
       provider: r.provider as string,
-      scope: r.scope as Incident['scope'],
-      kind: r.kind as Incident['kind'],
-      status: r.status as Incident['status'],
+      scope: r.scope as AnyIncident['scope'],
+      kind: r.kind as never,
+      status: r.status as AnyIncident['status'],
       openedAt: r.opened_at as Date,
       resolvedAt: (r.resolved_at as Date | null) ?? null,
       lastAlertedRate: r.last_alerted_rate === null ? null : Number(r.last_alerted_rate),
@@ -633,7 +722,7 @@ class PgIncidentStore implements IncidentStore {
     }));
   }
 
-  async list(tenant: Tenant, q: IncidentListQuery): Promise<Incident[]> {
+  async list(tenant: Tenant, q: IncidentListQuery): Promise<AnyIncident[]> {
     const params: unknown[] = [tenant.orgId, tenant.projectId];
     const parts = ['org_id = $1', 'project_id = $2'];
     if (q.status) {
@@ -643,6 +732,10 @@ class PgIncidentStore implements IncidentStore {
     if (q.provider) {
       params.push(q.provider);
       parts.push(`provider = $${params.length}`);
+    }
+    if (q.direction) {
+      params.push(q.direction);
+      parts.push(`direction = $${params.length}`);
     }
     if (q.since) {
       params.push(q.since);
@@ -656,7 +749,7 @@ class PgIncidentStore implements IncidentStore {
     return this.hydrate(rows);
   }
 
-  async get(tenant: Tenant, id: string): Promise<Incident | null> {
+  async get(tenant: Tenant, id: string): Promise<AnyIncident | null> {
     const { rows } = await this.db.query(
       `SELECT * FROM incidents WHERE org_id = $1 AND project_id = $2 AND id = $3`,
       [tenant.orgId, tenant.projectId, id],
@@ -664,7 +757,7 @@ class PgIncidentStore implements IncidentStore {
     return (await this.hydrate(rows))[0] ?? null;
   }
 
-  async listOpenAll(): Promise<Incident[]> {
+  async listOpenAll(): Promise<AnyIncident[]> {
     const { rows } = await this.db.query(
       `SELECT * FROM incidents WHERE status = 'open' ORDER BY opened_at`,
     );
@@ -682,19 +775,19 @@ class PgIncidentStore implements IncidentStore {
       `SELECT max(coalesce(e.recovered_at, i.resolved_at)) AS at
          FROM incident_endpoints e JOIN incidents i ON i.id = e.incident_id
         WHERE e.org_id = $1 AND e.project_id = $2 AND i.environment = $3 AND i.provider = $4
-          AND e.endpoint = $5 AND e.method = $6`,
+          AND e.endpoint = $5 AND e.method = $6 AND i.direction = 'outbound'`,
       [tenant.orgId, tenant.projectId, environment, provider, endpoint, method],
     );
     return (rows[0]?.at as Date | null) ?? null;
   }
 
-  async create(i: Incident): Promise<void> {
+  async create(i: AnyIncident): Promise<void> {
     await this.db.query(
       `INSERT INTO incidents (id, org_id, project_id, environment, provider, scope, kind, status, opened_at,
                               resolved_at, last_alerted_rate, last_alerted_p95_ms, last_evaluated_minute,
                               alerts_muted, peak_error_rate, peak_p95_ms, baseline, summary, sample_request_ids,
-                              window_minutes, deploy_hint)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+                              window_minutes, deploy_hint, direction)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
       [
         i.id,
         i.orgId,
@@ -717,12 +810,13 @@ class PgIncidentStore implements IncidentStore {
         i.sampleRequestIds,
         i.windowMinutes ?? 5,
         i.deployHint ?? null,
+        i.direction ?? 'outbound',
       ],
     );
     await this.writeEndpoints(i);
   }
 
-  async update(i: Incident): Promise<void> {
+  async update(i: AnyIncident): Promise<void> {
     await this.db.query(
       `UPDATE incidents SET scope = $3, kind = $4, status = $5, resolved_at = $6, last_alerted_rate = $7,
               last_alerted_p95_ms = $8, last_evaluated_minute = $9, alerts_muted = $10, peak_error_rate = $11,
@@ -752,7 +846,7 @@ class PgIncidentStore implements IncidentStore {
     await this.writeEndpoints(i);
   }
 
-  private async writeEndpoints(i: Incident): Promise<void> {
+  private async writeEndpoints(i: AnyIncident): Promise<void> {
     for (const e of i.endpoints) {
       await this.db.query(
         `INSERT INTO incident_endpoints (incident_id, org_id, project_id, endpoint, method, first_seen_at,
@@ -819,6 +913,8 @@ function rowToProvider(r: Row): ProviderRecord {
     allowedPathWords: (r.allowed_path_words as string[] | undefined) ?? [],
     endpointAliases: (r.endpoint_aliases as Record<string, string> | undefined) ?? {},
     thresholds: (r.thresholds as Record<string, number> | undefined) ?? {},
+    webhookThresholds: (r.webhook_thresholds as Record<string, number> | undefined) ?? {},
+    webhooksPublic: Boolean(r.webhooks_public),
   };
 }
 
@@ -885,6 +981,8 @@ const PROVIDER_FIELDS: [keyof ProviderInput, string][] = [
   ['allowedPathWords', 'allowed_path_words'],
   ['endpointAliases', 'endpoint_aliases'],
   ['thresholds', 'thresholds'],
+  ['webhookThresholds', 'webhook_thresholds'],
+  ['webhooksPublic', 'webhooks_public'],
 ];
 
 class PgConfigStore implements ConfigStore {
@@ -1075,8 +1173,9 @@ class PgConfigStore implements ConfigStore {
   }
   async recordDiscoveredHost(t: Tenant, d: DiscoveredHost, maxHosts: number) {
     const { rows } = await this.db.query(
-      `INSERT INTO providers (id, org_id, project_id, name, source, category, domain, hosts, alerts_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, ARRAY[$8::text], $9)
+      `INSERT INTO providers (id, org_id, project_id, name, source, category, domain, hosts, alerts_enabled,
+                              first_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, ARRAY[$8::text], $9, COALESCE($11::timestamptz, now()))
        ON CONFLICT (project_id, name) DO UPDATE SET
          hosts = CASE WHEN $8 = ANY(providers.hosts) OR cardinality(providers.hosts) >= $10
                       THEN providers.hosts ELSE array_append(providers.hosts, $8) END,
@@ -1094,6 +1193,7 @@ class PgConfigStore implements ConfigStore {
         d.host,
         d.alertsEnabled,
         maxHosts,
+        d.seenAt ?? null,
       ],
     );
     return rowToProvider(rows[0]);
@@ -1153,14 +1253,15 @@ class PgConfigStore implements ConfigStore {
     );
     return rows.map(rowToProvider).sort((a, b) => a.name.localeCompare(b.name));
   }
-  async ensureProviders(t: Tenant, names: string[], hosts: Map<string, string>) {
+  async ensureProviders(t: Tenant, names: string[], hosts: Map<string, string>, at?: Date) {
     if (names.length === 0) return;
     await this.db.query(
-      `INSERT INTO providers (id, org_id, project_id, name, host_patterns)
-       SELECT 'prv_' || substr(md5(random()::text || n), 1, 16), $1, $2, n, ARRAY[h]
+      `INSERT INTO providers (id, org_id, project_id, name, host_patterns, first_seen_at)
+       SELECT 'prv_' || substr(md5(random()::text || n), 1, 16), $1, $2, n,
+              CASE WHEN h = '' THEN '{}'::text[] ELSE ARRAY[h] END, COALESCE($5::timestamptz, now())
          FROM unnest($3::text[], $4::text[]) AS u(n, h)
        ON CONFLICT (project_id, name) DO NOTHING`,
-      [t.orgId, t.projectId, names, names.map((n) => hosts.get(n) ?? '')],
+      [t.orgId, t.projectId, names, names.map((n) => hosts.get(n) ?? ''), at ?? null],
     );
   }
 
@@ -1609,6 +1710,7 @@ function bind(db: Queryable, pool: pg.Pool): Storage {
     config: new PgConfigStore(db),
     usage: new PgUsageStore(db),
     auth: new PgAuthStore(db),
+    inbound: new PgInboundStore(db),
     async transaction<T>(fn: (tx: Storage) => Promise<T>): Promise<T> {
       if (db !== pool) return fn(storage); // already inside a transaction
       const client = await pool.connect();

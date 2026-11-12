@@ -7,6 +7,7 @@ import type {
   Storage,
   Tenant,
 } from '../../storage/types.js';
+import { isOutbound } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
 import type { AlertPayload } from '../alerts/channels.js';
 import type { AlertDispatcher } from '../alerts/dispatcher.js';
@@ -14,9 +15,9 @@ import type { Job } from '../scheduler/scheduler.js';
 import { BASELINE_REFRESH_MS, baselineKeyId, refreshBaselines } from '../scoring/baseline.js';
 import {
   MAX_WINDOW_MINUTES,
-  LOW_TRAFFIC_WINDOWS,
+  MinuteSums,
   defaultBaseline,
-  evaluate,
+  evaluateAt,
   failureCount,
   failureRate,
   normalRate,
@@ -72,26 +73,13 @@ export function evaluateKeys(
     const minutes = perKey.get(keyId(key)) ?? new Map<number, RollupRow>();
     const baseline = baselines.get(keyId(key)) ?? defaultBaseline(t);
     const evals: Evaluation[] = [];
-    const over = (end: number, n: number) => {
-      const window: RollupRow[] = [];
-      for (let i = 0; i < n; i++) {
-        const r = minutes.get(end - i * MIN);
-        if (r) window.push(r);
-      }
-      return windowStats(window);
-    };
-    for (let k = 0; k < count; k++) {
-      const end = T.getTime() - k * MIN;
-      let n: number = t.windowMinutes;
-      let stats = over(end, n);
-      // low traffic: widen the window until it holds enough calls (docs/scoring.md)
-      for (const w of LOW_TRAFFIC_WINDOWS) {
-        if (stats.calls >= t.minCalls || w <= t.windowMinutes) continue;
-        n = w;
-        stats = over(end, w);
-      }
-      evals.push(evaluate(stats, baseline, t, n));
-    }
+    // every minute any of the windows below can reach
+    const span = count - 1 + Math.max(t.windowMinutes, MAX_WINDOW_MINUTES);
+    const start = T.getTime() - (span - 1) * MIN;
+    const sums = new MinuteSums(start, span, (m) => minutes.get(m));
+    // low traffic: wider windows (docs/scoring.md "Low traffic")
+    for (let k = 0; k < count; k++)
+      evals.push(evaluateAt(sums, T.getTime() - k * MIN, baseline, t));
     out.push({ ...key, baseline, evals });
   }
   return out;
@@ -104,6 +92,8 @@ export async function baselinesFor(
   keys: readonly RollupKey[],
   now: Date,
   t: Thresholds,
+  /** A key's own thresholds (its provider's overrides) for its slow class; default `t`. */
+  tFor?: (key: RollupKey) => Thresholds,
 ): Promise<Map<string, Baseline>> {
   const stored = new Map((await storage.incidents.getBaselines(tenant)).map((b) => [keyId(b), b]));
   const stale = keys.filter((k) => {
@@ -111,7 +101,8 @@ export async function baselinesFor(
     return !b || now.getTime() - b.computedAt.getTime() >= BASELINE_REFRESH_MS;
   });
   if (stale.length > 0) {
-    for (const [id, b] of await refreshBaselines(storage, tenant, stale, now, t)) stored.set(id, b);
+    for (const [id, b] of await refreshBaselines(storage, tenant, stale, now, t, tFor))
+      stored.set(id, b);
   }
   return stored;
 }
@@ -294,7 +285,7 @@ export function incidentJob(
     async run(now) {
       const T = new Date(floorMinute(now.getTime()) - MIN);
       const active = await storage.rollups.activeKeys(new Date(T.getTime() - 30 * MIN));
-      const openAll = await storage.incidents.listOpenAll();
+      const openAll = (await storage.incidents.listOpenAll()).filter(isOutbound);
 
       const tenants = new Map<string, { tenant: Tenant; keys: Map<string, RollupKey> }>();
       const touch = (t: Tenant) => {
@@ -337,7 +328,9 @@ export function incidentJob(
             (count - 1 + Math.max(projectT.windowMinutes, MAX_WINDOW_MINUTES) - 1) * MIN,
         );
         const rows = await storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN) });
-        const baselines = await baselinesFor(storage, tenant, keyList, now, projectT);
+        const baselines = await baselinesFor(storage, tenant, keyList, now, projectT, (k) =>
+          tOf(k.provider),
+        );
         const byProvider = new Map<string, typeof keyList>();
         for (const k of keyList)
           byProvider.set(k.provider, [...(byProvider.get(k.provider) ?? []), k]);

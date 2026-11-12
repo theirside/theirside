@@ -1,0 +1,35 @@
+name: learning-from-empty
+description: >-
+  Three weeks from an empty database, watching baselines form (learning for the first day,
+  the status mix after it, silence after 21 days of history). Nothing may fire while learning,
+  and nothing fires on healthy traffic afterwards.
+start: 2026-01-05T00:00:00Z
+duration: 21d
+seed: 1
+history: { mode: empty }
+providers:
+  - name: PayCo
+    host: api.payco.test
+    endpoints:
+      - method: POST
+        path: /v1/charges
+        traffic: { pattern: daily, rate: 40 }
+        normal: { errors: 0.004, notFound: 0.005, latencyMs: 280 }
+      - method: GET
+        path: /v1/charges/:id
+        traffic: { pattern: daily, rate: 25 }
+        normal: { errors: 0.002, latencyMs: 110 }
+  - name: MailCo
+    host: api.mailco.test
+    endpoints:
+      - method: POST
+        path: /v3/send
+        traffic: { pattern: daily, rate: 8, weekend: 0.5 }
+        normal: { errors: 0.003, validation: 0.01, latencyMs: 400 }
+webhooks:
+  - provider: NotifyCo
+    route: /webhooks/notifyco
+    traffic: { pattern: daily, rate: 5 }
+    normal: { rejected: 0.002, handlerMs: 60, lagS: 1.5 }
+expect:
+  - quiet: { from: day 0, to: day 21 }

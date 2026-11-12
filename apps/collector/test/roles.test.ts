@@ -46,9 +46,11 @@ const ADMIN_ONLY = [
   'PUT /v1/admin/settings/security',
   'PUT /v1/admin/settings/thresholds',
   'PUT /v1/admin/users/:id/role',
+  'PUT /v1/admin/webhooks/candidates/confirm',
+  'PUT /v1/admin/webhooks/candidates/restore',
 ];
 
-/** Writes members may make: providers and their own account. */
+/** Writes members may make: providers (and their webhook sources' expected-quiet switch) and their own account. */
 const MEMBER_WRITES = [
   'PATCH /v1/admin/providers/:id',
   'POST /v1/account/2fa/disable',
@@ -59,6 +61,8 @@ const MEMBER_WRITES = [
   'POST /v1/account/sign-out-everywhere',
   'POST /v1/admin/providers/:id/merge',
   'POST /v1/admin/providers/:id/split',
+  'PUT /v1/admin/webhooks/candidates/ignore',
+  'PUT /v1/admin/webhooks/sources',
 ];
 
 /** The dashboard's routes with the role each needs, as the server decides it. */

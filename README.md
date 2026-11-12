@@ -5,13 +5,14 @@
 Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs. When one of them degrades, error trackers show *that something failed*. Theirside tells you *"Acme Cards `POST /v2/cards/:id/activate` is failing 38% for 6 minutes (normally 0.2%); other Acme Cards endpoints are fine"*, and hands you a summary with request IDs to paste straight into an email to their support.
 
 - **One line in your app.** A zero-dependency Node SDK records every outgoing call to the providers you list (fetch, http/https, Axios, `@nestjs/axios`), never slows or breaks the app, and never captures bodies, headers, query strings or raw paths. Paths are templated in your process: IDs become `:id`, and by default only known API words are kept, so customer names in paths never leave your app (limits: a few names that are also API words, like `max` or `mark`; see [privacy](docs/privacy.md)).
+- **Watches the webhooks they send you, too.** No setup for Stripe, GitHub, Shopify, Slack, Svix and a dozen more senders: alerts when deliveries stop for longer than that sender's learned rate for this hour of the week allows ("No Stripe webhooks for 2h 10m; normally ~40/hour at this time"), when your app starts rejecting them (401/403 named: likely a rotated signing secret), handles them slowly (duplicates on retry) or they arrive late. Senders it doesn't know are listed as discovered routes for you to confirm or ignore, and never alert until confirmed. Only the route, your status, timing and the sender's timestamp are recorded; your other incoming traffic is ignored.
 - **Learns what normal looks like** per endpoint and alerts only on real deviations: statistically significant error spikes or latency jumps, grouped per provider, with escalation and resolve.
 - **Slack, email or signed webhooks**, a dashboard, a health API, and an embeddable status page you can show your own customers.
 - **Self-host it for free** (one Docker image + your Postgres; your data never leaves your infrastructure). Cloud and enterprise editions come from the same code; see [Free vs paid](#free-vs-paid).
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.3` on port 4318, amd64 and arm64). Needs Docker, no clone:
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.4` on port 4318, amd64 and arm64). Needs Docker, no clone:
 
 ```sh
 mkdir theirside && cd theirside
@@ -20,7 +21,7 @@ docker compose -f compose.yml up -d --wait
 docker compose -f compose.yml logs collector | grep -m1 "/setup"
 ```
 
-`compose.yml` is [`docker/compose.selfhost.yml`](docker/compose.selfhost.yml) from the latest release; every setting in it is optional and commented. Nothing to configure: the first start generates your project API key and the last line prints a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. Running it on a server? Set `THEIRSIDE_PUBLIC_URL` to its address in `compose.yml` first, and create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. The image tag `0.3` follows patch releases (`docker compose -f compose.yml pull`, then `up -d --wait` again); pin `0.3.3` if you prefer. Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+`compose.yml` is [`docker/compose.selfhost.yml`](docker/compose.selfhost.yml) from the latest release; every setting in it is optional and commented. Nothing to configure: the first start generates your project API key and the last line prints a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. Running it on a server? Set `THEIRSIDE_PUBLIC_URL` to its address in `compose.yml` first, and create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. The image tag `0.4` follows patch releases (`docker compose -f compose.yml pull`, then `up -d --wait` again); pin `0.4.0` if you prefer. Coming from 0.3 (the file pulled `0.3`)? Download the file again, or change the tag to `0.4`: [upgrade notes](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure). Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
 
 > Maintainers: theirside.dev serves this file from the latest release, so change `docker/compose.selfhost.yml` only for new settings or a new minor version (then bump its image tag). `docker/docker-compose.yml` is the dev/demo file for working on this repo.
 
@@ -40,7 +41,33 @@ That's all: every third-party API the app calls is discovered, grouped into prov
 
 **4. Invite your team** under **Settings → Users**, add a Slack/email/webhook channel under **Settings → Alert channels** and press **Send test alert**. Your providers appear under **Providers** within a minute of the first calls; rename, merge or hide them under **Settings → Providers**. When one breaks, you get the alert.
 
-Want to see it first? `docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build` runs a NestJS demo app against fake providers you can break on demand: [docs/demo.md](docs/demo.md).
+### Demo vs simulation
+
+Want to see it first? From a clone of this repo (`pnpm install`, Docker running), there are two ways to watch it work, with fake providers only: [docs/demo.md](docs/demo.md).
+
+| | Demo | Simulation |
+|---|---|---|
+| What runs | Collector, NestJS demo app, chaos provider and load generator, in Docker | The collector from source, fed synthetic traffic from a scenario |
+| Clock | Real time | Simulated, up to several hundred times faster |
+| Data | The demo database (Docker volume; a week of history seeded on first start) | `theirside_sim` on the test Postgres (in memory) |
+| Break things | By hand: chaos rules and webhook modes | Faults in a scenario (Simulation page or YAML), with expected outcomes |
+| Good for | Seeing the SDK, dashboard and alerts end to end | Weeks of detection behaviour in minutes; checking a scenario passes |
+
+```sh
+pnpm demo            # start the demo stack, print the URLs and the admin token
+pnpm demo:logs       # follow its logs
+pnpm demo:stop       # stop, keep the data
+pnpm demo:reset      # stop and wipe its database
+
+pnpm sim             # Simulation page on http://localhost:4318/#/simulation
+pnpm sim:run dev-environment [--speed 3600]   # run a scenario, print pass/fail
+pnpm sim:list        # the ready-made scenarios
+pnpm sim:help daily  # what a setting means and its default (docs/simulation-reference.md)
+pnpm sim:stop        # stop the simulation's Postgres
+pnpm sim:reset       # wipe the simulation database (never the test database)
+```
+
+Both use port 4318, so run one at a time: each command says which one is running and how to stop it. They need Docker running; `pnpm sim` starts the test Postgres and builds the dashboard when needed.
 
 ## Docs
 
@@ -52,6 +79,7 @@ Want to see it first? `docker compose --env-file docker/dev.env -f docker/docker
 | [docs/security.md](docs/security.md) | Dashboard accounts, 2FA and its key, sign-in through your identity proxy, the admin token |
 | [docs/scoring.md](docs/scoring.md) | Baselines, incident rules, the 0–100 score |
 | [docs/demo.md](docs/demo.md) | Local demo with a chaos provider |
+| [docs/simulation-reference.md](docs/simulation-reference.md) | Every simulation scenario setting and its default |
 | [docs/benchmarks.md](docs/benchmarks.md) | SDK overhead, memory soak, collector-down, ingest throughput |
 | [docs/architecture.md](docs/architecture.md) | Components, data model, editions, decision log |
 | [apps/collector/openapi.yaml](apps/collector/openapi.yaml) | Ingest, health and incidents API |

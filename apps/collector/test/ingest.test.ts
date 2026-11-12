@@ -83,7 +83,10 @@ describe('POST /v1/ingest', () => {
     });
     expect(new Date(r.minute).getTime()).toBe(minute);
     expect(Number(r.latency_sum_ms)).toBeCloseTo(3160);
-    expect(r[`h${bucketIndex(3000)}`]).toBe(1);
+    // one column per fine bucket (migration 021), NULL when empty; coarse h* stay NULL in new rows
+    expect(r[`lat${bucketIndex(3000)}`]).toBe(1);
+    expect(r[`lat${bucketIndex(3000) + 1}`]).toBeNull();
+    expect(r.h0).toBeNull();
 
     const usage = (await t.db.pool.query('SELECT * FROM usage_daily')).rows[0];
     expect(usage).toMatchObject({ calls_ingested: 5, events_dropped_reported: 7 });

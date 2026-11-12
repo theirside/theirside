@@ -132,6 +132,9 @@ export function createApi(runtime: Runtime) {
    * always flushes (success or error, capped at `flushTimeoutMs`, and on AWS
    * Lambda by the time left minus a margin), then returns its result or
    * rethrows its error unchanged. The wrapped function returns a promise.
+   * On AWS Lambda, an HTTP invocation (API Gateway REST or HTTP API, ALB,
+   * function URL) from a webhook sender is recorded as an inbound delivery,
+   * with the status the sender got from the handler's result.
    */
   function wrap<F extends AnyFn>(
     handler: F,
@@ -145,6 +148,20 @@ export function createApi(runtime: Runtime) {
       this: unknown,
       ...args: Parameters<F>
     ): Promise<Awaited<ReturnType<F>>> {
+      // AWS Lambda HTTP events (API Gateway, ALB, function URLs) that are webhook deliveries
+      let delivery: ReturnType<Client['lambdaBegin']>;
+      try {
+        delivery = client?.lambdaBegin((args as unknown[])[0]);
+      } catch {
+        delivery = undefined;
+      }
+      const settle = (result: unknown, threw: boolean) => {
+        try {
+          if (delivery) client?.lambdaEnd(delivery, result, threw);
+        } catch {
+          // never let recording change the handler's outcome
+        }
+      };
       const after = () => {
         let ms = cap();
         const left = lambdaRemainingMs(args as unknown[]);
@@ -156,9 +173,11 @@ export function createApi(runtime: Runtime) {
           this,
           args as unknown[],
         );
+        settle(result, false);
         await after();
         return result as Awaited<ReturnType<F>>;
       } catch (err) {
+        settle(undefined, true);
         await after();
         throw err;
       }

@@ -5,9 +5,12 @@ import {
   OUTCOMES,
   type Outcome,
 } from '@theirside/shared';
+import { addDelivery } from '../modules/ingest/prepare.js';
 import { refreshBaselines } from '../modules/scoring/baseline.js';
+import { refreshInboundBaselines } from '../modules/scoring/inbound.js';
 import { resolveThresholds } from '../modules/scoring/thresholds.js';
 import type {
+  InboundRollupRow,
   Incident,
   RollupDelta,
   RollupKey,
@@ -16,6 +19,7 @@ import type {
   Tenant,
 } from '../storage/types.js';
 import { newId } from '../util/ids.js';
+import { inboundKeyId } from '../storage/types.js';
 
 /**
  * Demo data (docs/demo.md): 7 days of synthetic rollups for the four fake
@@ -543,6 +547,9 @@ export async function seedDemo(
     `rollups: ${rollupRows} rows, ${calls} calls (${days} days per minute, ${HISTORY_DAYS} days in total)`,
   );
 
+  const deliveries = await seedWebhooks(storage, tenant, end, rand);
+  log(`webhooks: ${deliveries} NotifyCo deliveries over ${WEBHOOK_HISTORY_DAYS} days`);
+
   const incidents = await seedIncidents(storage, tenant, keys, end, rand);
   log(`incidents: ${incidents} over 30 days`);
 
@@ -558,6 +565,74 @@ export async function seedDemo(
 
   await storage.config.setMetaIfAbsent(SEEDED_META_KEY, end.toISOString());
   return { seeded: true, rollupRows, calls, events, incidents, baselines: baselines.size };
+}
+
+/** Inbound history: a day more than silence needs (silenceMinHistoryDays), so it is judged at once. */
+export const WEBHOOK_HISTORY_DAYS = 22;
+/** The chaos provider's default rate (WEBHOOK_RATE_PER_MIN), so live traffic matches the history. */
+const WEBHOOKS_PER_MIN = 30;
+export const DEMO_WEBHOOK_ROUTE = '/webhooks/notifyco';
+
+/**
+ * NotifyCo's webhooks to the demo app, per minute (docs/demo.md): steady
+ * deliveries, accepted, handled in ~15 ms and signed ~1 s before arrival,
+ * written as inbound rollups, the source row and its baseline (silence profile).
+ */
+async function seedWebhooks(
+  storage: Storage,
+  tenant: Tenant,
+  end: Date,
+  rand: () => number,
+): Promise<number> {
+  const key = { environment: DEMO_ENVIRONMENT, provider: 'NotifyCo', endpoint: DEMO_WEBHOOK_ROUTE };
+  const rows: InboundRollupRow[] = [];
+  let total = 0;
+  for (let t = end.getTime() - WEBHOOK_HISTORY_DAYS * DAY; t < end.getTime(); t += MIN) {
+    const n = poisson(rand, WEBHOOKS_PER_MIN);
+    if (n === 0) continue;
+    const r: InboundRollupRow = {
+      ...key,
+      minute: new Date(t).toISOString(),
+      total: 0,
+      accepted: 0,
+      rejected: 0,
+      status3xx: 0,
+      status401: 0,
+      status403: 0,
+      status4xx: 0,
+      status5xx: 0,
+      unanswered: 0,
+      durationHistogram: emptyHistogram(),
+      durationSumMs: 0,
+      lagCount: 0,
+      lagSumS: 0,
+      lagHistogram: emptyHistogram(),
+    };
+    for (let i = 0; i < n; i++)
+      addDelivery(
+        r,
+        200,
+        15 * Math.exp(0.4 * gaussian(rand)),
+        1000 * Math.exp(0.3 * gaussian(rand)),
+      );
+    rows.push(r);
+    total += n;
+    if (rows.length >= 2000) await storage.inbound.upsertRollups(tenant, rows.splice(0));
+  }
+  await storage.inbound.upsertRollups(tenant, rows);
+  await storage.inbound.touchSources(tenant, [
+    { ...key, lastDeliveryAt: end, service: 'nestjs-demo' },
+  ]);
+  const t = resolveThresholds(await storage.config.getThresholds(tenant));
+  await refreshInboundBaselines(
+    storage,
+    tenant,
+    [key],
+    new Map([[inboundKeyId(key), end]]),
+    end,
+    t,
+  );
+  return total;
 }
 
 const hhmm = (d: Date) => `${d.toISOString().slice(11, 16)} UTC`;

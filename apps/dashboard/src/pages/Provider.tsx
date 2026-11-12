@@ -4,6 +4,7 @@ import { Chart, type ChartSeries } from '../components/Chart';
 import { Badge, Card, ErrorBox, Segmented, StatusDot, Table, usePoll } from '../components/ui';
 import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
+import { WebhooksSection } from './Webhooks';
 
 // series colours are tokens (packages/design): chart-1 blue, -2 pink, -3 purple, -4 teal,
 // -5 amber, -6 red, -7 green, -8 grey
@@ -282,7 +283,8 @@ export function Provider({ name, environment }: { name: string; environment: str
           )}
         </Card>
       )}
-      {data?.range === range && !p && <div className="empty">No data for {name}.</div>}
+      {data?.range === range && !p && <div className="empty">No outgoing calls to {name}.</div>}
+      <WebhooksSection provider={name} environment={environment} range={range} />
     </>
   );
 }

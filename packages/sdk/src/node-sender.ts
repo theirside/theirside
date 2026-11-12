@@ -107,7 +107,7 @@ export class NodeSender implements Sender {
     });
   }
 
-  post(batch: IngestBatch): Promise<SendResult> {
+  post(batch: IngestBatch, path: string = INGEST_PATH): Promise<SendResult> {
     return new Promise<SendResult>((resolve) => {
       gzip(JSON.stringify(batch), (zerr, body) => {
         if (zerr) return resolve({ error: 'gzip' });
@@ -119,7 +119,7 @@ export class NodeSender implements Sender {
           }
         };
         try {
-          const url = new URL(INGEST_PATH, this.cfg.endpoint);
+          const url = new URL(path, this.cfg.endpoint);
           const req = new OriginalClientRequest({
             protocol: url.protocol,
             hostname: url.hostname,

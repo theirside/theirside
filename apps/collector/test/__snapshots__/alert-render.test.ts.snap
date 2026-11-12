@@ -810,3 +810,108 @@ Open in dashboard: https://theirside.internal.example/#/incidents/inc_01
 
 -- Theirside"
 `;
+
+exports[`inbound webhook alerts > Slack names the webhooks and says "rejected", not "errors" 1`] = `
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Incident opened: Stripe webhooks",
+        "type": "plain_text",
+      },
+      "type": "header",
+    },
+    {
+      "text": {
+        "text": ":red_circle: *No Stripe webhooks for 2h 10m; normally ~40/hour at this time*",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "fields": [
+        {
+          "text": "*Duration*
+130 min (since 11:50 UTC)",
+          "type": "mrkdwn",
+        },
+        {
+          "text": "*Environment*
+production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "• POST \`/webhooks/stripe\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": ":white_check_mark: No other Stripe webhook routes.",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "text": {
+        "text": "\`\`\`Stripe webhooks — POST /webhooks/stripe: no deliveries since 11:50 UTC (2h 10m)
+Normally ~40/hour at this time of week; ~87 expected in this gap (chance of none: &lt; 0.0001%).
+Our receiving service (payments-api) is running and reporting.\`\`\`",
+        "type": "mrkdwn",
+      },
+      "type": "section",
+    },
+    {
+      "elements": [
+        {
+          "style": "danger",
+          "text": {
+            "text": "Open in dashboard",
+            "type": "plain_text",
+          },
+          "type": "button",
+          "url": "https://theirside.internal.example/#/incidents/inc_wh1",
+        },
+      ],
+      "type": "actions",
+    },
+    {
+      "elements": [
+        {
+          "text": "Theirside · production",
+          "type": "mrkdwn",
+        },
+      ],
+      "type": "context",
+    },
+  ],
+  "text": "Incident opened: No Stripe webhooks for 2h 10m; normally ~40/hour at this time
+No other Stripe webhook routes.
+https://theirside.internal.example/#/incidents/inc_wh1",
+}
+`;
+
+exports[`inbound webhook alerts > email subject and body 1`] = `
+"Incident opened: No Stripe webhooks for 2h 10m; normally ~40/hour at this time
+
+Duration: 130 min (since 11:50 UTC)
+Environment: production
+
+- POST /webhooks/stripe
+No other Stripe webhook routes.
+
+Summary for the provider (paste as is):
+Stripe webhooks — POST /webhooks/stripe: no deliveries since 11:50 UTC (2h 10m)
+Normally ~40/hour at this time of week; ~87 expected in this gap (chance of none: < 0.0001%).
+Our receiving service (payments-api) is running and reporting.
+
+Open in dashboard: https://theirside.internal.example/#/incidents/inc_wh1
+
+-- Theirside"
+`;

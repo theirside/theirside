@@ -106,5 +106,5 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'])
 const codes = await Promise.all(children.map((c) => c.exited));
 children.forEach(({ v }, i) => log(`${v.label} exited with ${codes[i]}`));
 const r = summarize(OUT_DIR, { warmupMin: WARMUP, plannedHours: HOURS });
-log(`${r.ok ? 'OK for production' : 'needs investigation'}: ${r.summaryPath}`);
+log(`${r.ok ? 'OK' : 'needs investigation'}: ${r.summaryPath}`);
 for (const reason of r.reasons) log(`  - ${reason}`);

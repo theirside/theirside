@@ -100,6 +100,8 @@ export function buildSdkConfig(
     })),
     tenants: tenants.slice(0, SDK_CONFIG_LIMITS.hostLists),
     sampleRate: null,
+    // this collector stores inbound webhook deliveries (SDKs record none until it says so)
+    inbound: true,
   };
 }
 
@@ -119,6 +121,12 @@ export async function registerSdkConfigRoute(app: FastifyInstance, ctx: AppConte
       await ctx.storage.config.listProviders(tenant),
       ctx.directory.catalog.entries,
     );
+    // webhook discovery: confirmed routes (recorded like declared ones) and ignored ones
+    const routes = await ctx.storage.inbound.candidateRoutes(tenant);
+    if (routes.confirmed.length > 0)
+      config.webhookRoutes = routes.confirmed.slice(0, SDK_CONFIG_LIMITS.webhookRoutes);
+    if (routes.ignored.length > 0)
+      config.ignoredWebhookRoutes = routes.ignored.slice(0, SDK_CONFIG_LIMITS.ignoredWebhookRoutes);
     // pooled learning for the asking service (SDK 0.2.0+ sends ?service=&environment=)
     const q = req.query as { service?: unknown; environment?: unknown };
     if (typeof q.service === 'string' && q.service && q.service.length <= 128) {

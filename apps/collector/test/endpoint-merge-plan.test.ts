@@ -77,7 +77,11 @@ describe('planEndpointMerges', () => {
       ['/_ah/api/orderendpoint/list', '/:id/api/orderendpoint/list'],
       [],
     ],
-    ['route parameters are not :id', ['/cards/:cardId/history', '/cards/orderendpoint/history'], []],
+    [
+      'route parameters are not :id',
+      ['/cards/:cardId/history', '/cards/orderendpoint/history'],
+      [],
+    ],
   ];
   it.each(cases)('%s', (_name, templates, expected) => {
     expect(merges(post(...templates)).map(([f, t]) => [f, t])).toEqual(expected);
@@ -93,7 +97,10 @@ describe('planEndpointMerges', () => {
   });
 
   it('uses the allowed words it is given (dashboard + catalog)', () => {
-    const keys = post('/_ah/api/:id/v1/getOrderHistory', '/_ah/api/orderendpoint/v1/getOrderHistory');
+    const keys = post(
+      '/_ah/api/:id/v1/getOrderHistory',
+      '/_ah/api/orderendpoint/v1/getOrderHistory',
+    );
     expect(merges(keys, new Set())).toEqual([]);
     expect(merges(keys)).toHaveLength(1);
   });
@@ -110,7 +117,9 @@ describe('planEndpointMerges', () => {
     );
     expect(plan.routes).toEqual(['/_ah/api/orderendpoint/v1/getOrderHistory']);
     // the 0.1.0 row itself is not merged: which :id was the slash can't be told
-    expect(plan.merges.map((m) => m.endpoint)).toEqual(['/:id/api/orderendpoint/v1/getOrderHistory']);
+    expect(plan.merges.map((m) => m.endpoint)).toEqual([
+      '/:id/api/orderendpoint/v1/getOrderHistory',
+    ]);
   });
 
   it('never pushes a target with :id as a route (it would swallow sibling words)', () => {
@@ -138,7 +147,7 @@ describe('planEndpointMerges', () => {
   });
 });
 
-describe('allowed words: the whole segment counts (camelCase RPC methods)', () => {
+describe('allowed words: the whole segment counts (RPC methods)', () => {
   it('merges an :id into a camelCase method named in the allowed words', () => {
     const allowed = new Set([
       'orderendpoint',

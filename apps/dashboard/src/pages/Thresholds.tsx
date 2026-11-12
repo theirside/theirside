@@ -50,6 +50,22 @@ const GROUPS: [string, Row[]][] = [
       ['minBaselineRate', 'Error-rate floor for the statistical test', '%', pp, fromPp],
     ],
   ],
+  [
+    // the rules above apply to webhook deliveries too (rejections like errors, handler p95 like latency)
+    'Webhooks',
+    [
+      ['silenceHistoryDays', 'Silence: history the hourly rate is learned from', 'days'],
+      ['silenceMinHistoryDays', 'Silence: judged only after this much history', 'days'],
+      [
+        'silenceMinDeliveries',
+        '… and this many deliveries (rare sources never alert)',
+        'deliveries',
+      ],
+      ['silenceMinGapMinutes', 'Silence: never before this long without a delivery', 'min'],
+      ['lagMultiplier', 'Delivery lag: p95 multiple of normal', '×'],
+      ['lagDeltaSeconds', 'Delivery lag: p95 margin above normal', 's'],
+    ],
+  ],
 ];
 const ALL = GROUPS.flatMap(([, rows]) => rows);
 
@@ -186,7 +202,11 @@ function ThresholdsForm({ data, onSaved }: { data: ThresholdsResponse; onSaved: 
 const LABEL: Record<string, string> = Object.fromEntries(ALL.map(([k, label]) => [k, label]));
 
 function ProviderOverrides({ providers }: { providers: Provider[] }) {
-  const own = providers.filter((p) => Object.keys(p.thresholds ?? {}).length > 0);
+  const own = providers.filter(
+    (p) =>
+      Object.keys(p.thresholds ?? {}).length > 0 ||
+      Object.keys(p.webhookThresholds ?? {}).length > 0,
+  );
   if (own.length === 0)
     return <div className="empty">No provider overrides the project thresholds.</div>;
   return (
@@ -204,9 +224,14 @@ function ProviderOverrides({ providers }: { providers: Provider[] }) {
               <a href={href('settings', 'providers', p.name)}>{p.displayName || p.name}</a>
             </td>
             <td>
-              {Object.entries(p.thresholds).map(([k, v]) => (
+              {Object.entries(p.thresholds ?? {}).map(([k, v]) => (
                 <Badge key={k} title={LABEL[k] ?? k}>
                   {LABEL[k] ?? k}: {k === 'rateDeltaPp' ? `${pp(v)} pp` : v}
+                </Badge>
+              ))}
+              {Object.entries(p.webhookThresholds ?? {}).map(([k, v]) => (
+                <Badge key={`wh-${k}`} title={`Webhooks: ${LABEL[k] ?? k}`}>
+                  webhooks · {LABEL[k] ?? k}: {k === 'rateDeltaPp' ? `${pp(v)} pp` : v}
                 </Badge>
               ))}
             </td>

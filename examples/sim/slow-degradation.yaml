@@ -1,0 +1,27 @@
+name: slow-degradation
+description: >-
+  Latency creeps up over three days, from normal to 4× (a provider slowly running out of
+  capacity): a latency incident must open before the end of the ramp; nothing before it.
+start: 2026-01-05T00:00:00Z
+duration: 5d
+seed: 7
+history: { mode: seeded, days: 8 }
+providers:
+  - name: SearchCo
+    host: api.searchco.test
+    endpoints:
+      - method: GET
+        path: /v2/search
+        traffic: { pattern: daily, rate: 80 }
+        normal: { errors: 0.002, latencyMs: 300 }
+faults:
+  - id: creeping
+    target: SearchCo GET /v2/search
+    at: day 1 00:00
+    duration: 3d
+    type: latency
+    size: 4
+    ramp: true
+expect:
+  - incident: { kind: latency, fault: creeping, within: 3d }
+  - quiet: { from: day 0, to: day 1 00:00 }

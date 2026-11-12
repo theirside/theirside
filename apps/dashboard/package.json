@@ -1,6 +1,6 @@
 {
   "name": "@theirside/dashboard",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "description": "Theirside dashboard (Vite + React), built into the collector's static directory.",
@@ -9,7 +9,8 @@
     "dev": "pnpm --filter @theirside/design build && vite",
     "build": "pnpm --filter @theirside/design build && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "playwright test"
+    "smoke": "playwright test",
+    "smoke:sim": "playwright test e2e/sim.spec.ts"
   },
   "dependencies": {
     "@theirside/design": "workspace:*",

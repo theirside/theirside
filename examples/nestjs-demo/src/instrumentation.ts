@@ -38,6 +38,10 @@ init({
   // nestjs-cls request id, set per incoming request (see app.module.ts)
   getCorrelationId: () => ClsServiceManager.getClsService()?.getId(),
   debug: process.env.THEIRSIDE_DEBUG === '1',
+  // Inbound webhooks need no setup for known senders (Stripe, GitHub, Shopify, Svix…).
+  // NotifyCo signs the Standard Webhooks way, which several providers share, so the
+  // route is declared to name it (see webhooks.controller.ts).
+  webhooks: [{ path: '/webhooks/notifyco', provider: 'NotifyCo' }],
 });
 
 startXRay();

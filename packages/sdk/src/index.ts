@@ -1,12 +1,13 @@
 import { createApi } from './api.js';
 import type { Runtime } from './client.js';
 import { HttpInstrumentation, defaultHttpMode } from './instrument/http.js';
+import { ServerInstrumentation } from './instrument/server.js';
 import { UndiciInstrumentation } from './instrument/undici.js';
 import { NodeSender } from './node-sender.js';
 import { SDK_VERSION } from './version.js';
 import { isUntracked } from './untracked.js';
 
-export type { InitOptions, ProviderConfig } from './config.js';
+export type { InitOptions, ProviderConfig, WebhookRouteConfig } from './config.js';
 export type { ManualCall } from './recorder.js';
 export type { TransportStats as SdkStats } from './transport.js';
 export type { WrapFetchOptions, WrapOptions } from './api.js';
@@ -26,6 +27,8 @@ export const nodeRuntime: Runtime = {
       (sender as NodeSender).agent,
     ),
     new UndiciInstrumentation(recorder, log),
+    // inbound webhooks; `webhooks: false` subscribes nothing
+    ...(recorder.inbound.enabled ? [new ServerInstrumentation(recorder.inbound, log)] : []),
   ],
   isUntracked,
   timers: () => true,

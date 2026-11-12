@@ -129,7 +129,7 @@ describe('Slack message', () => {
   });
 });
 
-/** `:id` next to other text and colons, as in a real deployment (":id:" became 🆔). */
+/** `:id` next to other text and colons, as seen in real traffic (":id:" became 🆔). */
 const COLONS: AlertPayload = {
   ...OPEN,
   event: 'escalation',
@@ -277,5 +277,89 @@ describe('email', () => {
     expect(m.html).toContain('&lt;script&gt;');
     expect(m.html).not.toContain('href=');
     expect(m.text).not.toContain('Open in dashboard');
+  });
+});
+
+describe('inbound webhook alerts', () => {
+  const SILENCE: AlertPayload = {
+    event: 'open',
+    direction: 'inbound',
+    title: 'No Stripe webhooks for 2h 10m; normally ~40/hour at this time',
+    incidentId: 'inc_wh1',
+    provider: 'Stripe',
+    environment: 'production',
+    status: 'open',
+    kind: 'webhook_silence',
+    endpoints: [
+      {
+        method: 'POST',
+        endpoint: '/webhooks/stripe',
+        errorRate: null,
+        normalErrorRate: null,
+        p95Ms: null,
+        normalP95Ms: null,
+      },
+    ],
+    otherEndpointsOk: true,
+    otherEndpointsText: 'No other Stripe webhook routes.',
+    summary: [
+      'Stripe webhooks — POST /webhooks/stripe: no deliveries since 11:50 UTC (2h 10m)',
+      'Normally ~40/hour at this time of week; ~87 expected in this gap (chance of none: < 0.0001%).',
+      'Our receiving service (payments-api) is running and reporting.',
+    ].join('\n'),
+    url: 'https://theirside.internal.example/#/incidents/inc_wh1',
+    openedAt: '2026-11-10T11:50:00.000Z',
+    resolvedAt: null,
+    durationMinutes: 130,
+    support: null,
+    webhook: {
+      lastDeliveryAt: '2026-11-10T11:49:00.000Z',
+      silentMinutes: 130,
+      expectedPerHour: 40.2,
+      pValue: 1e-12,
+      authShare: null,
+      lagP95S: null,
+      normalLagP95S: 2,
+    },
+  };
+  const REJECTED: AlertPayload = {
+    ...SILENCE,
+    incidentId: 'inc_wh2',
+    kind: 'webhook_rejections',
+    title: 'GitHub webhooks rejected by our app (38%, mostly 401/403)',
+    provider: 'GitHub',
+    endpoints: [
+      {
+        method: 'POST',
+        endpoint: '/webhooks/github',
+        errorRate: 0.38,
+        normalErrorRate: 0.002,
+        p95Ms: 41,
+        normalP95Ms: 38,
+      },
+    ],
+    otherEndpointsText: 'No other GitHub webhook routes.',
+    summary:
+      'GitHub webhooks — POST /webhooks/github: rejected by our app since 14:02 UTC (6m)\nMost are 401/403 from our app: the webhook signing secret likely does not match (rotated, or test vs live mode).',
+  };
+
+  it('Slack names the webhooks and says "rejected", not "errors"', () => {
+    const s = renderSlack(SILENCE);
+    expect(JSON.stringify(s.blocks[0])).toContain('Incident opened: Stripe webhooks');
+    expect(s.text).toContain('No Stripe webhooks for 2h 10m; normally ~40/hour at this time');
+    const r = JSON.stringify(renderSlack(REJECTED).blocks);
+    expect(r).toContain('rejected 38% (normal 0.2%), handler p95 41 ms (normal 38 ms)');
+    expect(r).not.toContain('errors 38%');
+    expect(renderSlack(SILENCE)).toMatchSnapshot();
+  });
+
+  it('email subject and body', () => {
+    expect(emailSubject(SILENCE)).toBe(
+      '[Theirside] No Stripe webhooks for 2h 10m; normally ~40/hour at this time',
+    );
+    const e = renderEmail(REJECTED);
+    expect(e.text).toContain('- POST /webhooks/github: rejected 38% (normal 0.2%)');
+    expect(e.text).toContain('signing secret likely does not match');
+    expect(renderEmail(SILENCE).text).toMatchSnapshot();
   });
 });

@@ -28,6 +28,7 @@ import { href } from '../router';
 import { useIsAdmin } from '../role';
 import { ProviderPanel, ProvidersTable } from './ProviderSettings';
 import { ThresholdsTab } from './Thresholds';
+import { DiscoveredWebhookRoutes } from './Webhooks';
 import { UsersTab } from './Users';
 
 /** [id, label, admins only] */
@@ -115,6 +116,7 @@ function ProvidersTab({ name }: { name: string | undefined }) {
       </p>
       <DiscoverySettings />
       <ProvidersTable />
+      <DiscoveredWebhookRoutes />
     </>
   );
 }

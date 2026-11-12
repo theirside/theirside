@@ -13,6 +13,12 @@ export const PROTOCOL_VERSION = 1;
 export const MIN_SUPPORTED_PROTOCOL_VERSION = 1;
 
 export const INGEST_PATH = '/v1/ingest';
+/**
+ * Same as INGEST_PATH, for batches of inbound webhook deliveries an SDK sends
+ * before the collector has said it stores them (`inbound: true` in init). A
+ * collector older than 0.4.0 answers 404, so they are never stored as calls.
+ */
+export const INGEST_INBOUND_PATH = '/v1/ingest/inbound';
 export const MAX_BATCH_EVENTS = 5000;
 export const MAX_BATCH_BYTES_COMPRESSED = 1024 * 1024;
 

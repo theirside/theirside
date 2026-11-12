@@ -207,7 +207,7 @@ export function summarize(dir, { warmupMin = 10, plannedHours } = {}) {
   out();
   if (reasons.length === 0) {
     out(
-      `**OK for production.** SDK heap is flat in the second half (below ${LIMITS.heapMbPerHour} MB/h or no clear trend) and the RSS gap to the control levelled off with the collector up and with it unreachable.`,
+      `**OK.** SDK heap is flat in the second half (below ${LIMITS.heapMbPerHour} MB/h or no clear trend) and the RSS gap to the control levelled off with the collector up and with it unreachable.`,
     );
   } else {
     out('**Needs investigation:**');

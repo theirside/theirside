@@ -15,9 +15,19 @@ export function num(x: number): string {
   return x >= 100 ? Math.round(x).toLocaleString() : String(Math.round(x * 10) / 10);
 }
 
+/**
+ * "Now" for relative times: the browser's clock, or the simulated clock in simulation
+ * mode (the banner keeps it current), so "3 min ago" means simulated minutes.
+ */
+let nowSource: () => number = () => Date.now();
+export const nowMs = () => nowSource();
+export function setNowSource(fn: () => number): void {
+  nowSource = fn;
+}
+
 export function ago(iso: string | null): string {
   if (!iso) return '–';
-  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  const s = Math.round((nowMs() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
@@ -39,7 +49,26 @@ export const KIND_LABEL: Record<string, string> = {
   validation: 'validation errors',
   rate_limited: 'rate limited',
   behaviour: 'behaviour change',
+  webhook_silence: 'webhooks silent',
+  webhook_rejections: 'webhooks rejected',
+  webhook_slow: 'webhooks slow',
+  webhook_lag: 'webhooks late',
 };
+
+/** "2h 10m", "45m", "3d 4h" (as in alerts). */
+export function gap(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m}m`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+  const h = Math.floor(m / 60);
+  return `${Math.floor(h / 24)}d${h % 24 ? ` ${h % 24}h` : ''}`;
+}
+
+/** Seconds of delivery lag: "2 s", "6m 20s"-style via gap(). */
+export function lag(s: number | null | undefined): string {
+  if (s === null || s === undefined) return '–';
+  return s < 60 ? `${Math.round(s)} s` : gap(s / 60);
+}
 
 /** Failure groups of the status-mix chart. */
 export const GROUP_LABEL: Record<string, string> = {

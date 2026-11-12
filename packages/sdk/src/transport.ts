@@ -1,4 +1,5 @@
 import {
+  INGEST_INBOUND_PATH,
   PROTOCOL_VERSION,
   SDK_PACKAGE_NAME,
   type CallEvent,
@@ -10,6 +11,17 @@ import { unrefTimer } from './platform.js';
 import type { RingBuffer } from './queue.js';
 import type { GetResult, SendResult, Sender } from './sender.js';
 import { SDK_VERSION } from './version.js';
+
+/**
+ * Inbound deliveries the collector hasn't confirmed it stores (`inbound: true`
+ * in init): sent in batches of their own to INGEST_INBOUND_PATH, so an older
+ * collector rejects only them (404) and never stores them as calls.
+ */
+export interface InboundProbe {
+  probePending(): boolean;
+  takeProbe(max: number): CallEvent[];
+  probeResult(outcome: 'accepted' | 'rejected' | 'retry' | 'dropped', events: CallEvent[]): void;
+}
 
 const MAX_BACKOFF_MS = 60_000;
 const BASE_BACKOFF_MS = 1000;
@@ -48,6 +60,8 @@ export class Transport {
   sampleRate: number;
   /** Extra header fields for every batch (instance, runtime); set by the client. */
   header: Partial<IngestBatch> = {};
+  /** Held inbound deliveries to offer the collector; set by the client. */
+  probe: InboundProbe | undefined;
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -90,7 +104,12 @@ export class Transport {
 
   /** Nothing queued, retrying or in flight. */
   idle(): boolean {
-    return this.queue.length === 0 && !this.retryBatch && !this.inFlight;
+    return (
+      this.queue.length === 0 &&
+      !this.retryBatch &&
+      !this.inFlight &&
+      !(this.probe?.probePending() ?? false)
+    );
   }
 
   /** Drop queued (and retry-pending) events matching pred; they count as dropped. */
@@ -112,6 +131,15 @@ export class Transport {
   flush(force = false): Promise<void> {
     if (this.inFlight) return this.inFlight;
     if (!force && Date.now() < this.backoffUntil) return Promise.resolve();
+    const probe = this.probe?.takeProbe(this.cfg.maxBatch);
+    if (probe && probe.length > 0) {
+      this.inFlight = this.sendProbe(probe)
+        .catch(() => {})
+        .finally(() => {
+          this.inFlight = undefined;
+        });
+      return this.inFlight;
+    }
     const batch = this.retryBatch ?? this.queue.take(this.cfg.maxBatch);
     this.retryBatch = undefined;
     if (batch.length === 0) return Promise.resolve();
@@ -175,9 +203,8 @@ export class Transport {
     await this.sendBatch([]).catch(() => {});
   }
 
-  private async sendBatch(events: CallEvent[]): Promise<void> {
-    const dropped = this.totalDropped() - this.reportedDrops;
-    const batch: IngestBatch = {
+  private batchFor(events: CallEvent[], dropped: number): IngestBatch {
+    return {
       protocol: PROTOCOL_VERSION,
       sdk: { name: SDK_PACKAGE_NAME, version: SDK_VERSION },
       service: this.cfg.service,
@@ -189,6 +216,39 @@ export class Transport {
       stats: { queued: this.queue.length, sent: this.sent, failedFlushes: this.failedFlushes },
       events,
     };
+  }
+
+  /** One batch of held inbound deliveries to INGEST_INBOUND_PATH (drops are reported by the main batches). */
+  private async sendProbe(events: CallEvent[]): Promise<void> {
+    const probe = this.probe!;
+    this.lastPostAt = Date.now();
+    const result = await this.sender.post(this.batchFor(events, 0), INGEST_INBOUND_PATH);
+    const status = 'status' in result ? result.status : 0;
+    if (status >= 200 && status < 300) {
+      this.sent += events.length;
+      this.failures = 0;
+      this.backoffUntil = 0;
+      probe.probeResult('accepted', events);
+      return;
+    }
+    // 404/405: no such route, a collector that predates inbound deliveries
+    if (status === 404 || status === 405) {
+      probe.probeResult('rejected', events);
+      return;
+    }
+    this.failedFlushes++;
+    this.lastFlushError = 'error' in result ? result.error : `http_${status}`;
+    const retryable = status === 0 || status === 408 || status === 429 || status >= 500;
+    probe.probeResult(retryable ? 'retry' : 'dropped', events);
+    this.failures++;
+    const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (this.failures - 1));
+    this.backoffUntil = Date.now() + backoff * (0.8 + Math.random() * 0.4);
+    this.log(`flush failed (${this.lastFlushError}); retrying in ~${Math.round(backoff / 1000)}s`);
+  }
+
+  private async sendBatch(events: CallEvent[]): Promise<void> {
+    const dropped = this.totalDropped() - this.reportedDrops;
+    const batch = this.batchFor(events, dropped);
     this.lastPostAt = Date.now();
     const result = await this.post(batch);
     const status = 'status' in result ? result.status : 0;

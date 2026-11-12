@@ -118,6 +118,43 @@ describe('incidents and scores read the provider overrides first', () => {
     ).toBe(200);
   });
 
+  it('webhook thresholds and the webhooks status-page switch: admins only, validated', async () => {
+    const id = await providerId('Quiet Pay');
+    const url = `/v1/admin/providers/${id}`;
+    expect(
+      (await member.req('PATCH', url, { webhookThresholds: { silenceMinGapMinutes: 60 } })).json()
+        .error,
+    ).toBe('admin_only');
+    expect((await member.req('PATCH', url, { webhooksPublic: true })).json().error).toBe(
+      'admin_only',
+    );
+    for (const bad of [{ silenceMinGapMinutes: 0 }, { lagMultiplier: 0.5 }, { maxPValue: 0.1 }])
+      expect(
+        (await admin.req('PATCH', url, { webhookThresholds: bad })).statusCode,
+        JSON.stringify(bad),
+      ).toBe(400);
+    const ok = await admin.req('PATCH', url, {
+      webhookThresholds: { silenceMinGapMinutes: 60, lagDeltaSeconds: 300 },
+      webhooksPublic: true,
+    });
+    expect(ok.json()).toMatchObject({
+      webhookThresholds: { silenceMinGapMinutes: 60, lagDeltaSeconds: 300 },
+      webhooksPublic: true,
+      // outgoing overrides untouched
+      thresholds: { minCalls: 10, openAfterMinutes: 2 },
+    });
+    // unchanged values from a member's form are fine
+    expect(
+      (
+        await member.req('PATCH', url, {
+          webhookThresholds: { lagDeltaSeconds: 300, silenceMinGapMinutes: 60 },
+          webhooksPublic: true,
+        })
+      ).statusCode,
+    ).toBe(200);
+    await admin.req('PATCH', url, { webhookThresholds: {}, webhooksPublic: false });
+  });
+
   it('the project thresholds API returns the effective values a provider override replaces', async () => {
     const res = await admin.req('GET', '/v1/admin/settings/thresholds');
     expect(res.json()).toMatchObject({

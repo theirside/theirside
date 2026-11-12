@@ -1,6 +1,6 @@
 {
   "name": "@theirside/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drop-in SDK (Node, serverless, Cloudflare Workers, Deno, Bun) that records outgoing calls to your third-party providers and tells you when one of their endpoints starts failing.",
   "license": "MIT",
   "type": "module",
@@ -72,7 +72,8 @@
     "prepublishOnly": "pnpm run build && vitest run && node test-compat/run.cjs",
     "bench:flush": "node --import tsx --conditions=@theirside/source bench/flush.ts",
     "test:runtimes": "node test-runtime/conditions.mjs && node test-runtime/workerd.mjs",
-    "test:bun": "bun test-runtime/bun.mjs"
+    "test:bun": "bun test-runtime/bun.mjs",
+    "bench:inbound": "node --import tsx --conditions=@theirside/source bench/inbound.ts"
   },
   "devDependencies": {
     "@opentelemetry/api": "~1.9.1",

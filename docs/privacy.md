@@ -5,6 +5,7 @@ This is the customer-facing statement of exactly what Theirside collects. It mus
 ## Summary
 
 - The SDK records **metadata about outgoing calls to third-party APIs**: by default every external host the app calls (auto-discovery), never loopback, private networks, cloud metadata, internal names, telemetry endpoints or hosts you mark internal; with `autoDiscover: false`, only the providers you list. No request or response bodies, no query strings, no headers, no raw paths.
+- **Inbound webhooks** (Node servers, and AWS Lambda HTTP invocations through `wrap()`; on by default, `webhooks: false` turns it off): for requests your app receives *from a known webhook sender*, the route template, the status your app answered, how long it took and the sender's signed timestamp. Every other incoming request is ignored and nothing about it is kept. Never a body, never a signature, never another header value ([details](#inbound-webhooks)). Webhook discovery also reports POST/PUT routes that look like deliveries from senders it can't identify, once a minute per route with a count ([details](#webhook-discovery)).
 - Paths are stored only as **templates** with identifiers removed (`/v2/cards/:id/activate`). Anything that could be a card number (12+ digits in one path segment) is always removed.
 - The self-hosted collector runs in your infrastructure and stores data in your own Postgres. It makes no outbound calls except to the alert channels and the SMTP server you configure (alerts, invites, password-reset emails), and, only with `THEIRSIDE_AUTH_PROXY=alb`, to AWS's public-key endpoint for ALB sign-in tokens.
 
@@ -80,6 +81,82 @@ Limits (residual risk):
 - An API with more than 16 distinct literal resource names under one parent shows them as `:id` until you add routes.
 - The dashboard's endpoint list shows every template in use, so you can audit this.
 
+### Inbound webhooks
+
+SDK 0.3.0+. Two ways in, with the same rules:
+
+- **Node servers:** the SDK subscribes to Node's `http.server.request.start` and `http.server.response.finish` diagnostics channels (code: `packages/sdk/src/instrument/server.ts`, `packages/sdk/src/inbound.ts`, `packages/shared/src/webhooks.ts`).
+- **AWS Lambda:** `wrap(handler)` looks at each invocation's event (`packages/sdk/src/lambda.ts`). Only API Gateway REST API (payload 1.0), HTTP API (payload 2.0), Application Load Balancer and function URL events are HTTP requests; anything else (SQS, EventBridge, S3, schedules, WebSocket messages) is ignored. From an HTTP event it reads the method, the path (`path`, or `rawPath` without a named stage) and header *names* from `headers`/`multiValueHeaders` (any case). It never reads `body`, the query string parameters, cookies, `requestContext` identity or any other header value. The status is the one the sender got: the result's `statusCode`; for a result without one, 200 on HTTP APIs and function URLs (AWS treats the result as the body) and 502 on REST APIs and ALB (AWS rejects it); a thrown error is a 500 (HTTP API, function URL) or 502 (REST API, ALB).
+
+Other runtimes record no incoming requests: Google Cloud Functions, Azure Functions, Vercel, Netlify, Cloudflare Workers, Deno and Bun (the fetch build).
+
+**Which requests.** For each incoming request the SDK looks only at whether certain header *names* are present, plus, if you declared routes with `webhooks: [{ path, provider }]`, the request path to match them. A request is a webhook when it matches a declared route, or carries the header combination of a known sender (checked against each sender's documentation):
+
+| Sender | Headers that must be present | Timestamp read |
+|---|---|---|
+| Stripe | `stripe-signature` | the `t=` part of `stripe-signature` |
+| GitHub | `x-github-event`, `x-github-delivery` | none |
+| GitLab | `x-gitlab-event` | `webhook-timestamp` |
+| Shopify | `x-shopify-topic`, `x-shopify-webhook-id` | `x-shopify-triggered-at` |
+| Slack | `x-slack-signature`, `x-slack-request-timestamp` | `x-slack-request-timestamp` |
+| SendGrid | `x-twilio-email-event-webhook-signature` | `x-twilio-email-event-webhook-timestamp` |
+| Twilio | `x-twilio-signature` | none |
+| Checkout.com | `cko-signature` | none |
+| Paddle | `paddle-signature` | the `ts=` part of `paddle-signature` |
+| PayPal | `paypal-transmission-sig`, `paypal-transmission-id` | `paypal-transmission-time` |
+| Square | `x-square-hmacsha256-signature` | none (Square only sends the first attempt's time) |
+| HubSpot | `x-hubspot-signature-v3` (or `x-hubspot-signature` + `x-hubspot-signature-version`) | `x-hubspot-request-timestamp` (v3) |
+| Zoom | `x-zm-signature`, `x-zm-request-timestamp` | `x-zm-request-timestamp` |
+| Twitch | `twitch-eventsub-message-signature` | `twitch-eventsub-message-timestamp` |
+| Calendly | `calendly-webhook-signature` | the `t=` part of `calendly-webhook-signature` |
+| Typeform | `typeform-signature` | none |
+| Razorpay | `x-razorpay-signature` | none |
+| Linear | `linear-signature`, `linear-delivery` | `linear-timestamp` |
+| Vercel | `x-vercel-signature` | none |
+| Svix (Clerk, Resend and other Svix customers) | `svix-id`, `svix-signature` | `svix-timestamp` |
+| Standard Webhooks | `webhook-id`, `webhook-signature` | `webhook-timestamp` |
+
+Every other request (your API traffic, health checks, browsers) is dropped at that check, except POST/PUT requests, which webhook discovery (below) looks at further. Nothing else about them is read and nothing is recorded, counted or kept in memory. Senders that sign inside the body (Adyen, Mailgun) are only recorded on routes you declare.
+
+**What is sent, per delivery**, in the same batches as outgoing calls:
+
+| Field | Example | Source |
+|---|---|---|
+| `direction` | `inbound` | Marks a delivery your app received. |
+| `ts` | `1762160520000` | When the request reached your app (epoch ms). |
+| `provider` | `Stripe` | The sender from the table above, or the name you declared for the route. |
+| `host` | `inbound` | Always the literal `inbound`: no hostname of yours or theirs. |
+| `method` | `POST` | HTTP method. |
+| `endpoint` | `/webhooks/stripe` | Your route as a **template**, with the outgoing rules above (query string dropped, IDs → `:id`, strict path privacy; webhook words and sender names such as `webhooks`, `hooks`, `stripe` count as known words). A declared route is sent as you declared it (`/hooks/:tenant/clerk`). |
+| `status` | `401` or `null` | The status your app answered; `null` when the connection closed before your answer (the sender gave up). Lambda: as described above. |
+| `durationMs` | `38.2` | From the request reaching your app to your response finishing (Lambda: the handler's run, without the flush). |
+| `outcome` | `http_4xx` | From the status as for outgoing calls; `timeout` when unanswered. |
+| `sentAt` | `1762160518500` | Only when the sender signs a send time (table above): that time, epoch ms. Ignored when more than 7 days from the receive time. |
+
+**Header values.** The only header value the SDK reads is the timestamp in the right-hand column: at most 512 characters of that one header, from which only the number is kept. For `stripe-signature`, `paddle-signature` and `calendly-webhook-signature` that means the `t=`/`ts=` part; the signature itself (`v1=…`, `h1=…`) is looked at only to skip past it and is never stored or sent. No other header value, no body, no query string, no client IP, and no correlation ID or provider request ID are taken for inbound deliveries.
+
+**Bounds and safety.** Deliveries are never sampled (silence detection needs every one counted) and go into the same bounded queue as calls. State between request start and response is kept in a `WeakMap` keyed by the response, so a request that never finishes holds no memory. No listener is added to your request or response; a closed connection is seen by observing the response's own events. An internal error is swallowed and never changes your response.
+
+### Webhook discovery
+
+For senders that the table above can't identify, the SDK also reports **candidate** routes (on by default; `webhookDiscovery: false` turns it off). It looks only at POST and PUT requests and, for those, at the path and header *names*:
+
+- **Never a candidate**: any request with a browser or front-end header (`cookie`, `origin`, `referer`, `sec-fetch-site`, `sec-fetch-mode`, `x-requested-with`, `x-csrf-token`, `x-xsrf-token`), and every GET, PATCH, DELETE and other method.
+- **Route words**: a whole path segment `webhook(s)`, `hook(s)` or `callback(s)`, anywhere in the path. The words `notify`, `notifications` and `events` are ordinary REST resources too, so they count only as the last segment, or before one final plain name (`/events`, `/integrations/acme/events`, `/notify/acme`), and only when the request carries no `authorization` or `x-api-key` header. `POST /api/events/123/attend`, `POST /api/events` with a bearer token and `GET /api/events/123` are never candidates.
+- **Generic signature header**: the request carries a header *named* `x-signature`, `x-webhook-signature`, `x-hub-signature(-256)`, `x-<anything>-signature` or `webhook-signature`. To find it, the SDK tests the names of the request's headers; it never reads a value.
+
+What is sent for a candidate, in the same batches as deliveries: `direction: 'inbound'`, `candidate: true`, the route template, method, the status your app answered and the handling time of one delivery, and `count`, the deliveries to that route since the last report. Each route is reported at most once a minute (so a busy route costs one event a minute), at most 50 candidate routes per process. No sender timestamp, body, query string or header value.
+
+- **Route template**: the same strict templating as every route (IDs → `:id`, words outside the vocabulary → `:id`), with one exception: the **suggested name**. When the segment after the route word is the path's last segment (`/webhooks/orbitpay`), or the segment before a final route word (`/api/orbitpay/webhook`), and it is a plain lower-case name (letters and inner hyphens, 2–32 characters, no digits, so never an ID or token), it is kept as-is and sent as `provider`. Otherwise `provider` is `unknown`. At most 16 distinct names per process; after that, `unknown` and `:id`. Residual risk: a path that ends in a customer's slug right after a webhook word (`/webhooks/acme-corp`) sends that slug. Declare such routes with `webhooks: [{ path: '/webhooks/:tenant', provider }]`, or turn discovery off.
+- **In the collector**: candidates are stored only as discovered routes (`webhook_candidates`: route, method, suggested name, first and last seen, the service that last reported it, the decision and who made it; `webhook_candidate_days`: deliveries per route and UTC day). No raw events, rollups, sources, provider rows or incidents, and they don't count toward the plan's call limit. At most 50 undecided routes per project; undecided routes not reported for 30 days and day counts older than 30 days are deleted.
+- **Decisions**: an admin confirms a route with a sender name (the remote config then lists it in `webhookRoutes`, and the SDK records it exactly like a route declared in `webhooks`), or a member ignores it (listed in `ignoredWebhookRoutes`, and the SDK stops reporting it).
+
+**Collector support.** An older collector would store deliveries as outgoing calls, so they are sent only to a collector that says it stores them (collector 0.4.0+):
+
+- By default, until the remote config answers, the SDK holds the first 500 deliveries in memory for at most 60 s. It sends them once the config says `inbound: true`, and discards them if it doesn't, if there is no config endpoint (404), or if no answer comes within 60 s. Later deliveries follow the latest answer.
+- With `inbound: true` in `init()` (for AWS Lambda, where each cold start would otherwise wait), held deliveries (at most 500 between flushes) are sent at each flush in batches of their own to `POST /v1/ingest/inbound`. A collector older than 0.4.0 has no such route and answers 404; the SDK then drops them and records no more deliveries. Those batches carry only inbound events, so outgoing calls are never lost with them. A config answer without `inbound: true` turns recording off too.
+- With `remoteConfig: false` the SDK assumes a current collector and sends them with the other events.
+
 ### What the SDK never collects
 
 Request or response bodies; query strings or fragments; request headers (including `Authorization`, cookies, API keys); response headers other than the value of the allowlisted request-ID headers; raw paths; error messages or stack traces; client IP addresses; anything about calls to excluded, hidden or internal hosts (and, with `autoDiscover: false`, to hosts you haven't listed).
@@ -101,6 +178,7 @@ With `sampleRate` below 1, only that fraction of successful calls is sent; every
 Everything lives in the Postgres database you point `DATABASE_URL` at.
 
 - **Raw events** (`events`): the per-call fields above, plus `org_id`, `project_id`, `service`, `environment`, `sdk_version` and `received_at`. Partitioned by day; whole days are dropped after `THEIRSIDE_RAW_RETENTION_DAYS` (default 30). Used for request-ID samples in incidents and for debugging. Event timestamps more than 5 minutes in the future or 24 hours in the past are replaced by the receive time.
+- **Inbound webhook deliveries**: raw events in the same `events` table with `direction = 'inbound'` and `sent_at` (the sender's signed time, when present); per-minute rollups in `rollups_inbound_1m` (deliveries, accepted, rejected, 3xx/401/403/other 4xx/5xx, unanswered, handler-duration and lag histograms, per environment/provider/route/minute, no IDs); `webhook_sources` (per route: first seen, last delivery, the service that received it, the "expected quiet" switch); `inbound_baselines` (normal rejected share, percentiles and the learned deliveries per hour of the week). Same retention as calls and rollups. **Discovered webhook routes** (webhook discovery): `webhook_candidates` and `webhook_candidate_days`, described above, kept 30 days unless decided.
 - **Per-minute rollups** (`rollups_1m`): counts per outcome, 429 count, latency histogram and sum, per environment/provider/endpoint/method/minute. No IDs of any kind. Kept `THEIRSIDE_ROLLUP_RETENTION_DAYS` (default 90), lower if a plan's entitlement caps it.
 - **Usage** (`usage_daily`): calls ingested and SDK-reported drops per project per day.
 - **SDK health** (`sdk_instances`): per service and environment: SDK name/version, first/last seen, cumulative dropped events, last flush error code.
@@ -135,6 +213,7 @@ The dashboard (served by the collector, behind user sign-in, [security.md](secur
 `GET /status/<token>` and `GET /embed.js` are public, without login; the random 24-character token in the URL is the only access control. The page shows:
 
 - only providers you marked **Show on the public status page** (off by default), and only under their **public display name** when one is set (otherwise their provider name);
+- a provider's webhooks as a separate "<name> webhooks" row only when **Also show its webhooks** is switched on for it (off by default), with the same status and daily bars, computed from webhook incidents; never routes or delivery counts;
 - each one's current status (Operational / Degraded / Outage / No recent data) and a 30-day bar of daily uptime, computed from incidents (uptime % per day in a tooltip and over 30 days).
 
 It never shows endpoint paths, methods, call counts, error rates, latencies, request or correlation IDs, environments, or providers not marked public. Pages are sent with `Cache-Control: public, max-age=30`, `Referrer-Policy: no-referrer`, `robots: noindex` and a Content-Security-Policy that blocks loading anything external. Its fonts come from the collector itself (`/fonts/`), never from a font CDN, so visitors' browsers contact no third party. `embed.js` only inserts an iframe of that page.

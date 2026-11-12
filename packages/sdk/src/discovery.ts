@@ -203,6 +203,22 @@ export function parseRemoteConfig(body: string): SdkRemoteConfig | null {
       parent: String(l.parent).slice(0, 512),
       position: l.position as number,
     }));
+  // webhook discovery: routes confirmed (like declared ones) and ignored in the dashboard
+  const webhookRoutes = (Array.isArray(o.webhookRoutes) ? o.webhookRoutes : [])
+    .filter(
+      (w): w is { path: string; provider: string } =>
+        !!w &&
+        typeof w === 'object' &&
+        typeof (w as { path?: unknown }).path === 'string' &&
+        (w as { path: string }).path.startsWith('/') &&
+        typeof (w as { provider?: unknown }).provider === 'string' &&
+        (w as { provider: string }).provider !== '',
+    )
+    .slice(0, SDK_CONFIG_LIMITS.webhookRoutes)
+    .map((w) => ({ path: w.path.slice(0, 512), provider: w.provider.slice(0, 128) }));
+  const ignored = strings(o.ignoredWebhookRoutes, SDK_CONFIG_LIMITS.ignoredWebhookRoutes).filter(
+    (r) => r.startsWith('/') && r.length <= 512,
+  );
   return {
     hidden: strings(o.hidden, SDK_CONFIG_LIMITS.hostLists),
     internal: strings(o.internal, SDK_CONFIG_LIMITS.hostLists),
@@ -210,5 +226,8 @@ export function parseRemoteConfig(body: string): SdkRemoteConfig | null {
     tenants: strings(o.tenants, SDK_CONFIG_LIMITS.hostLists),
     sampleRate: typeof rate === 'number' && rate > 0 && rate <= 1 ? rate : null,
     ...(learned.length > 0 ? { learned } : {}),
+    ...(o.inbound === true ? { inbound: true } : {}),
+    ...(webhookRoutes.length > 0 ? { webhookRoutes } : {}),
+    ...(ignored.length > 0 ? { ignoredWebhookRoutes: ignored } : {}),
   };
 }

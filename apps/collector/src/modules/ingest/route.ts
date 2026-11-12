@@ -1,12 +1,13 @@
 import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import {
+  INGEST_INBOUND_PATH,
   INGEST_PATH,
   MAX_BATCH_BYTES_COMPRESSED,
   MAX_BATCH_EVENTS,
   ingestBatchSchema,
 } from '@theirside/shared';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ApiKeyAuthenticator } from '../auth/api-keys.js';
 import { bearerToken } from '../auth/api-keys.js';
 import type { UsageLimiter } from '../usage/limits.js';
@@ -43,7 +44,7 @@ declare module 'fastify' {
 }
 
 /**
- * POST /v1/ingest (architecture §6). Auth runs before the body is read; the
+ * POST /v1/ingest and /v1/ingest/inbound (architecture §6). Auth runs before the body is read; the
  * whole batch (raw events, rollups, usage, SDK heartbeat) is one transaction.
  * 401 bad key, 400 invalid, 413 too large, 429 over plan limit, 503 storage down.
  */
@@ -77,6 +78,35 @@ function freshTemplates(
   return [...out.values()];
 }
 
+/**
+ * Pending discovered webhook routes per project: a busy API whose routes look
+ * like webhooks can't flood the table (new ones beyond this are not stored
+ * until an admin or member decides on some, or old ones age out after 30 days).
+ */
+export const MAX_PENDING_CANDIDATES = 50;
+
+/** Webhook sources' last delivery written recently, per collector process (bounded). */
+const writtenSources = new Map<string, number>();
+const SOURCE_REWRITE_MS = 30_000;
+
+function freshSources<
+  T extends { environment: string; provider: string; endpoint: string; lastDeliveryAt: Date },
+>(tenantKey: string, rows: readonly T[], now: number): T[] {
+  const out = rows.filter((r) => {
+    const at = writtenSources.get(
+      `${tenantKey}\u0000${r.environment}\u0000${r.provider}\u0000${r.endpoint}`,
+    );
+    return at === undefined || now - at >= SOURCE_REWRITE_MS;
+  });
+  if (writtenSources.size > 100_000) writtenSources.clear();
+  for (const r of out)
+    writtenSources.set(
+      `${tenantKey}\u0000${r.environment}\u0000${r.provider}\u0000${r.endpoint}`,
+      now,
+    );
+  return out;
+}
+
 export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Promise<void> {
   const seenProviders = new Map<string, Set<string>>();
 
@@ -104,7 +134,7 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
       }
     });
 
-    scope.post(INGEST_PATH, async (req: FastifyRequest, reply) => {
+    const handle = async (req: FastifyRequest, reply: FastifyReply) => {
       const key = req.ingestKey!;
       const tenant: Tenant = { orgId: key.orgId, projectId: key.projectId };
 
@@ -175,10 +205,21 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
         let seen = seenProviders.get(seenKey);
         if (!seen) seenProviders.set(seenKey, (seen = new Set()));
         const newProviders = [...prepared.providers.keys()].filter((p) => !seen!.has(p));
+        const newSenders = [...prepared.inboundProviders].filter((p) => !seen!.has(p));
 
         await deps.storage.transaction(async (tx) => {
           await tx.events.insert(tenant, receivedAt, prepared.events);
           await tx.rollups.upsert(tenant, prepared.deltas);
+          // inbound webhook deliveries: their own rollups and sources (never rollups_1m)
+          await tx.inbound.upsertRollups(tenant, prepared.inbound);
+          const sources = freshSources(seenKey, prepared.sources, receivedAt.getTime());
+          if (sources.length > 0) await tx.inbound.touchSources(tenant, sources);
+          // webhook discovery: candidate routes (capped per project), never scored
+          if (prepared.candidates.length > 0)
+            await tx.inbound.recordCandidates(tenant, prepared.candidates, MAX_PENDING_CANDIDATES);
+          // a sender seen only through its webhooks still gets a provider row (settings)
+          if (newSenders.length > 0)
+            await tx.config.ensureProviders(tenant, newSenders, new Map(), receivedAt);
           await tx.usage.add(tenant, utcDay(receivedAt), prepared.calls, parsed.data.dropped);
           await tx.config.recordSdkHeartbeat(
             tenant,
@@ -215,14 +256,19 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
             receivedAt,
           );
           if (newProviders.length > 0)
-            await tx.config.ensureProviders(tenant, newProviders, prepared.providers);
+            await tx.config.ensureProviders(tenant, newProviders, prepared.providers, receivedAt);
           // pooled learning: the templates this service sends (each written at most every 30 min)
-          const templates = freshTemplates(seenKey, prepared.events, receivedAt.getTime());
+          const templates = freshTemplates(
+            seenKey,
+            prepared.events.filter((e) => e.direction !== 'inbound'),
+            receivedAt.getTime(),
+          );
           if (templates.length > 0)
             await tx.config.recordServiceTemplates(tenant, templates, receivedAt);
           await tx.config.touchProviders(tenant, prepared.lastCalls);
         });
         for (const p of newProviders) seen.add(p);
+        for (const p of newSenders) seen.add(p);
         deps.limiter.recordAccepted(tenant.orgId, prepared.calls);
         deps.onIngested?.(tenant, prepared.calls);
       } catch (err) {
@@ -232,6 +278,10 @@ export async function registerIngest(app: FastifyInstance, deps: IngestDeps): Pr
         throw err;
       }
       return reply.code(202).send({ accepted: prepared.events.length });
-    });
+    };
+    scope.post(INGEST_PATH, handle);
+    // the same batches, from an SDK not yet told this collector stores inbound deliveries
+    // (`inbound: true` in init): an older collector has no such route and answers 404
+    scope.post(INGEST_INBOUND_PATH, handle);
   });
 }

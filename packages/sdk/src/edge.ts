@@ -12,7 +12,7 @@ import { SDK_VERSION } from './version.js';
  * `@theirside/sdk/edge`. Captures `fetch` only and imports no Node module.
  * Same API as the Node entry.
  */
-export type { InitOptions, ProviderConfig } from './config.js';
+export type { InitOptions, ProviderConfig, WebhookRouteConfig } from './config.js';
 export type { ManualCall } from './recorder.js';
 export type { TransportStats as SdkStats } from './transport.js';
 export type { WrapFetchOptions, WrapOptions } from './api.js';

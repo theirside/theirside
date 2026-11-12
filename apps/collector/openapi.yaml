@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Theirside collector API
-  version: 0.3.3
+  version: 0.4.0
   description: |
     Public API of the Theirside collector: SDK ingest, the health API
     and incidents. Authenticate with a project API key (`Authorization: Bearer tsd_live_…`);
@@ -52,6 +52,20 @@ components:
         service: { type: string }
         environment: { type: string }
         sdkVersion: { type: string }
+        direction:
+          type: string
+          enum: [outbound, inbound]
+          description: 'inbound: a webhook delivery the app received (provider = sender, host = "inbound", endpoint = our route template, status = our answer). Missing: outbound.'
+        sentAt:
+          type: integer
+          description: Inbound only. The sender's signed send time of this delivery attempt, epoch ms.
+        candidate:
+          type: boolean
+          description: 'Inbound only. Webhook discovery: a route that looks like a delivery from a sender the SDK cannot identify; provider is the suggested name or "unknown". Stored as a discovered route, never scored.'
+        count:
+          type: integer
+          minimum: 1
+          description: Candidates only. Deliveries to this route since its last report.
     IngestBatch:
       type: object
       required: [protocol, sdk, service, environment, events]
@@ -168,8 +182,25 @@ components:
         scope: { type: string, enum: [endpoint, provider] }
         kind:
           type: string
-          enum: [errors, latency, auth, not_found, validation, rate_limited, behaviour]
-          description: 'errors: 5xx/network; auth: 401/403; not_found: 404; validation: 400/409/422; rate_limited: 429; behaviour: other change in the status mix'
+          enum:
+            [
+              errors,
+              latency,
+              auth,
+              not_found,
+              validation,
+              rate_limited,
+              behaviour,
+              webhook_silence,
+              webhook_rejections,
+              webhook_slow,
+              webhook_lag,
+            ]
+          description: 'Outgoing calls: errors: 5xx/network; auth: 401/403; not_found: 404; validation: 400/409/422; rate_limited: 429; behaviour: other change in the status mix. Inbound webhooks (direction inbound): webhook_silence, webhook_rejections (our app answering non-2xx), webhook_slow (handler p95), webhook_lag (delivery delay). Treat unknown values like errors.'
+        direction:
+          type: string
+          enum: [outbound, inbound]
+          description: 'inbound: about webhooks your app receives from the provider (collector 0.4.0+); its one endpoint is your route. Missing on older collectors: outbound.'
         deployHint:
           type: [string, 'null']
           description: A restart or deploy of the calling services just before the start, or that there was none
@@ -224,6 +255,30 @@ paths:
         '401': { description: Missing, invalid or revoked key, or no ingest scope }
         '413': { description: Batch too large }
         '415': { description: Unsupported Content-Encoding }
+        '429': { description: Over the plan's monthly call limit; retry later (Retry-After) }
+        '503': { description: Storage unavailable; retry later (Retry-After) }
+  /v1/ingest/inbound:
+    post:
+      summary: Ingest a batch of inbound webhook deliveries before the SDK knows this collector stores them
+      description: 'Same body, limits and answers as `/v1/ingest` (collector 0.4.0+). An SDK with `inbound: true` sends deliveries here until the remote config or a 2xx from this path confirms support; collectors older than 0.4.0 answer 404, so the deliveries are never stored as outgoing calls.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestBatch' }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { type: object, properties: { accepted: { type: integer } } }
+        '400':
+          {
+            description: Invalid batch,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+          }
+        '401': { description: Missing, invalid or revoked key, or no ingest scope }
+        '413': { description: Batch too large }
         '429': { description: Over the plan's monthly call limit; retry later (Retry-After) }
         '503': { description: Storage unavailable; retry later (Retry-After) }
   /v1/sdk-config:

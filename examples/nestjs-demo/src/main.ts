@@ -7,7 +7,11 @@ import { AppModule } from './app.module';
 import { xrayMiddleware } from './xray';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { logger: ['error', 'warn', 'log'] });
+  // rawBody: the webhook route verifies signatures over the exact bytes received
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log'],
+    rawBody: true,
+  });
   app.use(xrayMiddleware);
   app.enableShutdownHooks();
   const port = Number(process.env.PORT ?? 3000);

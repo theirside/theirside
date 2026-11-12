@@ -1,18 +1,15 @@
 import { bootstrap } from './bootstrap.js';
 import { loadConfig } from './config.js';
 import { createContext } from './context.js';
-import {
-  discoveryDigestJob,
-  endpointMergeJob,
-  templateMergeJob,
-} from './modules/discovery/jobs.js';
-import { catalogRegroupJob } from './modules/discovery/regroup.js';
-import { alertJob, incidentJob } from './modules/incidents/job.js';
-import { partitionJob, rollupRetentionJob } from './modules/scheduler/maintenance.js';
+import { schedulerJobs } from './jobs.js';
 import { Scheduler } from './modules/scheduler/scheduler.js';
 import { buildApp } from './server.js';
 import { migrate } from './storage/migrate.js';
 import { createPgStorage } from './storage/postgres.js';
+import { SIM_DEFAULT_START, attachSim } from './sim/app.js';
+import { SimClock } from './sim/clock.js';
+import { checkSimDatabase } from './sim/guard.js';
+import { systemClock } from './util/clock.js';
 
 async function waitForDatabase(ping: () => Promise<void>, log: (m: string) => void): Promise<void> {
   for (let attempt = 1; ; attempt++) {
@@ -34,8 +31,16 @@ async function main() {
   await waitForDatabase(() => storage.ping(), app0Log);
   const applied = await migrate(pool);
   if (applied.length) app0Log(`applied migrations: ${applied.join(', ')}`);
+  // simulation databases and real ones never mix (docs/demo.md "Simulate weeks in minutes")
+  if ((await checkSimDatabase(pool, config.sim)) === 'marked')
+    app0Log('simulation mode: marked this empty database as a simulation database');
 
-  const ctx = createContext(config, storage, { log: app0Log });
+  // simulation mode: product time is the simulated clock; accounts and credentials stay on real time
+  const simClock = config.sim ? new SimClock(SIM_DEFAULT_START) : undefined;
+  const ctx = createContext(config, storage, {
+    log: app0Log,
+    ...(simClock ? { clock: simClock, wallClock: systemClock } : {}),
+  });
   const boot = await bootstrap(storage, {
     apiKey: config.bootstrapApiKey,
     generateKey: config.zeroConfig,
@@ -85,29 +90,21 @@ async function main() {
   const scheduler = new Scheduler(
     storage,
     ctx.clock,
-    [
-      partitionJob(
-        storage,
-        { ahead: config.partitionsAhead, rawRetentionDays: config.rawRetentionDays },
-        info,
-      ),
-      incidentJob(storage, ctx.alerts, { publicUrl: config.publicUrl, log: info }),
-      alertJob(ctx.alerts),
-      discoveryDigestJob(storage, ctx.alerts, { publicUrl: config.publicUrl, log: info }),
-      catalogRegroupJob(storage, ctx.directory.catalog, info),
-      templateMergeJob(storage, info),
-      endpointMergeJob(storage, ctx.directory.catalog.entries, info),
-      rollupRetentionJob(storage, ctx.entitlements, {
-        rollupRetentionDays: config.rollupRetentionDays,
-      }),
-    ],
+    schedulerJobs(ctx, config, info),
     app.log,
     config.schedulerIntervalMs,
   );
 
+  // simulation mode: the engine steps the jobs one simulated minute at a time
+  const sim = simClock ? await attachSim(app, ctx, pool, config, simClock, { log: info }) : null;
+  if (sim)
+    app.log.warn(
+      'SIMULATION MODE: synthetic data on a simulated clock (Simulation page, /__sim API)',
+    );
+
   await app.listen({ host: config.host, port: config.port });
   // a public-paths-only instance serves the status page and nothing else
-  if (config.schedulerEnabled && !config.publicPathsOnly) scheduler.start();
+  if (!sim && config.schedulerEnabled && !config.publicPathsOnly) scheduler.start();
 
   let closing = false;
   const close = async (signal: string) => {
@@ -115,6 +112,7 @@ async function main() {
     closing = true;
     app.log.info(`${signal} received, shutting down`);
     await scheduler.stop();
+    await sim?.engine.stop();
     await app.close();
     await storage.close();
     process.exit(0);

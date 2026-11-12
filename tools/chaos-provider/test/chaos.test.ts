@@ -60,3 +60,67 @@ describe('chaos provider', () => {
     expect(alerts[0]).toMatchObject({ signatureValid: false, body: { event: 'open' } });
   });
 });
+
+describe('webhook sender', () => {
+  it('signs deliveries the Standard Webhooks way; modes change what is sent', async () => {
+    const { createWebhookSender, signStandardWebhook } = await import('../src/webhooks.js');
+    const got: { headers: Record<string, string>; body: string }[] = [];
+    const now = Date.UTC(2026, 10, 10, 14, 0);
+    const s = createWebhookSender({
+      target: 'http://demo.test/webhooks/notifyco',
+      secret: 'sekrit',
+      now: () => now,
+      post: async (headers, body) => {
+        got.push({ headers, body });
+        return 200;
+      },
+    });
+    await s.deliver();
+    const [first] = got;
+    const ts = Number(first!.headers['webhook-timestamp']);
+    expect(ts).toBe(now / 1000);
+    expect(first!.headers['webhook-signature']).toBe(
+      signStandardWebhook('sekrit', first!.headers['webhook-id']!, ts, first!.body),
+    );
+    expect(s.set({ mode: 'rejected' })).toBeNull();
+    await s.deliver();
+    expect(got[1]!.headers['webhook-signature']).not.toBe(
+      signStandardWebhook('sekrit', got[1]!.headers['webhook-id']!, ts, got[1]!.body),
+    );
+    s.set({ mode: 'late', lagSeconds: 900 });
+    await s.deliver();
+    expect(Number(got[2]!.headers['webhook-timestamp'])).toBe(now / 1000 - 900);
+    s.set({ mode: 'slow', delayMs: 2500 });
+    await s.deliver();
+    expect(JSON.parse(got[3]!.body)).toMatchObject({ simulate: 'slow', delayMs: 2500 });
+    s.set({ mode: 'silent' });
+    await s.deliver();
+    expect(got).toHaveLength(4);
+    expect(s.set({ mode: 'bogus' as never })).toMatch(/mode must be/);
+    expect(s.state).toMatchObject({ sent: 4, answers: { '200': 4 } });
+  });
+
+  it('/__webhooks controls the sender', async () => {
+    const { createWebhookSender } = await import('../src/webhooks.js');
+    const sender = createWebhookSender({
+      target: 'http://x.test',
+      secret: 's',
+      post: async () => 200,
+    });
+    const c = createChaosServer({ webhooks: sender });
+    await new Promise<void>((r) => c.server.listen(0, '127.0.0.1', () => r()));
+    const base = `http://127.0.0.1:${(c.server.address() as AddressInfo).port}`;
+    const put = await fetch(`${base}/__webhooks`, {
+      method: 'PUT',
+      body: JSON.stringify({ mode: 'silent' }),
+    });
+    expect(put.status).toBe(200);
+    expect(((await (await fetch(`${base}/__webhooks`)).json()) as { mode: string }).mode).toBe(
+      'silent',
+    );
+    expect(
+      (await fetch(`${base}/__webhooks`, { method: 'PUT', body: '{"mode":"x"}' })).status,
+    ).toBe(400);
+    await c.close();
+  });
+});

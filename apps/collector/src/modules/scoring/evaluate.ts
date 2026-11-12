@@ -9,7 +9,8 @@ import {
   mergeHistograms,
   type Outcome,
 } from '@theirside/shared';
-import { binomialUpperTail } from './stats.js';
+import { countTest, slowClassTest } from './model.js';
+import type { SlowModel } from './model.js';
 import type { Thresholds } from './thresholds.js';
 
 /** The parts of a rollup row scoring needs (works for raw rows and sums). */
@@ -71,6 +72,8 @@ export const kindOutranks = (a: IncidentKind, b: IncidentKind) =>
 export interface WindowStats {
   /** Calls that count: total minus caller aborts. */
   calls: number;
+  /** Calls with a latency (the histogram's total). */
+  timed: number;
   providerErrors: number;
   /** 4xx other than 429. */
   clientErrors: number;
@@ -90,6 +93,20 @@ export interface WindowStats {
   p95: number | null;
 }
 
+/** Failure classes the count test learns an overdispersion for (`OutboundModel.rho`). */
+export type RateClass = FailureGroup | 'nonSuccess';
+
+/**
+ * What the count tests learn per endpoint beyond the normal shares
+ * (baselines.model, migration 020): each failure class's overdispersion
+ * (beta-binomial ρ from hour-to-hour variation in the history) and the slow
+ * class (share of calls above the latency threshold, and its ρ).
+ */
+export interface OutboundModel {
+  rho: Partial<Record<RateClass, number>>;
+  slow?: SlowModel;
+}
+
 export interface BaselineView {
   providerErrorRate: number;
   rate4xx: number;
@@ -106,6 +123,8 @@ export interface BaselineView {
    * right after the upgrade to collector 0.3.0): 4xx groups aren't judged or scored.
    */
   statusMixLearning?: boolean;
+  /** Overdispersion and the slow class (missing: none learned yet; latency isn't judged). */
+  model?: OutboundModel;
 }
 
 /** Baseline for an endpoint with no history at all. */
@@ -151,8 +170,11 @@ export function windowStats(rows: readonly RollupCounts[]): WindowStats {
     rate_limited: throttled,
     client_other: Math.max(0, clientErrors - auth - notFound - validation),
   };
+  let timed = 0;
+  for (const c of histogram) timed += c;
   return {
     calls,
+    timed,
     providerErrors,
     clientErrors,
     throttled,
@@ -256,7 +278,35 @@ export function successCollapseJudged(b: BaselineView): boolean {
   return !b.statusMixLearning || 1 - normalRate(b, 'behaviour') >= NORMAL_SUCCESS_MIN;
 }
 
-/** Is this window "bad" (incident-worthy) relative to the baseline? */
+/** Calls above the slow threshold in the window, and that test (null: no slow class learned). */
+export function slowTest(stats: WindowStats, b: BaselineView, t: Thresholds) {
+  const m = b.model?.slow;
+  if (!m) return null;
+  return { thresholdMs: m.thresholdMs, ...slowClassTest(stats.timed, stats.histogram, m, t) };
+}
+
+/**
+ * How many failure classes one check (`evaluate`) runs the count test on: provider errors;
+ * the slow class once learned; once the status mix is learned the four 4xx groups and
+ * other 4xx; while it is learning, all unsuccessful calls pooled (endpoints that normally
+ * succeed). At least 1.
+ */
+export function classesTested(b: BaselineView, enough = true): number {
+  if (!enough) return 1;
+  let k = 1;
+  if (b.model?.slow) k++;
+  if (!b.learning && !b.statusMixLearning) k += 5;
+  else if (!b.learning && b.statusMixLearning && successCollapseJudged(b)) k++;
+  return k;
+}
+
+/**
+ * Is this window "bad" (incident-worthy) relative to the baseline? Every rate
+ * rule is the count test (`countTest`: excess ≥ `minExcess` and a beta-binomial
+ * p below `maxPValue`); the error-like ones also need `minErrors` and a share
+ * at the incident threshold. Latency: the slow calls (above max(multiplier ×
+ * normal p95, normal p95 + delta)) against their own normal share.
+ */
 export function evaluate(
   stats: WindowStats,
   b: BaselineView,
@@ -265,48 +315,52 @@ export function evaluate(
 ): Evaluation {
   const threshold = errorThreshold(b.providerErrorRate, t);
   const enough = stats.calls >= t.minCalls;
-  const p0 = Math.max(b.providerErrorRate, t.minBaselineRate);
-  const pValue = enough ? binomialUpperTail(stats.calls, stats.providerErrors, p0) : 1;
+  const rho = (c: RateClass) => b.model?.rho[c] ?? 0;
+  // The failure classes this check tests share `maxPValue` (Bonferroni, as the windows do):
+  // each of k classes is tested at maxPValue / k, so an endpoint with seven classes isn't
+  // seven times as likely to page by chance as one with a single class.
+  const tc = { ...t, maxPValue: t.maxPValue / classesTested(b, enough) };
+  const errors = enough
+    ? countTest(stats.calls, stats.providerErrors, b.providerErrorRate, rho('outage'), tc)
+    : null;
+  const pValue = errors?.pValue ?? 1;
   const errorBreach =
-    enough &&
-    stats.providerErrors >= t.minErrors &&
-    stats.errorRate >= threshold &&
-    pValue < t.maxPValue;
-  const latencyBreach =
-    enough &&
-    b.p95Ms !== null &&
-    stats.p95 !== null &&
-    stats.p95 >= t.latencyMultiplier * b.p95Ms &&
-    stats.p95 >= b.p95Ms + t.latencyDeltaMs;
+    !!errors?.bad && stats.providerErrors >= t.minErrors && stats.errorRate >= threshold;
+  const slow = enough ? slowTest(stats, b, tc) : null;
+  const latencyBreach = !!slow?.bad;
 
   // behaviour change: the same test per failure group against its own normal share.
   // Only once the endpoint's normal is learned: a new endpoint's usual 4xx aren't known yet.
-  const significant = (count: number, base: number) =>
+  const significant = (count: number, base: number, c: RateClass) =>
     enough &&
     !b.learning &&
     count >= t.minErrors &&
     count / stats.calls >= errorThreshold(base, t) &&
-    binomialUpperTail(stats.calls, count, Math.max(base, t.minBaselineRate)) < t.maxPValue;
-  const shifted = (count: number, base: number) => !b.statusMixLearning && significant(count, base);
+    countTest(stats.calls, count, base, rho(c), tc).bad;
+  const shifted = (count: number, base: number, c: RateClass) =>
+    !b.statusMixLearning && significant(count, base, c);
   let groupBreach: Evaluation['groupBreach'] = null;
   let strongest = 0;
   for (const g of ['auth', 'not_found', 'validation', 'rate_limited'] as const) {
     const base = g === 'rate_limited' ? b.rate429 : (b.statusMix?.[g] ?? 0);
     const count = stats.groups[g];
-    if (!shifted(count, base)) continue;
+    if (!shifted(count, base, g)) continue;
     const excess = count / stats.calls - base;
     if (excess > strongest) {
       strongest = excess;
       groupBreach = g;
     }
   }
-  // the success share collapsing is judged from ok vs not-ok counts, which every rollup
-  // has: also while the per-status mix is still learning (right after the upgrade), for
-  // endpoints that normally succeed
+  // All unsuccessful calls as one pooled class only while the per-status mix is still
+  // learning (right after the upgrade, from ok vs not-ok counts every rollup has, for
+  // endpoints that normally succeed). Once the mix is learned each class has its own rule:
+  // testing the pool too only added a test where everyday 404s, 422s and 5xx coincide.
   const behaviourBreach =
     groupBreach === null &&
-    (shifted(stats.groups.client_other, b.statusMix?.client_other ?? 0) ||
-      (successCollapseJudged(b) && significant(stats.nonSuccess, normalRate(b, 'behaviour'))));
+    (shifted(stats.groups.client_other, b.statusMix?.client_other ?? 0, 'client_other') ||
+      (!!b.statusMixLearning &&
+        successCollapseJudged(b) &&
+        significant(stats.nonSuccess, normalRate(b, 'behaviour'), 'nonSuccess')));
   const kind: IncidentKind | null = errorBreach
     ? 'errors'
     : groupBreach
@@ -328,6 +382,128 @@ export function evaluate(
     kind,
     bad: kind !== null,
   };
+}
+
+/**
+ * A window holding fewer calls than this is a small sample: the next wider low-traffic
+ * window is tested too (100 calls: enough for the count test to see `minExcess` (5)
+ * extra failures when 5% of calls fail, e.g. the slow calls of a 3× slowdown).
+ */
+export const SMALL_SAMPLE_CALLS = 100;
+
+/**
+ * Per-minute sums of one key's rows over a stretch of minutes, so any window's
+ * stats cost one subtraction (the incident job evaluates up to four windows for
+ * each of the last ten minutes).
+ */
+export class MinuteSums {
+  private static readonly SCALARS = 3 + OUTCOMES.length + STATUS_COUNT_KEYS.length;
+  private readonly width: number;
+  private readonly cum: Float64Array;
+
+  /** Minutes start..start+(n−1)·MIN; `row(minuteMs)` gives each minute's row, if any. */
+  constructor(
+    private readonly start: number,
+    private readonly n: number,
+    row: (minute: number) => RollupCounts | undefined,
+  ) {
+    this.width = MinuteSums.SCALARS + LATENCY_BUCKETS;
+    this.cum = new Float64Array((n + 1) * this.width);
+    const W = this.width;
+    for (let i = 0; i < n; i++) {
+      const base = i * W;
+      const next = base + W;
+      this.cum.copyWithin(next, base, next);
+      const r = row(start + i * MINUTE);
+      if (!r) continue;
+      let f = next;
+      this.cum[f++]! += r.total;
+      this.cum[f++]! += r.status429;
+      this.cum[f++]! += 1;
+      for (const o of OUTCOMES) this.cum[f++]! += r.outcomes[o] ?? 0;
+      for (const k of STATUS_COUNT_KEYS) this.cum[f++]! += r.statusCounts?.[k] ?? 0;
+      const h = r.latencyHistogram;
+      for (let j = 0; j < LATENCY_BUCKETS; j++) this.cum[f++]! += h[j] ?? 0;
+    }
+  }
+
+  /** Calls that count (total minus aborted) in the `minutes` minutes ending at `end`. */
+  calls(end: number, minutes: number): number {
+    const W = this.width;
+    const b = Math.min(this.n, Math.floor((end - this.start) / MINUTE) + 1);
+    const a = Math.max(0, b - minutes);
+    if (b <= a) return 0;
+    const d = (f: number) => this.cum[b * W + f]! - this.cum[a * W + f]!;
+    return Math.max(0, d(0) - d(3 + ABORTED));
+  }
+
+  /** Stats of the `minutes` minutes ending at `end` (inclusive). */
+  window(end: number, minutes: number): WindowStats {
+    const W = this.width;
+    const b = Math.min(this.n, Math.floor((end - this.start) / MINUTE) + 1);
+    const a = Math.max(0, b - minutes);
+    if (b <= a) return windowStats([]);
+    const d = (f: number) => this.cum[b * W + f]! - this.cum[a * W + f]!;
+    let f = 0;
+    const total = d(f++);
+    const status429 = d(f++);
+    f++; // rows
+    const outcomes = {} as Record<Outcome, number>;
+    for (const o of OUTCOMES) outcomes[o] = d(f++);
+    const statusCounts = emptyStatusCounts();
+    for (const k of STATUS_COUNT_KEYS) statusCounts[k] = d(f++);
+    const latencyHistogram = new Array<number>(LATENCY_BUCKETS);
+    for (let j = 0; j < LATENCY_BUCKETS; j++) latencyHistogram[j] = d(f++);
+    return windowStats([{ total, status429, outcomes, statusCounts, latencyHistogram }]);
+  }
+}
+
+const MINUTE = 60_000;
+const LATENCY_BUCKETS = emptyHistogram().length;
+const ABORTED = OUTCOMES.indexOf('aborted');
+
+/**
+ * The evaluation of the window ending at `end`: the normal window (`windowMinutes`),
+ * widened to the first low-traffic window with `minCalls` calls (else the widest);
+ * while that window is a small sample (`SMALL_SAMPLE_CALLS`), the wider ones are
+ * tested too, and the tests share `maxPValue` (Bonferroni: each of k windows tested
+ * at maxPValue / k). The strongest kind any of them finds wins, on the narrowest
+ * window that finds it; with none bad, the first window's evaluation is returned.
+ */
+export function evaluateAt(
+  sums: MinuteSums,
+  end: number,
+  b: BaselineView,
+  t: Thresholds,
+): Evaluation {
+  const windows = chainWindows((n) => sums.calls(end, n), t);
+  const tk = windows.length > 1 ? { ...t, maxPValue: t.maxPValue / windows.length } : t;
+  let first: Evaluation | null = null;
+  let best: Evaluation | null = null;
+  for (const n of windows) {
+    const e = evaluate(sums.window(end, n), b, tk, n);
+    first ??= e;
+    if (e.kind && (!best || kindOutranks(e.kind, best.kind!))) best = e;
+  }
+  return best ?? first!;
+}
+
+/**
+ * The windows tested for one minute (`evaluateAt`): the first of `windowMinutes`, then
+ * the low-traffic windows, holding `minCalls` (else the widest), then the wider ones
+ * while the last one holds fewer than `SMALL_SAMPLE_CALLS`.
+ */
+export function chainWindows(callsIn: (minutes: number) => number, t: Thresholds): number[] {
+  const all = [t.windowMinutes, ...LOW_TRAFFIC_WINDOWS.filter((w) => w > t.windowMinutes)];
+  let i = 0;
+  let calls = callsIn(all[0]!);
+  while (calls < t.minCalls && i < all.length - 1) calls = callsIn(all[++i]!);
+  const out = [all[i]!];
+  while (calls < SMALL_SAMPLE_CALLS && i < all.length - 1) {
+    calls = callsIn(all[++i]!);
+    out.push(all[i]!);
+  }
+  return out;
 }
 
 /**

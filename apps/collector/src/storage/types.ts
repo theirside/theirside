@@ -1,4 +1,6 @@
-import type { FailureGroup, IncidentKind } from '../modules/scoring/evaluate.js';
+import type { FailureGroup, IncidentKind, OutboundModel } from '../modules/scoring/evaluate.js';
+import type { SilenceProfile } from '../modules/scoring/silence.js';
+import type { InboundModel } from '../modules/scoring/inbound.js';
 import type { Outcome, RollupRow } from '@theirside/shared';
 
 /**
@@ -29,6 +31,10 @@ export interface StoredEvent {
   errorCode: string | null;
   correlationId: string | null;
   providerRequestId: string | null;
+  /** Inbound webhook delivery (missing: outbound call). */
+  direction?: 'outbound' | 'inbound';
+  /** Inbound: the provider's signed send time. */
+  sentAt?: Date | null;
 }
 
 export interface EventSample {
@@ -107,6 +113,13 @@ export interface RollupStore {
   ): Promise<(RollupRow & { minutes: number; firstMinute: string; lastMinute: string })[]>;
   /** Rows summed per bucket of `bucketMinutes`, for charts. */
   series(tenant: Tenant, q: RollupQuery & { bucketMinutes: number }): Promise<RollupRow[]>;
+  /** One key's rows summed per clock hour in [from, to) (hours with rows only): the count tests' overdispersion. */
+  hourly(
+    tenant: Tenant,
+    key: RollupKey,
+    from: Date,
+    to: Date,
+  ): Promise<(RollupRow & { hour: Date })[]>;
   /** Every (tenant, key) with traffic in the range: what the scheduler scores. */
   activeKeys(from: Date): Promise<(Tenant & RollupKey)[]>;
   /** Re-key every row of provider `from` to `to`, adding into rows that already exist. */
@@ -116,6 +129,197 @@ export interface RollupStore {
   /** Re-key one endpoint's rows (all environments, all minutes), adding into existing rows. */
   moveEndpoint(tenant: Tenant, m: EndpointMove): Promise<number>;
   deleteBefore(before: Date, tenant?: Tenant): Promise<number>;
+}
+
+// ------------------------------------------------------------------ inbound webhooks
+
+/** A webhook source: deliveries from one provider to one route of ours. */
+export interface InboundKey {
+  environment: string;
+  provider: string;
+  endpoint: string;
+}
+
+/** Map key of a source. */
+export const inboundKeyId = (k: InboundKey) =>
+  `${k.environment}\u0000${k.provider}\u0000${k.endpoint}`;
+
+/** Additive counts of one inbound rollup (or a sum of them). */
+export interface InboundCounts {
+  total: number;
+  /** We answered 2xx. */
+  accepted: number;
+  /** Everything else, unanswered included. */
+  rejected: number;
+  status3xx: number;
+  status401: number;
+  status403: number;
+  /** 4xx other than 401/403. */
+  status4xx: number;
+  status5xx: number;
+  /** The connection closed before our answer. */
+  unanswered: number;
+  /** Handler duration, ms buckets. */
+  durationHistogram: number[];
+  durationSumMs: number;
+  /** Deliveries with a send timestamp. */
+  lagCount: number;
+  lagSumS: number;
+  /** Delivery lag, the latency buckets in seconds. */
+  lagHistogram: number[];
+}
+
+export interface InboundRollupRow extends InboundKey, InboundCounts {
+  /** Minute (or bucket) start, ISO 8601. */
+  minute: string;
+}
+
+export interface InboundQuery {
+  from: Date;
+  /** Exclusive. */
+  to: Date;
+  environment?: string;
+  provider?: string;
+  endpoint?: string;
+}
+
+export interface WebhookSource extends InboundKey {
+  firstSeenAt: Date;
+  lastDeliveryAt: Date;
+  /** Service that received the latest delivery. */
+  lastService: string | null;
+  /** Silence is not judged for this source. */
+  expectedQuiet: boolean;
+  /** Silence is judged even though the gap model calls the source irregular (migration 020). */
+  silenceForced: boolean;
+}
+
+/** Webhook discovery: a route the SDK reported as a possible delivery from an unidentified sender. */
+export type WebhookCandidateStatus = 'pending' | 'confirmed' | 'ignored';
+
+export interface WebhookCandidate {
+  endpoint: string;
+  method: string;
+  /** Name suggested from the path; null when the SDK had none (`unknown`). */
+  suggestedName: string | null;
+  status: WebhookCandidateStatus;
+  /** Confirmed: the provider name given by the admin. */
+  provider: string | null;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  lastService: string | null;
+  decidedAt: Date | null;
+  decidedBy: string | null;
+  /** Deliveries in the last 7 UTC days (today included) and the days with any. */
+  deliveries7d: number;
+  activeDays: number;
+}
+
+/** One ingest batch's candidate reports for one route and UTC day. */
+export interface CandidateDelta {
+  endpoint: string;
+  method: string;
+  suggestedName: string | null;
+  day: string;
+  deliveries: number;
+  lastAt: Date;
+  service: string;
+}
+
+export interface InboundBaseline extends InboundKey {
+  /** Normal share of rejected deliveries (learning: at least learningDefaultRate). */
+  rejectionRate: number;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  /** Normal p95 delivery lag, seconds (null: the sender has no timestamp). */
+  lagP95S: number | null;
+  sampleSize: number;
+  historyMinutes: number;
+  learning: boolean;
+  silence: SilenceProfile;
+  /** Overdispersion and the slow and late classes (migration 020; missing: not learned yet). */
+  model?: InboundModel;
+  computedAt: Date;
+}
+
+export interface InboundStore {
+  upsertRollups(tenant: Tenant, rows: InboundRollupRow[]): Promise<void>;
+  /** Per-minute rows, ordered by minute. */
+  query(tenant: Tenant, q: InboundQuery): Promise<InboundRollupRow[]>;
+  /** Rows summed per source over the range, with first and last minute. */
+  aggregateByKey(
+    tenant: Tenant,
+    q: InboundQuery,
+  ): Promise<(InboundRollupRow & { firstMinute: string; lastMinute: string })[]>;
+  /** Rows summed per bucket of `bucketMinutes` (charts). */
+  series(tenant: Tenant, q: InboundQuery & { bucketMinutes: number }): Promise<InboundRollupRow[]>;
+  /**
+   * One source's rows summed per clock hour in [from, to) (hours with deliveries only),
+   * with the minutes that had one: the silence profile and the count tests' overdispersion.
+   */
+  hourly(
+    tenant: Tenant,
+    key: InboundKey,
+    from: Date,
+    to: Date,
+  ): Promise<(InboundRollupRow & { hour: Date; minutes: number })[]>;
+  /**
+   * Stretches of minutes without a delivery between two minutes with one, both in
+   * [from, to): first silent minute and length (silence gap model).
+   */
+  gaps(
+    tenant: Tenant,
+    key: InboundKey,
+    from: Date,
+    to: Date,
+  ): Promise<{ start: Date; minutes: number }[]>;
+  /** Deliveries of one source in each range (silence: the same window in past weeks). */
+  countIn(tenant: Tenant, key: InboundKey, ranges: { from: Date; to: Date }[]): Promise<number[]>;
+  /** Start of the latest minute with a delivery since `since`, per source of the tenant. */
+  lastDeliveryMinutes(tenant: Tenant, since: Date): Promise<Map<string, Date>>;
+  /** Every (tenant, source) with a delivery since `from` (from `webhook_sources`). */
+  activeKeys(from: Date): Promise<(Tenant & InboundKey)[]>;
+  deleteBefore(before: Date, tenant?: Tenant): Promise<number>;
+  /** Provider merge: inbound rollups, sources and baselines of `from` become `to`'s. */
+  moveProvider(tenant: Tenant, from: string, to: string): Promise<void>;
+
+  listSources(tenant: Tenant): Promise<WebhookSource[]>;
+  /** Move each source's last delivery forward (creating it), never back. */
+  touchSources(
+    tenant: Tenant,
+    rows: (InboundKey & { lastDeliveryAt: Date; service: string })[],
+  ): Promise<void>;
+  setExpectedQuiet(tenant: Tenant, key: InboundKey, quiet: boolean): Promise<boolean>;
+  setSilenceForced(tenant: Tenant, key: InboundKey, forced: boolean): Promise<boolean>;
+
+  getBaselines(tenant: Tenant): Promise<InboundBaseline[]>;
+  upsertBaselines(tenant: Tenant, baselines: InboundBaseline[]): Promise<void>;
+
+  /**
+   * Webhook discovery: count candidate reports. Known routes (any status) are
+   * updated; a new route is added only while the project has fewer than
+   * `maxPending` pending ones. Returns the new routes not added (over the cap).
+   */
+  recordCandidates(tenant: Tenant, rows: CandidateDelta[], maxPending: number): Promise<number>;
+  /** Every candidate route of the project, with deliveries in the 7 days up to `today`. */
+  listCandidates(tenant: Tenant, today: Date): Promise<WebhookCandidate[]>;
+  /** Confirm (with a provider name), ignore or reset (pending) a route. False when unknown. */
+  decideCandidate(
+    tenant: Tenant,
+    endpoint: string,
+    decision: {
+      status: WebhookCandidateStatus;
+      provider: string | null;
+      by: string | null;
+      at: Date;
+    },
+  ): Promise<boolean>;
+  /** For the remote config: confirmed routes with their names, and ignored routes. */
+  candidateRoutes(
+    tenant: Tenant,
+  ): Promise<{ confirmed: { path: string; provider: string }[]; ignored: string[] }>;
+  /** Drop day counts before `before`, and pending routes not seen since then. */
+  pruneCandidates(before: Date): Promise<void>;
 }
 
 // ------------------------------------------------------------------ incidents
@@ -132,6 +336,8 @@ export interface Baseline extends RollupKey {
   callsPerMin: number | null;
   /** Under a day of per-status counts behind `statusMix` (stored in status_mix as `learning`). */
   statusMixLearning?: boolean;
+  /** The count tests' overdispersion and slow class (migration 020; missing: not learned yet). */
+  model?: OutboundModel;
   sampleSize: number;
   historyMinutes: number;
   learning: boolean;
@@ -146,8 +352,20 @@ export interface IncidentEndpoint {
   peakErrorRate: number;
 }
 
+/** Inbound webhook incident kinds (docs/scoring.md "Webhooks"), by priority. */
+export const INBOUND_KINDS = [
+  'webhook_silence',
+  'webhook_rejections',
+  'webhook_slow',
+  'webhook_lag',
+] as const;
+export type InboundKind = (typeof INBOUND_KINDS)[number];
+export type AnyIncidentKind = IncidentKind | InboundKind;
+
+/** An outgoing-call incident (`direction` missing or `outbound`). */
 export interface Incident extends Tenant {
   id: string;
+  direction?: 'outbound';
   environment: string;
   provider: string;
   scope: 'endpoint' | 'provider';
@@ -174,8 +392,24 @@ export interface Incident extends Tenant {
   endpoints: IncidentEndpoint[];
 }
 
+/**
+ * An inbound webhook incident: one source (environment, provider, route); its one
+ * `endpoints` entry is the route with method POST.
+ */
+export interface InboundIncident extends Omit<Incident, 'direction' | 'kind'> {
+  direction: 'inbound';
+  kind: InboundKind;
+}
+
+export type AnyIncident = Incident | InboundIncident;
+
+export const isOutbound = (i: AnyIncident): i is Incident => i.direction !== 'inbound';
+export const isInbound = (i: AnyIncident): i is InboundIncident => i.direction === 'inbound';
+
 export interface IncidentListQuery {
   status?: 'open' | 'resolved';
+  /** Only this direction (default: both). */
+  direction?: 'outbound' | 'inbound';
   provider?: string;
   limit?: number;
   since?: Date;
@@ -191,15 +425,24 @@ export interface IncidentStore {
    */
   moveEndpoint(tenant: Tenant, m: EndpointMove): Promise<void>;
   upsertBaselines(tenant: Tenant, baselines: Baseline[]): Promise<void>;
+  /** Inbound: minute ranges of this source's incidents (all kinds, or one), for baseline exclusion. */
+  inboundIncidentWindows(
+    tenant: Tenant,
+    key: InboundKey,
+    since: Date,
+    kind?: InboundKind,
+  ): Promise<{ from: Date; to: Date | null }[]>;
+  /** Inbound: latest resolution of this source's incidents of one kind (cooldown). */
+  lastInboundResolvedAt(tenant: Tenant, key: InboundKey, kind: InboundKind): Promise<Date | null>;
   /** Minute ranges covered by incidents touching this endpoint, for baseline exclusion. */
   incidentWindows(
     tenant: Tenant,
     key: RollupKey,
     since: Date,
   ): Promise<{ from: Date; to: Date | null }[]>;
-  list(tenant: Tenant, q: IncidentListQuery): Promise<Incident[]>;
-  get(tenant: Tenant, id: string): Promise<Incident | null>;
-  listOpenAll(): Promise<Incident[]>;
+  list(tenant: Tenant, q: IncidentListQuery): Promise<AnyIncident[]>;
+  get(tenant: Tenant, id: string): Promise<AnyIncident | null>;
+  listOpenAll(): Promise<AnyIncident[]>;
   /** Latest resolved_at per endpoint, for cooldown checks. */
   lastResolvedAt(
     tenant: Tenant,
@@ -208,8 +451,8 @@ export interface IncidentStore {
     endpoint: string,
     method: string,
   ): Promise<Date | null>;
-  create(incident: Incident): Promise<void>;
-  update(incident: Incident): Promise<void>;
+  create(incident: AnyIncident): Promise<void>;
+  update(incident: AnyIncident): Promise<void>;
 }
 
 // ------------------------------------------------------------------ config
@@ -272,6 +515,10 @@ export interface ProviderRecord extends Tenant {
   endpointAliases: Record<string, string>;
   /** Threshold overrides for this provider (`PROVIDER_THRESHOLD_KEYS`); missing keys: the project's. */
   thresholds: Record<string, number>;
+  /** Overrides for this provider's inbound webhooks (`WEBHOOK_THRESHOLD_KEYS`). */
+  webhookThresholds: Record<string, number>;
+  /** Show this provider's webhooks on the public status page (off by default). */
+  webhooksPublic: boolean;
 }
 
 type ProviderDiscoveryFields =
@@ -287,7 +534,9 @@ type ProviderDiscoveryFields =
   | 'pathPrivacy'
   | 'allowedPathWords'
   | 'endpointAliases'
-  | 'thresholds';
+  | 'thresholds'
+  | 'webhookThresholds'
+  | 'webhooksPublic';
 
 export type ProviderInput = Omit<
   ProviderRecord,
@@ -303,6 +552,8 @@ export interface DiscoveredHost {
   source: Exclude<ProviderSource, 'configured'>;
   category: string;
   alertsEnabled: boolean;
+  /** When the host was first seen, for a new provider row (default: the database's now()). */
+  seenAt?: Date;
 }
 
 export interface AlertChannelRecord extends Tenant {
@@ -437,7 +688,13 @@ export interface ConfigStore {
   ): Promise<ProviderRecord | null>;
   deleteProvider(tenant: Tenant, id: string): Promise<boolean>;
   /** Insert providers seen in traffic that have no config row yet. */
-  ensureProviders(tenant: Tenant, names: string[], hosts: Map<string, string>): Promise<void>;
+  /** Create missing providers; `at` is their first-seen time (default: the database's now()). */
+  ensureProviders(
+    tenant: Tenant,
+    names: string[],
+    hosts: Map<string, string>,
+    at?: Date,
+  ): Promise<void>;
   /** Move `lastCallAt` forward to the latest call per provider name (never back). */
   touchProviders(tenant: Tenant, lastCalls: Map<string, Date>): Promise<void>;
   /**
@@ -694,6 +951,7 @@ export interface Storage {
   config: ConfigStore;
   usage: UsageStore;
   auth: AuthStore;
+  inbound: InboundStore;
   transaction<T>(fn: (tx: Storage) => Promise<T>): Promise<T>;
   /** Run fn only on the instance that holds the named advisory lock; null if not leader. */
   withLeaderLock<T>(name: string, fn: () => Promise<T>): Promise<T | null>;

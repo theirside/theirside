@@ -30,6 +30,7 @@ export async function mergeProviders(
     await tx.rollups.moveProvider(tenant, from.name, into.name);
     await tx.incidents.moveProvider(tenant, from.name, into.name);
     await tx.events.moveProvider(tenant, from.name, into.name);
+    await tx.inbound.moveProvider(tenant, from.name, into.name);
     const merged = await tx.config.absorbProvider(tenant, from.id, into.id);
     if (!merged) throw new ProviderActionError(404, 'provider not found');
     return merged;

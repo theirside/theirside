@@ -1,6 +1,14 @@
 import { api, type Incident as IncidentData } from '../api';
 import { Badge, Card, CopyButton, Empty, ErrorBox, Table, usePoll } from '../components/ui';
-import { ago, ms, pct, when, KIND_LABEL } from '../format';
+import { ago, lag, ms, pct, when, KIND_LABEL } from '../format';
+
+/** The incident's peak in its own unit: p95 for slowness and lag, a share otherwise, none for silence. */
+function peak(i: IncidentData): string {
+  if (i.kind === 'latency' || i.kind === 'webhook_slow') return ms(i.peakP95Ms);
+  if (i.kind === 'webhook_lag') return lag(i.peakP95Ms === null ? null : i.peakP95Ms / 1000);
+  if (i.kind === 'webhook_silence') return '–';
+  return pct(i.peakErrorRate);
+}
 import { href } from '../router';
 
 export function Incidents() {
@@ -24,7 +32,7 @@ export function Incidents() {
               <th>Endpoints</th>
               <th>Opened</th>
               <th className="num">Duration</th>
-              <th className="num">Peak errors</th>
+              <th className="num">Peak</th>
             </tr>
           </thead>
           <tbody>
@@ -40,7 +48,9 @@ export function Incidents() {
                     <Badge title="opened during cooldown; no alerts sent">muted</Badge>
                   )}
                 </td>
-                <td>{i.provider}</td>
+                <td>
+                  {i.provider} {i.direction === 'inbound' && <Badge>webhooks</Badge>}
+                </td>
                 <td>
                   {i.endpoints.map((e) => (
                     <div key={e.method + e.endpoint}>
@@ -50,9 +60,7 @@ export function Incidents() {
                 </td>
                 <td title={when(i.openedAt)}>{ago(i.openedAt)}</td>
                 <td className="num">{i.durationMinutes} min</td>
-                <td className="num">
-                  {i.kind === 'latency' ? ms(i.peakP95Ms) : pct(i.peakErrorRate)}
-                </td>
+                <td className="num">{peak(i)}</td>
               </tr>
             ))}
           </tbody>
@@ -83,8 +91,12 @@ export function Incident({ id }: { id: string }) {
           <div className="kpis">
             <Badge tone={inc.status === 'open' ? 'danger' : undefined}>{inc.status}</Badge>
             <div>
-              {inc.scope === 'provider' ? 'Provider-wide' : 'Single endpoint'},{' '}
-              {KIND_LABEL[inc.kind] ?? inc.kind}
+              {inc.direction === 'inbound'
+                ? 'Webhooks we receive'
+                : inc.scope === 'provider'
+                  ? 'Provider-wide'
+                  : 'Single endpoint'}
+              , {KIND_LABEL[inc.kind] ?? inc.kind}
               {inc.windowMinutes && inc.windowMinutes > 5
                 ? ` (low volume, judged over ${inc.windowMinutes} min)`
                 : ''}
@@ -102,7 +114,7 @@ export function Incident({ id }: { id: string }) {
               {inc.summary}
             </pre>
           </Card>
-          <Card title="Endpoints">
+          <Card title={inc.direction === 'inbound' ? 'Webhook route' : 'Endpoints'}>
             <Table>
               <thead>
                 <tr>
@@ -122,7 +134,9 @@ export function Incident({ id }: { id: string }) {
                     </td>
                     <td>{when(e.firstSeenAt)}</td>
                     <td>{e.recoveredAt ? when(e.recoveredAt) : '–'}</td>
-                    <td className="num">{pct(e.peakErrorRate)}</td>
+                    <td className="num">
+                      {inc.direction === 'inbound' ? peak(inc) : pct(e.peakErrorRate)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

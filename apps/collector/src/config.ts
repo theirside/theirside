@@ -48,6 +48,12 @@ export interface CollectorConfig {
   rollupRetentionDays: number;
   partitionsAhead: number;
   schedulerEnabled: boolean;
+  /**
+   * Simulation mode (THEIRSIDE_SIM=1, docs/demo.md "Simulate weeks in minutes"): a simulated
+   * clock driven by the simulation engine, the /__sim API and the Simulation page. Only on a
+   * simulation database.
+   */
+  sim: boolean;
   schedulerIntervalMs: number;
   smtp: SmtpConfig | undefined;
   logLevel: string;
@@ -236,6 +242,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     rollupRetentionDays: int(env, 'THEIRSIDE_ROLLUP_RETENTION_DAYS', 90, 1),
     partitionsAhead: int(env, 'THEIRSIDE_PARTITIONS_AHEAD_DAYS', 3, 1),
     schedulerEnabled: bool(env, 'THEIRSIDE_SCHEDULER_ENABLED', true),
+    sim: bool(env, 'THEIRSIDE_SIM', false),
     schedulerIntervalMs: int(env, 'THEIRSIDE_SCHEDULER_INTERVAL_MS', 60_000, 1000),
     smtp:
       smtpUrl || smtpHost

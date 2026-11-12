@@ -1,4 +1,4 @@
-import type { IncidentKind } from '../scoring/evaluate.js';
+import type { AnyIncidentKind } from '../../storage/types.js';
 import { createHmac } from 'node:crypto';
 import type { SmtpConfig } from '../../config.js';
 import type { AlertChannelRecord } from '../../storage/types.js';
@@ -16,9 +16,12 @@ export interface AlertPayload {
   status: 'open' | 'resolved' | 'test';
   /**
    * null for test alerts. errors (5xx/network), latency, auth (401/403),
-   * not_found (404), validation (400/409/422), rate_limited (429), behaviour.
+   * not_found (404), validation (400/409/422), rate_limited (429), behaviour;
+   * inbound webhooks: webhook_silence, webhook_rejections, webhook_slow, webhook_lag.
    */
-  kind?: IncidentKind | null;
+  kind?: AnyIncidentKind | null;
+  /** `inbound`: about webhooks our app receives from the provider (missing: outgoing calls). */
+  direction?: 'outbound' | 'inbound';
   endpoints: {
     method: string;
     endpoint: string;
@@ -50,7 +53,24 @@ export interface AlertPayload {
     hosts: string[];
     alertsEnabled: boolean;
   }[];
-  escalation?: 'rate' | 'latency' | 'spread';
+  /** rate/latency doubled, another endpoint joined (spread), or a stronger kind took over (kind). */
+  escalation?: 'rate' | 'latency' | 'spread' | 'kind';
+  /** Inbound only: what the webhook alert is based on. */
+  webhook?: {
+    /** Latest delivery seen (silence). */
+    lastDeliveryAt: string | null;
+    /** Minutes without a delivery (silence). */
+    silentMinutes: number | null;
+    /** Normal deliveries per hour at this time of week (silence). */
+    expectedPerHour: number | null;
+    /** P(no delivery in the gap) under the learned rate (silence). */
+    pValue: number | null;
+    /** Share of deliveries answered 401/403 (rejections). */
+    authShare: number | null;
+    /** p95 delivery lag and its normal, seconds (lag). */
+    lagP95S: number | null;
+    normalLagP95S: number | null;
+  };
   /** A restart or deploy of the calling services around the start, or that there was none. */
   deployHint?: string | null;
   /** Side signals: call volume far above normal, failures far faster than normal responses. */

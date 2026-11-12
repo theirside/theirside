@@ -127,6 +127,30 @@ describe('demo seed', () => {
     expect(await t.db.storage.config.takeUndigestedProviders(tenant)).toEqual([]);
   });
 
+  it('seeds NotifyCo webhooks: silence is judged from the first minute, and goes off ~15 min after they stop', async () => {
+    const tenant = { orgId: t.orgId, projectId: t.projectId };
+    const [src] = await t.db.storage.inbound.listSources(tenant);
+    expect(src).toMatchObject({
+      provider: 'NotifyCo',
+      endpoint: '/webhooks/notifyco',
+      environment: 'demo',
+    });
+    const [b] = await t.db.storage.inbound.getBaselines(tenant);
+    expect(b!.silence.historyHours).toBeGreaterThanOrEqual(7 * 24);
+    expect(b!.silence.deliveries).toBeGreaterThan(100);
+    const { judgeSilence } = await import('../src/modules/scoring/silence.js');
+    const { DEFAULT_THRESHOLDS } = await import('../src/modules/scoring/thresholds.js');
+    const last = Math.floor(NOW.getTime() / 60_000) * 60_000 - 60_000;
+    expect(judgeSilence(b!.silence, last, last + 10 * 60_000, DEFAULT_THRESHOLDS)).toMatchObject({
+      judged: true,
+      bad: false,
+    });
+    expect(judgeSilence(b!.silence, last, last + 17 * 60_000, DEFAULT_THRESHOLDS)).toMatchObject({
+      judged: true,
+      bad: true,
+    });
+  });
+
   it('a second run is a no-op', async () => {
     expect((await seedDemo(t.db.storage, { now: NOW })).seeded).toBe(false);
   });

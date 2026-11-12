@@ -5,7 +5,16 @@ import {
   histogramQuantile,
 } from '@theirside/shared';
 import type { Baseline, RollupKey, Storage, Tenant } from '../../storage/types.js';
-import { NORMAL_SUCCESS_MIN, windowStats, type RollupCounts } from './evaluate.js';
+import {
+  FAILURE_GROUPS,
+  NORMAL_SUCCESS_MIN,
+  windowStats,
+  type OutboundModel,
+  type RateClass,
+  type RollupCounts,
+} from './evaluate.js';
+import { slowModel } from './model.js';
+import { estimateRho } from './stats.js';
 import type { Thresholds } from './thresholds.js';
 
 const MIN = 60_000;
@@ -101,6 +110,39 @@ export function baselineFrom(
   };
 }
 
+/**
+ * The count tests' model from the history's clock hours (incident hours left out):
+ * each failure class's overdispersion, and the slow class from the whole history's
+ * histogram (`counts`) with the key's latency settings.
+ */
+export function outboundModel(
+  counts: RollupCounts,
+  hours: readonly RollupCounts[],
+  t: Pick<Thresholds, 'latencyMultiplier' | 'latencyDeltaMs'>,
+): OutboundModel {
+  const stats = hours.map((h) => windowStats([h]));
+  const rho: OutboundModel['rho'] = {};
+  const classes: RateClass[] = [...FAILURE_GROUPS, 'nonSuccess'];
+  for (const c of classes) {
+    const r = estimateRho(
+      stats.map((s) => ({ n: s.calls, x: c === 'nonSuccess' ? s.nonSuccess : s.groups[c] })),
+    );
+    if (r > 0) rho[c] = Math.round(r * 1e6) / 1e6;
+  }
+  const slow = slowModel(
+    counts.latencyHistogram,
+    stats.map((s) => ({ n: s.timed, hist: s.histogram })),
+    t.latencyMultiplier,
+    t.latencyDeltaMs,
+  );
+  return { rho, ...(slow ? { slow } : {}) };
+}
+
+const HOUR = 60 * MIN;
+/** Does [from, from + 1 h) overlap any of the windows? */
+export const hourTouches = (hour: number, windows: readonly { from: Date; to: Date }[]): boolean =>
+  windows.some((w) => w.from.getTime() < hour + HOUR && w.to.getTime() > hour);
+
 const keyId = (k: RollupKey) =>
   `${k.environment}\u0000${k.provider}\u0000${k.endpoint}\u0000${k.method}`;
 
@@ -115,6 +157,8 @@ export async function refreshBaselines(
   keys: readonly RollupKey[],
   now: Date,
   t: Thresholds,
+  /** A key's own thresholds (its provider's overrides) for its slow class; default `t`. */
+  tFor: (key: RollupKey) => Thresholds = () => t,
 ): Promise<Map<string, Baseline>> {
   const out = new Map<string, Baseline>();
   if (keys.length === 0) return out;
@@ -147,10 +191,12 @@ export async function refreshBaselines(
     if (!agg) continue; // no history yet: callers use the default baseline
     let counts: RollupCounts = agg;
     let split = splitByKey?.get(keyId(key));
+    const excludedWindows: { from: Date; to: Date }[] = [];
     for (const w of await storage.incidents.incidentWindows(tenant, key, from)) {
       const wFrom = new Date(Math.max(w.from.getTime() - t.windowMinutes * MIN, from.getTime()));
       const wTo = new Date(Math.min((w.to ?? to).getTime() + MIN, to.getTime()));
       if (wTo <= wFrom) continue;
+      excludedWindows.push({ from: wFrom, to: wTo });
       const excluded = await storage.rollups.aggregateByKey(tenant, {
         from: wFrom,
         to: wTo,
@@ -167,14 +213,22 @@ export async function refreshBaselines(
         }
       }
     }
-    const b = baselineFrom(
-      key,
-      counts,
-      new Date(agg.firstMinute),
-      now,
-      t,
-      splitByKey ? { counts: split, minutes: splitMinutes } : undefined,
+    // whole clock hours of the history, hours an incident touched left out
+    const hours = (await storage.rollups.hourly(tenant, key, from, to)).filter(
+      (h) =>
+        h.hour.getTime() + HOUR <= to.getTime() && !hourTouches(h.hour.getTime(), excludedWindows),
     );
+    const b: Baseline = {
+      ...baselineFrom(
+        key,
+        counts,
+        new Date(agg.firstMinute),
+        now,
+        t,
+        splitByKey ? { counts: split, minutes: splitMinutes } : undefined,
+      ),
+      model: outboundModel(counts, hours, tFor(key)),
+    };
     if (wanted.has(keyId(key))) baselines.push(b);
     out.set(keyId(key), b);
   }

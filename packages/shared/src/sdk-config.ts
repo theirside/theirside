@@ -57,6 +57,18 @@ export interface SdkRemoteConfig {
    * with `?service=&environment=`; collector 0.3.0+). Missing: none.
    */
   learned?: SdkLearnedPosition[];
+  /**
+   * The collector stores inbound webhook deliveries (collector 0.4.0+). Until it
+   * says so, the SDK records none: an older collector would store them as calls.
+   */
+  inbound?: boolean;
+  /**
+   * Webhook routes confirmed in the dashboard (webhook discovery): treated
+   * exactly like `webhooks: [{ path, provider }]` declared in init (those win).
+   */
+  webhookRoutes?: { path: string; provider: string }[];
+  /** Candidate webhook routes a member ignored: the SDK stops recording them. */
+  ignoredWebhookRoutes?: string[];
 }
 
 /** Caps applied by the SDK to whatever it receives (memory bound). */
@@ -68,4 +80,6 @@ export const SDK_CONFIG_LIMITS = {
   routesPerProvider: 500,
   allowedWordsPerProvider: 500,
   learned: 2000,
+  webhookRoutes: 500,
+  ignoredWebhookRoutes: 1000,
 } as const;

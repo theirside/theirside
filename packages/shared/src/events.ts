@@ -30,6 +30,24 @@ export interface CallEvent {
   service?: string;
   environment?: string;
   sdkVersion?: string;
+  /**
+   * `inbound`: a webhook delivery our app received (SDK 0.3.0+, collector 0.4.0+);
+   * missing or `outbound`: an outgoing call. For inbound events `provider` is the
+   * sender, `host` is `inbound`, `endpoint` our route template, `status` what we
+   * answered (null: the connection closed first), `durationMs` our handling time
+   * and `ts` the receive time.
+   */
+  direction?: 'outbound' | 'inbound';
+  /** Inbound only: the provider's signed send time of this delivery attempt, epoch ms. */
+  sentAt?: number;
+  /**
+   * Inbound only: a *candidate* webhook route (webhook discovery): a POST/PUT
+   * that looks like a delivery from a sender the SDK can't identify. `provider`
+   * is the name suggested from the path, or `unknown`. Never scored.
+   */
+  candidate?: boolean;
+  /** Candidates only: deliveries to this route this event stands for (the SDK sends one a minute). */
+  count?: number;
 }
 
 export interface IngestBatch {

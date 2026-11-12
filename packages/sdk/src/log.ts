@@ -24,14 +24,15 @@ export function warn(message: string): void {
 }
 
 /** Run fn; swallow and optionally log anything it throws. Never rethrows. */
-export function safely(log: Logger, where: string, fn: () => void): void {
+export function safely<T>(log: Logger, where: string, fn: () => T): T | undefined {
   try {
-    fn();
+    return fn();
   } catch (err) {
     try {
       log(`internal error in ${where}: ${(err as Error)?.message ?? String(err)}`);
     } catch {
       // ignore
     }
+    return undefined;
   }
 }

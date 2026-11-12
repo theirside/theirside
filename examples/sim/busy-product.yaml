@@ -1,0 +1,57 @@
+name: busy-product
+description: >-
+  A busy product with a daily cycle and several providers: a full outage on one endpoint and a
+  partial error spike on another must alert quickly; nothing else may fire.
+start: 2026-01-05T00:00:00Z
+duration: 4d
+seed: 2
+history: { mode: seeded, days: 8 }
+providers:
+  - name: PayCo
+    host: api.payco.test
+    endpoints:
+      - method: POST
+        path: /v1/charges
+        traffic: { pattern: daily, rate: 120 }
+        normal: { errors: 0.004, latencyMs: 280 }
+      - method: POST
+        path: /v1/refunds
+        traffic: { pattern: daily, rate: 15 }
+        normal: { errors: 0.003, latencyMs: 320 }
+  - name: MailCo
+    host: api.mailco.test
+    endpoints:
+      - method: POST
+        path: /v3/send
+        traffic: { pattern: daily, rate: 60 }
+        normal: { errors: 0.002, validation: 0.01, latencyMs: 450 }
+  - name: MapsCo
+    host: api.mapsco.test
+    endpoints:
+      - method: GET
+        path: /geocode
+        traffic: { pattern: daily, rate: 200, night: 0.2 }
+        normal: { errors: 0.001, notFound: 0.02, latencyMs: 90 }
+webhooks:
+  - provider: NotifyCo
+    route: /webhooks/notifyco
+    traffic: { pattern: daily, rate: 20 }
+faults:
+  - id: payco-outage
+    target: PayCo POST /v1/charges
+    at: day 1 14:00
+    duration: 30m
+    type: 5xx
+    size: 1
+  - id: mailco-partial
+    target: MailCo POST /v3/send
+    at: day 2 11:00
+    duration: 60m
+    type: timeouts
+    size: 0.2
+expect:
+  - incident: { kind: errors, target: PayCo POST /v1/charges, fault: payco-outage, within: 5m }
+  - incident: { kind: errors, target: MailCo POST /v3/send, fault: mailco-partial, within: 10m }
+  - quiet: { from: day 0, to: day 1 14:00 }
+  - quiet: { from: day 1 15:00, to: day 2 11:00 }
+  - quiet: { from: day 2 12:30, to: day 4 }

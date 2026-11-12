@@ -5,6 +5,7 @@ import {
   type Outcome,
 } from '@theirside/shared';
 import type { Incident, ProviderRecord, RollupKey, Storage, Tenant } from '../../storage/types.js';
+import { isOutbound } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
 import { baselineKeyId } from '../scoring/baseline.js';
 import {
@@ -136,11 +137,14 @@ export async function computeHealth(
   const evaluated = new Map(
     evaluateKeys([...keys.values()], rows, baselines, T, 1, t).map((e) => [baselineKeyId(e), e]),
   );
-  const open = (await storage.incidents.list(tenant, { status: 'open' })).filter(
-    (i) =>
-      (!opts.environment || i.environment === opts.environment) &&
-      (!opts.provider || i.provider === opts.provider),
-  );
+  // webhook incidents have their own section; they don't colour a provider's outgoing health
+  const open = (await storage.incidents.list(tenant, { status: 'open', direction: 'outbound' }))
+    .filter(isOutbound)
+    .filter(
+      (i) =>
+        (!opts.environment || i.environment === opts.environment) &&
+        (!opts.provider || i.provider === opts.provider),
+    );
   const incidentOf = (e: RollupKey) =>
     open.find(
       (i) =>

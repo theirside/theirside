@@ -192,13 +192,13 @@ describe('the real-world case right after the upgrade to collector 0.3.0', () =>
   sim.statusMixSince = F;
   const k = sim.key('/_ah/api/accountendpoint/v1/login', 'UserCo');
   sim.run(START, F, (m) => sim.traffic(k, m, { calls: (m / MIN) % 2 ? 1 : 2, latencyMs: 998 }));
-  const realWorld = (m: number) =>
+  const traffic = (m: number) =>
     sim.traffic(k, m, {
       calls: (m / MIN) % 5 === 0 ? 8 : 9,
       statuses: { 401: 9 },
       latencyMs: 113,
     });
-  sim.run(F, F + 30 * MIN, realWorld);
+  sim.run(F, F + 30 * MIN, traffic);
   const open = sim.alerts.find((a) => a.event === 'open')!;
   const atOpen = { ...open.incident };
 
@@ -223,9 +223,9 @@ describe('the real-world case right after the upgrade to collector 0.3.0', () =>
   });
 
   it('takes the auth label once the per-status baseline is learned, same incident', () => {
-    sim.run(F + 30 * MIN, F + 23 * 60 * MIN, realWorld);
+    sim.run(F + 30 * MIN, F + 23 * 60 * MIN, traffic);
     expect(sim.incidents[0]!.kind).toBe('behaviour');
-    sim.run(F + 23 * 60 * MIN, F + 25 * 60 * MIN, realWorld);
+    sim.run(F + 23 * 60 * MIN, F + 25 * 60 * MIN, traffic);
     expect(sim.incidents).toHaveLength(1);
     expect(sim.incidents[0]!.resolvedAt).toBeFalsy();
     expect(sim.incidents[0]!.kind).toBe('auth');

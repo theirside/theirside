@@ -16,7 +16,7 @@ if (!url) {
 if (process.env.DEMO_STACK && !process.env.THEIRSIDE_API_KEY) {
   console.error(
     'demo-seed: refused: start the demo with the dev values: ' +
-      'docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build',
+      'pnpm demo (docker compose --env-file docker/dev.env -f docker/docker-compose.yml --profile demo up --build)',
   );
   process.exit(2);
 }

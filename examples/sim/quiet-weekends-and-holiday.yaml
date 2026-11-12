@@ -1,0 +1,25 @@
+name: quiet-weekends-and-holiday
+description: >-
+  Traffic drops to a third at weekends and on one quiet weekday (a holiday): two weekends and the
+  holiday must pass without a false alarm, for outgoing calls and webhooks (silence included).
+start: 2026-01-05T00:00:00Z
+duration: 14d
+seed: 4
+history: { mode: seeded, days: 22 }
+providers:
+  - name: PayCo
+    host: api.payco.test
+    endpoints:
+      - method: POST
+        path: /v1/charges
+        traffic: { pattern: daily, rate: 50, weekend: 0.3, holidays: [9] }
+        normal: { errors: 0.004, latencyMs: 280 }
+webhooks:
+  - provider: NotifyCo
+    route: /webhooks/notifyco
+    traffic: { pattern: daily, rate: 10, weekend: 0.3, holidays: [9] }
+  - provider: NotifyCo
+    route: /webhooks/notifyco/billing
+    traffic: { pattern: daily, rate: 2, weekend: 0.3, holidays: [9] }
+expect:
+  - quiet: { from: day 0, to: day 14 }

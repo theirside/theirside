@@ -135,7 +135,7 @@ export async function registerAlertRoutes(app: FastifyInstance, ctx: AppContext)
     if (!channel) return reply.code(404).send({ error: 'not found' });
     const [delivery] = await ctx.alerts.enqueue(
       tenant,
-      testPayload(channel.name, ctx.config.publicUrl),
+      testPayload(channel.name, ctx.config.publicUrl, ctx.clock.now()),
       {
         onlyChannelId: channel.id,
       },

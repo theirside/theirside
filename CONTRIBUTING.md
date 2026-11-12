@@ -33,6 +33,34 @@ node packages/sdk/test-compat/run.cjs   # built SDK on your Node version
 
 The full command list (benchmarks, demo stack, alerting end-to-end, Playwright smoke) is in [`CLAUDE.md`](CLAUDE.md#commands).
 
+## Demo vs simulation
+
+To try a change in the running product ([docs/demo.md](docs/demo.md)):
+
+| | Demo | Simulation |
+|---|---|---|
+| What runs | Collector, NestJS demo app, chaos provider and load generator, in Docker | The collector from source, fed synthetic traffic from a scenario |
+| Clock | Real time | Simulated, up to several hundred times faster |
+| Data | The demo database (Docker volume; a week of history seeded on first start) | `theirside_sim` on the test Postgres (in memory) |
+| Break things | By hand: chaos rules and webhook modes | Faults in a scenario (Simulation page or YAML), with expected outcomes |
+| Good for | Seeing the SDK, dashboard and alerts end to end | Weeks of detection behaviour in minutes; checking a scenario passes |
+
+```sh
+pnpm demo            # start the demo stack, print the URLs and the admin token
+pnpm demo:logs       # follow its logs
+pnpm demo:stop       # stop, keep the data
+pnpm demo:reset      # stop and wipe its database
+
+pnpm sim             # Simulation page on http://localhost:4318/#/simulation
+pnpm sim:run dev-environment [--speed 3600]   # run a scenario, print pass/fail
+pnpm sim:list        # the ready-made scenarios
+pnpm sim:help daily  # what a setting means and its default (docs/simulation-reference.md)
+pnpm sim:stop        # stop the simulation's Postgres
+pnpm sim:reset       # wipe the simulation database (never the test database)
+```
+
+Both use port 4318, so run one at a time: each command says which one is running and how to stop it. They need Docker running; `pnpm sim` starts the test Postgres and builds the dashboard when needed.
+
 ## Pull requests
 
 - Small, focused commits with clear messages; tests come with the code.

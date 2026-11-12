@@ -4,6 +4,7 @@ import { Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { shutdown } from '@theirside/sdk';
 import { ClsModule } from 'nestjs-cls';
 import { DemoController } from './demo.controller';
+import { WebhooksController } from './webhooks.controller';
 import {
   AcmeCardsClient,
   BankCoClient,
@@ -35,7 +36,7 @@ class MonitorShutdown implements OnApplicationShutdown {
       },
     }),
   ],
-  controllers: [DemoController],
+  controllers: [DemoController, WebhooksController],
   providers: [
     AcmeCardsClient,
     KycoClient,

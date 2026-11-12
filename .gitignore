@@ -53,3 +53,6 @@ tools/vocabulary/.cache/
 
 Claude outputs
 .private/
+
+# simulation scenarios saved from the Simulation page (local only)
+examples/sim/local/

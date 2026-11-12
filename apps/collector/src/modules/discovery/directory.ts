@@ -189,6 +189,7 @@ export class ProviderDirectory {
         category,
         // infrastructure (cloud APIs, CDNs, storage) is monitored without alerts by default
         alertsEnabled: category !== 'infrastructure',
+        seenAt: this.clock.now(),
       },
       this.limits.maxHostsPerProvider,
     );

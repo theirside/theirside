@@ -106,6 +106,9 @@ jobs:
       # fails on a clear upward heap trend; the 60-minute run is manual (docs/benchmarks.md)
       - run: pnpm --filter @theirside/soak soak:ci --collector ${{ matrix.collector }}
 
+  # Alert quality (docs/benchmarks.md "Detection") runs in detection-ci.yml (every push)
+  # and detection-nightly.yml (the full sweep).
+
   # The theirside.dev Quick start against docker/compose.selfhost.yml with this commit's image.
   # Release tags run the same check in release-collector.yml before anything is pushed.
   selfhost-quickstart:

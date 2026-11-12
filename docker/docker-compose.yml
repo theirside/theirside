@@ -2,7 +2,7 @@
 # profiles. Self-hosting users get docker/compose.selfhost.yml instead (what theirside.dev
 # serves as /compose.yml); keep user-facing settings and comments there.
 # Collector + Postgres from a released image (ghcr.io/theirside/collector):
-#   THEIRSIDE_VERSION=0.3.3 docker compose -f docker/docker-compose.yml up -d
+#   THEIRSIDE_VERSION=0.4.0 docker compose -f docker/docker-compose.yml up -d
 # Without docker/dev.env the first start generates the project API key and logs a one-time
 # link to create the first account (docker compose -f docker/docker-compose.yml logs collector).
 # A release version is pulled, never built: if the pull fails, or with --build, it stops
@@ -100,6 +100,11 @@ services:
     environment:
       CHAOS_PORT: 4010
       SINK_SECRET: ${SINK_SECRET:-e2e-sink-secret-0123456789}
+      # NotifyCo also sends webhooks to the demo app (in e2e there is no demo app: sends fail quietly).
+      # Make them stop, arrive late, fail verification or be slow: PUT /__webhooks (docs/demo.md)
+      WEBHOOK_TARGET: ${WEBHOOK_TARGET:-http://demo:3000/webhooks/notifyco}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-demo-webhook-secret}
+      WEBHOOK_RATE_PER_MIN: ${WEBHOOK_RATE_PER_MIN:-30}
     ports:
       - '${CHAOS_PUBLISH_PORT:-4010}:4010'
     networks:
@@ -133,6 +138,8 @@ services:
       THEIRSIDE_ENVIRONMENT: demo
       # zero-config SDK: no provider list, see examples/nestjs-demo/src/instrumentation.ts
       SAASCO_TARGET: chaos
+      # verifies NotifyCo's webhook signatures (the chaos provider signs with the same secret)
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-demo-webhook-secret}
     ports:
       - '${DEMO_PORT:-3000}:3000'
     depends_on:

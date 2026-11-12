@@ -14,6 +14,7 @@ import {
 } from '@theirside/shared/core';
 import type { ResolvedConfig, ResolvedProvider } from './config.js';
 import { HostPolicy } from './discovery.js';
+import { InboundRecorder } from './inbound.js';
 import type { Logger } from './log.js';
 import type { RingBuffer } from './queue.js';
 
@@ -63,6 +64,8 @@ function cleanId(v: unknown): string | undefined {
 
 export class Recorder {
   readonly policy: HostPolicy;
+  /** Inbound webhook deliveries (Node: the server channels feed it). */
+  readonly inbound: InboundRecorder;
   /** Fraction of ok calls kept; remote config may change it when init() didn't set one. */
   sampleRate: number;
   private readonly templater: EndpointTemplater;
@@ -84,6 +87,7 @@ export class Recorder {
   ) {
     this.providerMatchers = cfg.providers.map((p) => ({ value: p, matchers: p.matchers }));
     this.policy = new HostPolicy(cfg);
+    this.inbound = new InboundRecorder(cfg, queue, log, onEnqueue);
     this.sampleRate = cfg.sampleRate;
     this.learner = new RouteLearner({ minSightings: minPathSightings });
     this.templater = new EndpointTemplater({

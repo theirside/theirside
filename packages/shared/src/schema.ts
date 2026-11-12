@@ -34,6 +34,10 @@ export const callEventSchema = z.object({
   service: name.optional(),
   environment: name.optional(),
   sdkVersion: z.string().max(32).optional(),
+  direction: z.enum(['outbound', 'inbound']).optional(),
+  sentAt: z.number().int().nonnegative().optional(),
+  candidate: z.boolean().optional(),
+  count: z.number().int().min(1).max(10_000_000).optional(),
 });
 
 export const ingestBatchSchema = z.object({

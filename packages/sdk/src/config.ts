@@ -20,6 +20,14 @@ export interface ProviderConfig {
   routes?: string[];
 }
 
+/** A webhook route declared by hand (senders that can't be detected from headers, or to name one). */
+export interface WebhookRouteConfig {
+  /** Route as your framework declares it: `/webhooks/adyen`, `/hooks/:tenant/clerk`. */
+  path: string;
+  /** Sender name shown in alerts and the dashboard, e.g. `Adyen`, `Clerk`. */
+  provider: string;
+}
+
 export interface InitOptions {
   apiKey?: string | undefined;
   /** Collector base URL, e.g. `http://collector:4318`. */
@@ -61,6 +69,33 @@ export interface InitOptions {
   flushIntervalMs?: number;
   maxBatch?: number;
   maxQueue?: number;
+  /**
+   * Inbound webhook monitoring (Node only). Default: on, detecting known senders
+   * by their signature headers. A list declares routes by hand (they win over
+   * detection); `false` turns inbound capture off. Requests that aren't
+   * webhooks are never recorded.
+   */
+  webhooks?: boolean | WebhookRouteConfig[];
+  /**
+   * Record webhook deliveries from the first one, without waiting for the
+   * collector's remote config to say it stores them (default false). For AWS
+   * Lambda, where each cold start would otherwise lose the deliveries before
+   * that answer. They go out with the usual flush; a collector older than 0.4.0
+   * rejects them and the SDK stops recording deliveries. Without it, a
+   * long-running server holds the first 500 deliveries (at most 60 s) until the
+   * remote config answers, and discards them if it says no or doesn't answer.
+   */
+  inbound?: boolean;
+  /**
+   * Webhook discovery (default true): also report POST/PUT requests whose
+   * route (`/webhooks/…`, `/hooks/…`, `/callbacks/…`, a final `/events`…) or a
+   * generic signature header (`x-signature`, `x-*-signature`…) suggests a
+   * delivery from a sender the SDK can't identify. They appear in the dashboard
+   * as discovered routes to confirm or ignore, and are never alerted on until
+   * confirmed. `false` turns it off; known senders and declared routes are
+   * still recorded.
+   */
+  webhookDiscovery?: boolean;
   /** Log SDK problems to console.warn. */
   debug?: boolean;
   enabled?: boolean;
@@ -82,6 +117,11 @@ export interface ResolvedProvider {
   name: string;
   routes: CompiledRoute[];
   matchers: HostMatcher[];
+}
+
+export interface ResolvedWebhookRoute {
+  route: CompiledRoute;
+  provider: string;
 }
 
 export interface ResolvedConfig {
@@ -108,6 +148,14 @@ export interface ResolvedConfig {
   serverless: boolean;
   /** Detected platform, if any (reported in SDK health). */
   platform: Platform | null;
+  /** Inbound webhook capture on (`webhooks !== false`). */
+  webhooksEnabled: boolean;
+  /** Declared webhook routes (at most 100). */
+  webhookRoutes: ResolvedWebhookRoute[];
+  /** `inbound: true`: record deliveries before the collector confirms it stores them. */
+  inboundOptIn: boolean;
+  /** Webhook discovery: candidate routes are reported (`webhookDiscovery !== false`). */
+  webhookDiscovery: boolean;
 }
 
 function clampInt(v: unknown, min: number, max: number, dflt: number): number {
@@ -191,5 +239,14 @@ export function resolveConfig(
       typeof opts.handleProcessExit === 'boolean' ? opts.handleProcessExit : !serverless,
     serverless,
     platform: platform.platform,
+    webhooksEnabled: opts.webhooks !== false,
+    inboundOptIn: opts.inbound === true,
+    webhookDiscovery: opts.webhookDiscovery !== false,
+    webhookRoutes: (Array.isArray(opts.webhooks) ? opts.webhooks : [])
+      .filter(
+        (w) => !!w && typeof w.path === 'string' && w.path !== '' && typeof w.provider === 'string',
+      )
+      .slice(0, 100)
+      .map((w) => ({ route: compileRoute(w.path), provider: shortName(w.provider, 'unknown') })),
   };
 }

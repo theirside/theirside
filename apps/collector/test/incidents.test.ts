@@ -116,7 +116,9 @@ describe('acceptance: low traffic (5 calls/min)', () => {
     const k = sim.key('/v1/rare', 'BankCo');
     const F = START + 2 * DAY;
     warm(sim, [k], F, 5, 0);
-    sim.run(F, F + 30 * MIN, (m) =>
+    // 5 calls a minute is a small sample: the 30-minute window is judged too, so it
+    // resolves once that window has cleared (≈ 30 min after the failures stop, + 10)
+    sim.run(F, F + 60 * MIN, (m) =>
       sim.traffic(k, m, { calls: 5, errors: m < F + 10 * MIN ? 5 : 0 }),
     );
     expect(sim.alerts.map((a) => a.event)).toEqual(['open', 'resolve']);

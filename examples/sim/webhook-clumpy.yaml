@@ -1,0 +1,22 @@
+name: webhook-clumpy
+description: >-
+  A clumpy webhook sender (clumps of ~20 every ~15 minutes, a daily cycle): its normal gaps are
+  long for its rate, so silence must wait for 1.5 × its longest normal gap, never page on a normal
+  gap, and still catch a 12-hour stop.
+start: 2026-01-05T00:00:00Z
+duration: 5d
+seed: 6
+history: { mode: seeded, days: 22 }
+webhooks:
+  - provider: NotifyCo
+    route: /webhooks/notifyco
+    traffic: { pattern: bursty, clumpSize: 20, clumpEvery: 15 }
+faults:
+  - id: stops
+    target: NotifyCo webhooks /webhooks/notifyco
+    at: day 3 11:00
+    duration: 12h
+    type: silent
+expect:
+  - incident: { kind: webhook_silence, fault: stops, within: 3h }
+  - quiet: { from: day 0, to: day 3 11:00 }

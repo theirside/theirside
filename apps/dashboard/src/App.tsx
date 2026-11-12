@@ -15,6 +15,9 @@ import { Incident, Incidents } from './pages/Incidents';
 import { Overview } from './pages/Overview';
 import { Provider } from './pages/Provider';
 import { Settings } from './pages/Settings';
+import { SimBanner, Simulation, type SimClockView } from './pages/Simulation';
+import { setNowSource } from './format';
+import { Webhooks } from './pages/Webhooks';
 import { AdminContext } from './role';
 import { href, useRoute } from './router';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -27,6 +30,7 @@ export function App() {
   const route = useRoute();
 
   const [status, setStatus] = useState<AuthStatus>();
+  const [simClock, setSimClock] = useState<SimClockView | null>(null);
 
   const loadMe = () => api<Me>('/v1/me').then(setMe, () => setMe(null));
   const loadStatus = () => api<AuthStatus>('/v1/auth/status').then(setStatus, () => {});
@@ -62,6 +66,28 @@ export function App() {
       );
   }, [me]);
 
+  // simulation mode: the simulated clock for the banner and for relative times ("3 min ago")
+  useEffect(() => {
+    if (!me || !status?.simulation) return;
+    let alive = true;
+    const run = () =>
+      void api<SimClockView>('/__sim/clock').then(
+        (c) => {
+          if (!alive) return;
+          setSimClock(c);
+          const at = Date.parse(c.now);
+          setNowSource(() => at);
+        },
+        () => {},
+      );
+    run();
+    const t = setInterval(run, 1000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [me, status?.simulation]);
+
   const [section, arg] = route;
   // one-time links work whether or not someone is signed in on this browser
   if (section === 'invite' && arg) return <AcceptInvite token={arg} onDone={signedIn} />;
@@ -92,16 +118,19 @@ export function App() {
   if (section === 'providers' && arg) page = <Provider name={arg} environment={environment} />;
   else if (section === 'incidents' && arg) page = <Incident id={arg} />;
   else if (section === 'incidents') page = <Incidents />;
+  else if (section === 'webhooks') page = <Webhooks environment={environment} />;
   else if (section === 'settings')
     page = <Settings tab={arg ?? 'providers'} {...(route[2] ? { sub: route[2] } : {})} me={me} />;
   else if (section === 'connect') page = <Connect me={me} />;
   else if (section === 'account') page = <Account me={me} onSignedOut={() => setMe(null)} />;
+  else if (section === 'simulation' && status.simulation) page = <Simulation />;
   else page = <Overview environment={environment} />;
 
   const active = (s: string) =>
     (section ?? '') === s || (s === '' && section === 'providers') ? 'on' : '';
   return (
     <div className="app">
+      {status.simulation && <SimBanner clock={simClock} />}
       <header className="top">
         <a className="brand" href={href()}>
           Theirside
@@ -110,12 +139,20 @@ export function App() {
           <a href={href()} className={active('')}>
             Providers
           </a>
+          <a href={href('webhooks')} className={active('webhooks')}>
+            Webhooks
+          </a>
           <a href={href('incidents')} className={active('incidents')}>
             Incidents
           </a>
           <a href={href('settings', 'providers')} className={active('settings')}>
             Settings
           </a>
+          {status.simulation && (
+            <a href={href('simulation')} className={active('simulation')}>
+              Simulation
+            </a>
+          )}
         </nav>
         <div className="right">
           {envs.length > 1 && (

@@ -17,7 +17,7 @@ import {
 } from './helpers.js';
 
 /**
- * A real-world case: one RPC-style call, POST /_ah/api//orderendpoint/v1/getOrderHistory
+ * The real-world case: one RPC-style call, POST /_ah/api//orderendpoint/v1/getOrderHistory
  * (Google Cloud Endpoints, base URL ending in "/"), made by three API services
  * and two Lambdas, each with its own SDK learning state, so it arrived as
  * several templates.
@@ -427,7 +427,7 @@ describe('migration 011', () => {
       await pool.query(`INSERT INTO projects (id, org_id, name) VALUES ('prj_1', 'org_1', 'P')`);
       await pool.query(
         `INSERT INTO providers (id, org_id, project_id, name, explicit_routes) VALUES
-           ('prv_a', 'org_1', 'prj_1', 'OrderCo', ARRAY['/_ah/api/orderCo/v1/x', '/_ah/api//orderCo/v1/x', '/_ah/api/orderCo//v1/x']),
+           ('prv_a', 'org_1', 'prj_1', 'OrderCo', ARRAY['/_ah/api/orders/v1/x', '/_ah/api//orders/v1/x', '/_ah/api/orders//v1/x']),
            ('prv_b', 'org_1', 'prj_1', 'Acme', ARRAY['/v1/users/:id'])`,
       );
       expect((await migrate(pool))[0]).toBe('011_drop_doubled_slash_routes.sql');
@@ -436,7 +436,7 @@ describe('migration 011', () => {
       );
       expect(rows).toEqual([
         { name: 'Acme', explicit_routes: ['/v1/users/:id'] },
-        { name: 'OrderCo', explicit_routes: ['/_ah/api/orderCo/v1/x'] },
+        { name: 'OrderCo', explicit_routes: ['/_ah/api/orders/v1/x'] },
       ]);
     } finally {
       await pool.end();

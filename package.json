@@ -13,7 +13,18 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "typecheck": "pnpm -r run typecheck",
-    "demo:seed": "pnpm --filter @theirside/collector demo:seed"
+    "demo:seed": "pnpm --filter @theirside/collector demo:seed",
+    "bench:detect": "pnpm --filter @theirside/collector bench:detect",
+    "demo": "node scripts/demo.mjs up",
+    "demo:logs": "node scripts/demo.mjs logs",
+    "demo:stop": "node scripts/demo.mjs stop",
+    "demo:reset": "node scripts/demo.mjs reset",
+    "sim": "node scripts/sim.mjs serve",
+    "sim:run": "node scripts/sim.mjs run",
+    "sim:list": "node scripts/sim.mjs list",
+    "sim:stop": "node scripts/sim.mjs stop",
+    "sim:reset": "node scripts/sim.mjs reset",
+    "sim:help": "pnpm --silent --filter @theirside/collector sim:help"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -2,6 +2,8 @@ import type { CallEvent } from '@theirside/shared/core';
 import { resolveConfig, type InitOptions, type ResolvedConfig } from './config.js';
 import { createLogger, safely, warn, type Logger } from './log.js';
 import { RingBuffer } from './queue.js';
+import { INBOUND_HOLD_MS, type InboundPending } from './inbound.js';
+import { lambdaHttpRequest, lambdaStatus, type LambdaHttpKind } from './lambda.js';
 import { Recorder, type ManualCall } from './recorder.js';
 import { RemoteConfigClient } from './remote-config.js';
 import { unrefTimer } from './platform.js';
@@ -102,6 +104,10 @@ export class Client {
       () => runtime.isUntracked(),
     );
     this.capture = runtime.instrumentations(this.recorder, this.log, sender, internals);
+    // a collector that doesn't store inbound deliveries would keep them as calls
+    this.recorder.inbound.onRejected = () =>
+      this.transport.discard((e) => e.direction === 'inbound');
+    this.transport.probe = this.recorder.inbound;
     this.remote = cfg.remoteConfig
       ? new RemoteConfigClient(
           this.transport,
@@ -109,6 +115,12 @@ export class Client {
           (c) =>
             safely(this.log, 'remote config', () => {
               this.recorder.policy.setRemote(c);
+              // inbound deliveries only to a collector that stores them as such
+              this.recorder.inbound.setSupport(c.inbound === true ? 'yes' : 'no');
+              this.recorder.inbound.setRemoteRoutes(
+                c.webhookRoutes ?? [],
+                c.ignoredWebhookRoutes ?? [],
+              );
               this.recorder.remoteChanged(c.tenants, c.learned);
               if (!cfg.sampleRateFromInit) {
                 const rate = c.sampleRate ?? 1;
@@ -119,6 +131,7 @@ export class Client {
           internals.remoteConfigIntervalMs,
           () =>
             safely(this.log, 'remote config', () => {
+              this.recorder.inbound.setSupport('no');
               if (!this.recorder.policy.discovering) return;
               // An older collector rejects whole batches holding provider: null events,
               // so stop discovering and drop the ones already queued; listed providers go on.
@@ -137,6 +150,9 @@ export class Client {
 
   start(): void {
     for (const c of this.capture) c.enable();
+    // held deliveries go when the remote config hasn't answered in time
+    if (this.timers && this.recorder.inbound.enabled && this.recorder.inbound.support === 'unknown')
+      unrefTimer(setTimeout(() => this.recorder.inbound.expireHold(), INBOUND_HOLD_MS));
     this.transport.start();
     this.remote?.start();
     // idle long-running processes say they're alive (SDK health: idle vs not running);
@@ -153,6 +169,26 @@ export class Client {
       unrefTimer(this.heartbeatTimer);
     }
     if (this.cfg.handleProcessExit && this.runtime.processHooks) this.hookProcessExit();
+  }
+
+  /**
+   * `wrap()` on AWS Lambda: an HTTP invocation (API Gateway, ALB, function URL)
+   * that is a webhook delivery. Returns what lambdaEnd needs, or undefined.
+   */
+  lambdaBegin(event: unknown): { p: InboundPending; kind: LambdaHttpKind } | undefined {
+    if (this.shutdownPromise || !this.recorder.inbound.active) return undefined;
+    return safely(this.log, 'lambda webhook', () => {
+      const req = lambdaHttpRequest(event);
+      if (!req) return undefined;
+      const p = this.recorder.inbound.begin(req.path, req.method, req.has, req.get, req.anyName);
+      return p ? { p, kind: req.kind } : undefined;
+    });
+  }
+
+  lambdaEnd(h: { p: InboundPending; kind: LambdaHttpKind }, result: unknown, threw: boolean): void {
+    safely(this.log, 'lambda webhook', () =>
+      this.recorder.inbound.end(h.p, lambdaStatus(h.kind, result, threw)),
+    );
   }
 
   track(call: ManualCall): void {

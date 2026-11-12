@@ -1,0 +1,21 @@
+name: webhook-silence-steady
+description: >-
+  A steady webhook sender (~30 a minute) stops sending: silence must alert within 20 minutes and
+  resolve when deliveries come back; nothing may fire before.
+start: 2026-01-05T00:00:00Z
+duration: 2d
+seed: 5
+history: { mode: seeded, days: 22 }
+webhooks:
+  - provider: NotifyCo
+    route: /webhooks/notifyco
+    traffic: { pattern: steady, rate: 30 }
+faults:
+  - id: stops
+    target: NotifyCo webhooks /webhooks/notifyco
+    at: day 1 14:00
+    duration: 6h
+    type: silent
+expect:
+  - incident: { kind: webhook_silence, fault: stops, within: 20m }
+  - quiet: { from: day 0, to: day 1 14:00 }

@@ -1,6 +1,6 @@
 import { api, type Overview as OverviewData, type ProviderHealth } from '../api';
 import { Badge, Callout, Empty, ErrorBox, StatusDot, Table, usePoll } from '../components/ui';
-import { ago, ms, num, pct } from '../format';
+import { ago, ms, nowMs, num, pct } from '../format';
 import { href } from '../router';
 
 export function Overview({ environment }: { environment: string }) {
@@ -29,8 +29,14 @@ export function Overview({ environment }: { environment: string }) {
           {data.openIncidents.length} open incident{data.openIncidents.length > 1 ? 's' : ''}:{' '}
           {data.openIncidents.map((i) => (
             <a key={i.id} href={href('incidents', i.id)}>
-              {i.provider} ({i.endpoints.filter((e) => !e.recoveredAt).length} endpoint
-              {i.endpoints.filter((e) => !e.recoveredAt).length > 1 ? 's' : ''})
+              {i.direction === 'inbound' ? (
+                <>{i.provider} webhooks</>
+              ) : (
+                <>
+                  {i.provider} ({i.endpoints.filter((e) => !e.recoveredAt).length} endpoint
+                  {i.endpoints.filter((e) => !e.recoveredAt).length > 1 ? 's' : ''})
+                </>
+              )}
             </a>
           ))}
         </Callout>
@@ -98,7 +104,7 @@ function ProviderTable({ providers, testId }: { providers: ProviderHealth[]; tes
               </a>
               {p.source !== 'configured' &&
                 p.firstSeenAt &&
-                Date.now() - Date.parse(p.firstSeenAt) < WEEK && <Badge tone="healthy">New</Badge>}
+                nowMs() - Date.parse(p.firstSeenAt) < WEEK && <Badge tone="healthy">New</Badge>}
               {!p.alertsEnabled && <Badge>alerts off</Badge>}
               {p.openIncidentId && (
                 <Badge tone="danger" href={href('incidents', p.openIncidentId)}>

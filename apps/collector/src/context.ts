@@ -44,7 +44,14 @@ export interface AppContext {
 }
 
 export interface ContextOverrides {
+  /** Product time: ingest, rollups, scoring, incidents, alerts, retention, dashboards. */
   clock?: Clock;
+  /**
+   * Time for accounts and credentials (sessions, 2FA codes, login throttling, invites,
+   * API-key use, proxy tokens, the licence): default `clock`. Simulation mode keeps it
+   * on the real clock, so a simulated week doesn't expire sessions or break 2FA codes.
+   */
+  wallClock?: Clock;
   /** Cloud plugs its plan-based resolver in here (private repo). */
   entitlements?: EntitlementsResolver;
   log?: (msg: string) => void;
@@ -71,39 +78,40 @@ export function createContext(
   o: ContextOverrides = {},
 ): AppContext {
   const clock = o.clock ?? systemClock;
+  const wall = o.wallClock ?? clock;
   const entitlements =
     o.entitlements ??
     new LicenseEntitlementsResolver({
       licenseKey: config.licenseKey,
       allowDevLicense: config.allowDevLicense,
-      clock,
+      clock: wall,
       ...(o.log ? { log: o.log } : {}),
     });
   const adapters = o.adapters ?? defaultAdapters(config.smtp);
-  const sessions = new SessionManager(storage.auth, storage.config, clock, {
+  const sessions = new SessionManager(storage.auth, storage.config, wall, {
     maxAgeMs: config.sessionMaxAgeHours * 3600_000,
     idleMs: config.sessionIdleHours * 3600_000,
   });
   const accounts = new Accounts(
     storage,
     config,
-    clock,
+    wall,
     sessions,
-    new LoginThrottle(storage.auth, clock),
+    new LoginThrottle(storage.auth, wall),
     o.mailer ?? smtpMailer(config.smtp),
     entitlements,
-    new TwoFactor(storage, clock, new SecretBox(config.secretKey, config.secretKeyPrevious)),
+    new TwoFactor(storage, wall, new SecretBox(config.secretKey, config.secretKeyPrevious)),
   );
   return {
     config,
     storage,
     clock,
     entitlements,
-    apiKeys: new ApiKeyAuthenticator(storage.config, clock),
+    apiKeys: new ApiKeyAuthenticator(storage.config, wall),
     sessions,
     accounts,
     proxyAuth: config.authProxy
-      ? new ProxyAuth(config.authProxy, clock, o.albKeyFetcher)
+      ? new ProxyAuth(config.authProxy, wall, o.albKeyFetcher)
       : undefined,
     limiter: new UsageLimiter(storage.usage, entitlements, clock),
     adapters,

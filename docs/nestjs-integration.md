@@ -132,6 +132,42 @@ The SDK also flushes on `SIGTERM`/`beforeExit` by itself; the hook makes it dete
   - you want a nicer name than `:id` (`/v2/cards/:cardId/activate`).
 - Loopback, private networks, cloud metadata, internal names (`redis`, `*.svc`, `*.internal`), telemetry hosts and the collector are never recorded. Add your own services' host patterns to `internalHosts`, or mark a provider internal in the dashboard.
 
+## 5a. Webhooks you receive
+
+Webhooks from your providers are monitored with no extra code (SDK 0.3.0+, collector 0.4.0+): `init()` also listens to Node's `http.server` diagnostics channels, so Nest on Express or Fastify needs no middleware or interceptor. A request counts as a webhook when it carries a known sender's signature headers (Stripe, GitHub, GitLab, Shopify, Slack, SendGrid, Twilio, Checkout.com, Paddle, PayPal, Square, HubSpot, Zoom, Twitch, Calendly, Typeform, Razorpay, Linear, Vercel, Svix, Standard Webhooks; the list and what is read: [privacy.md](privacy.md#inbound-webhooks)). Everything else your app serves is ignored.
+
+For each delivery the SDK records the route template, the status your controller answered, how long it took and, when the sender signs one, its send time. The collector then alerts on:
+
+- **silence**: no deliveries for longer than this sender's learned rate for this hour of the week allows ("No Stripe webhooks for 2h 10m; normally ~40/hour at this time"), after a week of history;
+- **rejections**: your app answering non-2xx far more than usual; mostly 401/403 usually means the signing secret no longer matches;
+- **slow handling**: your handler's p95 far above normal (providers retry deliveries that time out, so you get duplicates);
+- **delivery lag**: deliveries arriving long after the provider signed them.
+
+```ts
+init({
+  apiKey: process.env.THEIRSIDE_API_KEY,
+  endpoint: process.env.THEIRSIDE_COLLECTOR_URL,
+  service: 'payments-api',
+  // only needed for senders that can't be told from headers (Adyen and Mailgun sign in the body;
+  // Clerk, Resend and other Svix customers all look like "Svix"), or to name a route yourself
+  webhooks: [
+    { path: '/webhooks/adyen', provider: 'Adyen' },
+    { path: '/webhooks/:tenant/clerk', provider: 'Clerk' },
+  ],
+  // webhooks: false turns inbound capture off entirely
+});
+```
+
+**Senders that aren't on the list** are found anyway: a POST or PUT to a route like `/webhooks/orbitpay`, `/hooks/…`, `/callbacks/…` or a final `/events` (without an `Authorization` header), or carrying a generic signature header (`x-signature`, `x-*-signature`), shows under **Settings → Providers → Discovered webhook routes** with its deliveries per day and a suggested name. Nothing alerts on it until an admin confirms the route with the sender's name; from then on it is monitored like a declared route. A member can ignore a route that isn't a webhook, and the SDK stops reporting it. Requests from browsers (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off.
+
+Notes:
+
+- Return 2xx only when the event was accepted, and acknowledge quickly: do the work after responding (a queue, `setImmediate`), so slow work never shows up as a slow, retried delivery.
+- Signature verification needs the raw body (`NestFactory.create(AppModule, { rawBody: true })` and `req.rawBody`); the SDK never reads it. See `examples/nestjs-demo/src/webhooks.controller.ts`.
+- A route that is legitimately quiet for long periods (a monthly invoice webhook) can be marked **expected quiet** on the provider's page: no silence alerts, everything else still applies. Rare senders (a few deliveries a day) never get silence alerts anyway.
+- Webhooks show on the provider's dashboard page and under **Webhooks**; their incidents are in the same incident list and go to the same alert channels. They are not on the public status page unless you switch that on per provider.
+- On AWS Lambda (API Gateway REST or HTTP API, ALB, function URL), deliveries are recorded through `wrap(handler)`; add `inbound: true` so a cold start doesn't wait for the remote config (SDK README, "Webhooks on AWS Lambda"). Other serverless runtimes (Google Cloud Functions, Azure Functions, Vercel, Netlify, Cloudflare Workers) aren't covered yet.
+
 ## 6. Correlation IDs
 
 `getCorrelationId` is read at the start of every outgoing call, inside the incoming request's async context. With `nestjs-cls`:
@@ -160,7 +196,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.3.3`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.4.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -196,12 +232,24 @@ To 0.3.2: **first run is zero-config.** A collector started with neither `THEIRS
 - **Compose users who never set the two variables**: the compose file used to default them to `tsd_live_localdemo0000000000000000` and `change-me-admin-token`, and now leaves them empty. An existing install keeps its data, its accounts and the localdemo key, which services may still be using. Rotate it under Settings → API keys. The admin token `change-me-admin-token` no longer works. Set `THEIRSIDE_ADMIN_TOKEN` if you want break-glass sign-in back, and set it to something else.
 - The demo, e2e and smoke stacks need `--env-file docker/dev.env` ([demo](demo.md)).
 
+From 0.3.x to 0.4.0 (deploy it before your services move to SDK 0.3.0; older SDKs keep working, and SDK 0.3.0 works with older collectors but records no webhooks there):
+
+- **Webhooks you receive are monitored** ([5a](#5a-webhooks-you-receive), [scoring](scoring.md#webhooks-inbound)): with SDK 0.3.0, deliveries from known senders (by signature headers) or declared routes get their own **Webhooks** page, a section on each provider page and four incident kinds: `webhook_silence` (the sender stopped), `webhook_rejections` (our app answers non-2xx), `webhook_slow` (our handler is slow) and `webhook_lag` (deliveries arrive long after they were signed). They alert in your existing channels; a provider can show a webhook row on the status page (off by default).
+- **Silence alerts start after 21 days** of a source's history, and only for regular senders: a sender whose normal gaps are too irregular to judge is marked so on the Webhooks page with silence off (switch it on per route). When two or more sources go quiet together and nothing else delivers, silence alerts are held ("all sources quiet: possible holiday or receiver issue"). Rejections, slow handling and lag are judged like outgoing calls, against each source's own normal.
+- **Discovered webhook routes**: POST/PUT routes that look like webhooks from senders the SDK can't identify are listed under Settings → Providers. Nothing is monitored until an admin confirms one with a name; members can ignore them.
+- **Outgoing detection is stricter about evidence** ([scoring](scoring.md)): every rate rule now also needs at least 5 failures above what is normal and a count test whose noise level is learned per endpoint, and latency counts slow calls against their normal share instead of comparing p95 alone. In the detection bench this cut false alarms (medium-volume endpoints from about 2 to 0.7 per 6 months) while every fault scenario still alerts within its target ([benchmarks](benchmarks.md#detection-alert-quality)). Expect fewer low-volume and latency alerts.
+- **Latency is measured finer**: 130 histogram buckets instead of 18, so p95 values on charts and in alerts are closer to the real ones. Rows written before the upgrade keep their coarse buckets and are read spread over the fine ones, so the first week mixes both.
+- **Webhook payloads**: `direction` (`outbound` or `inbound`) and the four `webhook_*` kinds. Treat a `kind` you don't know like `errors`.
+- **API**: `POST /v1/ingest/inbound` (SDK 0.3.0's probe for Lambda cold starts), `/v1/admin/webhooks…` and webhook threshold keys under `/v1/admin/settings/thresholds` (OpenAPI).
+- **Self-host compose file**: it pulled the `0.3` tag, which stays on 0.3.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.4`.
+- Migrations 018–021 run on the first start: new tables for webhooks and discovered routes, new nullable columns (no table rewrite) and dropped defaults on the latency histogram columns.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.3.3
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.4.0
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -218,8 +266,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.3.3 .
-docker push <registry>/theirside-collector:0.3.3
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.4.0 .
+docker push <registry>/theirside-collector:0.4.0
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -242,7 +290,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.3.3` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.4.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -260,7 +308,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.3.3",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.4.0",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [
@@ -361,4 +409,6 @@ Full list: `docs/architecture.md` §3.3.
 | One provider shows up as several | Merge them (Settings → Providers → Merge into…); history moves too. |
 | `lastFlushError: http_401` | Wrong `THEIRSIDE_API_KEY` or a key without the `ingest` scope. |
 | Endpoints show IDs or `/:overflow` | Add explicit `routes` for that provider in the dashboard (pushed to the SDK) or in `init()` (see §5). Near-duplicate templates are also merged daily. |
+| Webhooks don't show up | The collector is older than 0.4.0 (the SDK sends deliveries only to a collector that says it stores them), `webhooks: false` is set, or the sender isn't in the detected list: declare its route with `webhooks: [{ path, provider }]`. Deliveries received before the remote config answers are held (first 500, at most 60 s) and dropped if no answer comes. On AWS Lambda: wrap the handler with `wrap()` and set `inbound: true`. |
+| Silence alerts for a route that is quiet on purpose | Mark it **expected quiet** on the provider's page, or raise `silenceMinGapMinutes` for that provider (Settings → Providers → Webhooks). |
 | Dropped events grow | Collector down or slow; the SDK keeps at most `maxQueue` (10,000) events and drops the oldest. Nothing else is affected. |

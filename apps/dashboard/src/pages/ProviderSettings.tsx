@@ -12,7 +12,7 @@ import {
   Tabs,
   usePoll,
 } from '../components/ui';
-import { ago } from '../format';
+import { ago, nowMs } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
 
@@ -36,7 +36,7 @@ const TABS = [
   [
     'new',
     'New (7 days)',
-    (p: Provider) => p.source !== 'configured' && Date.now() - Date.parse(p.firstSeenAt) < WEEK,
+    (p: Provider) => p.source !== 'configured' && nowMs() - Date.parse(p.firstSeenAt) < WEEK,
   ],
   [
     'quiet',
@@ -205,8 +205,10 @@ const lines = (s: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+type ThresholdRow = [string, string, string, (v: number) => number, (v: number) => number];
+
 /** Thresholds a provider may override: [key, label, unit, to UI, from UI]. */
-const THRESHOLDS: [string, string, string, (v: number) => number, (v: number) => number][] = [
+const THRESHOLDS: ThresholdRow[] = [
   ['minCalls', 'Minimum calls in the window', 'calls', (v) => v, (v) => v],
   ['openAfterMinutes', 'Bad minutes in a row to open', 'min', (v) => v, (v) => v],
   ['rateMultiplier', 'Error rate: multiple of normal', '×', (v) => v, (v) => v],
@@ -220,6 +222,116 @@ const THRESHOLDS: [string, string, string, (v: number) => number, (v: number) =>
   ['latencyMultiplier', 'Latency: p95 multiple of normal', '×', (v) => v, (v) => v],
   ['latencyDeltaMs', 'Latency: p95 margin above normal', 'ms', (v) => v, (v) => v],
 ];
+
+/**
+ * A provider's webhook overrides (collector WEBHOOK_THRESHOLD_LIMITS): the
+ * outgoing rules applied to deliveries, plus silence and lag. Separate from the
+ * outgoing overrides; project defaults are the same keys.
+ */
+const WEBHOOK_THRESHOLDS: ThresholdRow[] = [
+  ['minCalls', 'Minimum deliveries in the window', 'deliveries', (v) => v, (v) => v],
+  ['openAfterMinutes', 'Bad minutes in a row to open', 'min', (v) => v, (v) => v],
+  ['rateMultiplier', 'Rejected share: multiple of normal', '×', (v) => v, (v) => v],
+  [
+    'rateDeltaPp',
+    'Rejected share: margin above normal',
+    'pp',
+    (v) => Math.round(v * 10_000) / 100,
+    (v) => v / 100,
+  ],
+  ['latencyMultiplier', 'Handler p95: multiple of normal', '×', (v) => v, (v) => v],
+  ['latencyDeltaMs', 'Handler p95: margin above normal', 'ms', (v) => v, (v) => v],
+  [
+    'silenceMinGapMinutes',
+    'Silence: never before this long without a delivery',
+    'min',
+    (v) => v,
+    (v) => v,
+  ],
+  ['lagMultiplier', 'Delivery lag: p95 multiple of normal', '×', (v) => v, (v) => v],
+  ['lagDeltaSeconds', 'Delivery lag: p95 margin above normal', 's', (v) => v, (v) => v],
+];
+
+const overridesFrom = (rows: ThresholdRow[], saved: Record<string, number> | undefined) =>
+  Object.fromEntries(
+    rows
+      .filter(([k]) => saved?.[k] !== undefined)
+      .map(([k, , , toUi]) => [k, String(toUi(saved![k]!))]),
+  );
+
+const overridesTo = (rows: ThresholdRow[], typed: Record<string, string>) =>
+  Object.fromEntries(
+    rows
+      .filter(([k]) => (typed[k] ?? '').trim() !== '')
+      .map(([k, , , , fromUi]) => [k, fromUi(Number(typed[k]))]),
+  );
+
+/** Rules with the project default and this provider's override (editable by admins). */
+function ThresholdTable({
+  rows,
+  values,
+  onChange,
+  project,
+  testId,
+}: {
+  rows: ThresholdRow[];
+  values: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+  project: Record<string, number>;
+  testId: string;
+}) {
+  const isAdmin = useIsAdmin();
+  return (
+    <Table className="thresholds" data-testid={testId}>
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th className="num">Project default</th>
+          <th className="num">This provider</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([k, text, unit, toUi]) => {
+          const own = (values[k] ?? '').trim() !== '';
+          return (
+            <tr key={k}>
+              <td>{text}</td>
+              <td className="num muted">
+                {project[k] !== undefined ? `${toUi(project[k])} ${unit}` : '–'}
+              </td>
+              <td className="num">
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  aria-label={text}
+                  value={values[k] ?? ''}
+                  placeholder="default"
+                  disabled={!isAdmin}
+                  onChange={(e) => onChange({ ...values, [k]: e.target.value })}
+                />{' '}
+                {own ? <Badge>override</Badge> : null}
+              </td>
+              <td>
+                {own && isAdmin && (
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      onChange(Object.fromEntries(Object.entries(values).filter(([x]) => x !== k)))
+                    }
+                  >
+                    Reset to default
+                  </Button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
 
 function Section({
   title,
@@ -305,15 +417,14 @@ function ProviderForm({
     alertsEnabled: p.alertsEnabled,
     pathPrivacy: p.pathPrivacy ?? '',
     allowedPathWords: p.allowedPathWords.join(' '),
+    webhooksPublic: p.webhooksPublic,
   });
   // overrides as typed (UI units); '' = the project's value
   const [thr, setThr] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      THRESHOLDS.filter(([k]) => p.thresholds?.[k] !== undefined).map(([k, , , toUi]) => [
-        k,
-        String(toUi(p.thresholds[k]!)),
-      ]),
-    ),
+    overridesFrom(THRESHOLDS, p.thresholds),
+  );
+  const [whThr, setWhThr] = useState<Record<string, string>>(() =>
+    overridesFrom(WEBHOOK_THRESHOLDS, p.webhookThresholds),
   );
   const [state, setState] = useState('');
   const [mergeInto, setMergeInto] = useState('');
@@ -336,13 +447,7 @@ function ProviderForm({
   };
   const patch = (body: Record<string, unknown>) =>
     api(`/v1/admin/providers/${p.id}`, { method: 'PATCH', body });
-  const thresholds = () =>
-    Object.fromEntries(
-      THRESHOLDS.filter(([k]) => (thr[k] ?? '').trim() !== '').map(([k, , , , fromUi]) => [
-        k,
-        fromUi(Number(thr[k])),
-      ]),
-    );
+  const thresholds = () => overridesTo(THRESHOLDS, thr);
   const save = () =>
     run('saving', () =>
       patch({
@@ -359,8 +464,10 @@ function ProviderForm({
         ...(isAdmin
           ? {
               thresholds: thresholds(),
+              webhookThresholds: overridesTo(WEBHOOK_THRESHOLDS, whThr),
               publicDisplayName: form.publicDisplayName || null,
               isPublic: form.isPublic,
+              webhooksPublic: form.webhooksPublic,
             }
           : {}),
       }),
@@ -541,54 +648,28 @@ function ProviderForm({
           <input type="checkbox" checked={form.alertsEnabled} onChange={set('alertsEnabled')} />{' '}
           Alerts on <small className="muted">(incidents are tracked either way)</small>
         </Field>
-        <Table className="thresholds" data-testid="thresholds">
-          <thead>
-            <tr>
-              <th>Rule</th>
-              <th className="num">Project default</th>
-              <th className="num">This provider</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {THRESHOLDS.map(([k, text, unit, toUi]) => {
-              const own = (thr[k] ?? '').trim() !== '';
-              return (
-                <tr key={k}>
-                  <td>{text}</td>
-                  <td className="num muted">
-                    {project[k] !== undefined ? `${toUi(project[k])} ${unit}` : '–'}
-                  </td>
-                  <td className="num">
-                    <input
-                      type="number"
-                      step="any"
-                      min={0}
-                      aria-label={text}
-                      value={thr[k] ?? ''}
-                      placeholder="default"
-                      disabled={!isAdmin}
-                      onChange={(e) => setThr({ ...thr, [k]: e.target.value })}
-                    />{' '}
-                    {own ? <Badge>override</Badge> : null}
-                  </td>
-                  <td>
-                    {own && isAdmin && (
-                      <Button
-                        size="small"
-                        onClick={() =>
-                          setThr(Object.fromEntries(Object.entries(thr).filter(([x]) => x !== k)))
-                        }
-                      >
-                        Reset to default
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
+        <ThresholdTable
+          rows={THRESHOLDS}
+          values={thr}
+          onChange={setThr}
+          project={project}
+          testId="thresholds"
+        />
+      </Section>
+
+      <Section title="Webhooks" admin="thresholds: admins only, read-only">
+        <p className="muted">
+          Webhooks your app receives from {label}: silence, rejections, slow handling and delivery
+          lag (each route's &ldquo;expected quiet&rdquo; switch is on the provider&rsquo;s dashboard
+          page). Alerts follow the switch above. Overrides here apply to webhooks only.
+        </p>
+        <ThresholdTable
+          rows={WEBHOOK_THRESHOLDS}
+          values={whThr}
+          onChange={setWhThr}
+          project={project}
+          testId="webhook-thresholds"
+        />
       </Section>
 
       <Section title="Public status page" admin="admins only, read-only">
@@ -601,6 +682,15 @@ function ProviderForm({
               disabled={!isAdmin}
             />{' '}
             Show on the public status page
+          </Field>
+          <Field check>
+            <input
+              type="checkbox"
+              checked={form.webhooksPublic}
+              onChange={set('webhooksPublic')}
+              disabled={!isAdmin}
+            />{' '}
+            Also show its webhooks <small className="muted">(a separate row; off by default)</small>
           </Field>
           <Field>
             Public display name <small>shown on the status page instead of the provider name</small>

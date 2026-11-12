@@ -1,0 +1,31 @@
+name: provider-auth-change
+description: >-
+  A provider changes its access rules: half the calls to one endpoint suddenly answer
+  401/403. Starts with 8 days of seeded history, so the endpoint's normal is learned.
+start: 2026-01-05T00:00:00Z
+duration: 3d
+seed: 1
+history: { mode: seeded, days: 8 }
+providers:
+  - name: PayCo
+    host: api.payco.test
+    endpoints:
+      - method: POST
+        path: /v1/charges
+        traffic: { pattern: daily, rate: 60 }
+        normal: { errors: 0.004, latencyMs: 250 }
+      - method: GET
+        path: /v1/charges/:id
+        traffic: { pattern: daily, rate: 40 }
+        normal: { errors: 0.002, latencyMs: 120 }
+faults:
+  - id: access-change
+    target: PayCo POST /v1/charges
+    at: day 1 14:00
+    duration: 45m
+    type: auth
+    size: 0.5
+expect:
+  - incident: { kind: auth, target: PayCo POST /v1/charges, fault: access-change, within: 10m }
+  - quiet: { from: day 0 00:00, to: day 1 14:00 }
+  - quiet: { from: day 1 16:00, to: day 3 00:00 }

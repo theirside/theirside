@@ -246,6 +246,8 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
     adminTokenEnabled: !!ctx.config.adminToken,
     proxy: ctx.config.authProxy?.mode ?? null,
     designGallery: ctx.config.designGallery,
+    // simulation mode: the dashboard shows its banner and the Simulation page
+    simulation: ctx.config.sim,
   }));
 
   app.post('/v1/auth/setup', async (req, reply) => {

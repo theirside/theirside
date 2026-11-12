@@ -30,7 +30,9 @@ export function partitionJob(
 }
 
 /** SDK process rows are kept this long after a process was last seen. */
-export const SDK_PROCESS_DAYS = 7;
+export /** Webhook discovery keeps day counts, and undecided routes, this long. */
+const CANDIDATE_DAYS = 30;
+const SDK_PROCESS_DAYS = 7;
 
 /**
  * Delete rollups older than THEIRSIDE_ROLLUP_RETENTION_DAYS, capped per org by the
@@ -54,12 +56,15 @@ export function rollupRetentionJob(
         const cutoff = new Date(today - days * DAY_MS);
         for (const p of await storage.config.listProjects(org.id)) {
           await storage.rollups.deleteBefore(cutoff, { orgId: org.id, projectId: p.id });
+          await storage.inbound.deleteBefore(cutoff, { orgId: org.id, projectId: p.id });
         }
       }
       // SDK process rows (restarts, serverless cold starts) are only needed for a week
       await storage.config.pruneSdkProcesses(new Date(today - SDK_PROCESS_DAYS * DAY_MS));
       // pooled learning looks back 7 days
       await storage.config.pruneServiceTemplates(new Date(today - SDK_PROCESS_DAYS * DAY_MS));
+      // webhook discovery: day counts, and pending routes not reported for 30 days
+      await storage.inbound.pruneCandidates(new Date(today - CANDIDATE_DAYS * DAY_MS));
     },
   };
 }

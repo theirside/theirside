@@ -8,4 +8,5 @@ export * from './hosts.js';
 export * from './exclusions.js';
 export * from './sdk-config.js';
 export * from './network.js';
+export * from './webhooks.js';
 export type * from './events.js';

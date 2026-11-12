@@ -12,6 +12,7 @@ This package is the Node SDK: it records your app's outgoing HTTP calls (endpoin
 - **Never gets in your way.** Never throws into your code, never waits on the network in your request path, bounded memory. If the collector is down, events are dropped and counted; your app doesn't notice.
 - **Private by design.** No bodies, headers, query strings or raw paths ever leave your process (details below).
 - **Zero runtime dependencies.** Node 18.18+ (tested on 18, 20, 22 and 24). CommonJS and ESM. TypeScript types included.
+- **Webhooks they send you.** Deliveries from Stripe, GitHub, Shopify, Slack, Svix and other known senders are recorded without setup (route, your status, handling time, their signed timestamp), so the collector can alert when they stop, get rejected, get slow or arrive late. Other incoming requests are ignored. Node servers, and AWS Lambda through `wrap()` (see [Inbound webhooks](#inbound-webhooks)).
 - **Serverless and edge too.** AWS Lambda, Google Cloud Functions, Azure Functions, Netlify, Vercel, Cloudflare Workers, Deno and Bun, plus cron jobs and CLI scripts (see [Serverless and short-lived processes](#serverless-and-short-lived-processes)).
 
 ## Install
@@ -107,6 +108,8 @@ async onApplicationShutdown() {
 
 Each call becomes one small event: provider host, HTTP method, **endpoint template**, status code, duration, outcome, and optionally the value of a provider request-ID response header and your own correlation ID.
 
+**Inbound webhooks** (Node servers; AWS Lambda HTTP events through `wrap()`): a request your app receives is recorded only when it carries a known sender's signature headers, or matches a route you declared in `webhooks`. Then one event: sender, route template, the status you answered, handling time, and the sender's signed timestamp when it has one. Nothing else from the request is read (on Lambda: never `event.body`, the query string or other header values); other requests and non-HTTP Lambda events are ignored. The full sender list: the collector's docs/privacy.md.
+
 Never sent: request or response bodies, query strings, request headers (including `Authorization`, cookies, API keys), other response headers, raw paths, error messages, client IP addresses.
 
 Paths are turned into templates inside your process, before anything is queued:
@@ -115,6 +118,47 @@ Paths are turned into templates inside your process, before anything is queued:
 - **Plain words** are kept only if they are known API words (`strict`, the default): a built-in vocabulary of ~1,850 words that real APIs use in their paths, with personal names removed. `/v2/people/ivan-wei` is sent as `/v2/people/:id`; `/customers/cus_123/payment-methods` as `/customers/:id/payment-methods`. A position that sees more than 16 different values becomes `:id`.
 - Words that aren't in the vocabulary (product slugs, a provider's own resource names) show as `:id`. Add them as the provider's allowed words in the collector dashboard, add `routes`, or switch that provider to `balanced` if its paths never carry personal data (`balanced` sends any word once it has been seen 5 times at a position).
 - Residual risk: a few names that are also ordinary API words (`ai`, `long`, `mark`, `max`, `min`, `or`, `price`, `run`, `sim`, `to`, `uri`) are sent like other known words. If a provider puts names in its paths, give it explicit `routes`.
+
+## Inbound webhooks
+
+Webhooks your app receives are monitored with SDK 0.3.0+ and collector 0.4.0+. Nothing to turn on: known senders (Stripe, GitHub, GitLab, Shopify, Slack, SendGrid, Twilio, Checkout.com, Paddle, PayPal, Square, HubSpot, Zoom, Twitch, Calendly, Typeform, Razorpay, Linear, Vercel, Svix, Standard Webhooks) are detected by their signature headers.
+
+**Servers** (Express, Fastify, Koa, Nest, plain `http`): `init()` is enough. Until the collector's remote config answers (normally within a second of start), the SDK holds the first 500 deliveries for at most 60 s, sends them if the collector stores webhooks, and discards them if it doesn't or doesn't answer.
+
+**AWS Lambda** (API Gateway REST or HTTP API, ALB, function URL): wrap the handler and set `inbound: true`, so a cold start's deliveries go out with that invocation's flush instead of waiting for the remote config:
+
+```ts
+import { init, wrap } from '@theirside/sdk';
+
+init({
+  apiKey: process.env.THEIRSIDE_API_KEY,
+  endpoint: process.env.THEIRSIDE_ENDPOINT,
+  inbound: true,
+});
+
+export const handler = wrap(async (event) => {
+  // verify the signature and handle the event as usual
+  return { statusCode: 200, body: '' };
+});
+```
+
+The status recorded is the one the sender got: your `statusCode`; a thrown error is 500 on HTTP APIs and function URLs and 502 on REST APIs and ALB; a result without `statusCode` is 200 on HTTP APIs and function URLs and 502 on REST APIs and ALB (AWS rejects it there). Non-HTTP events (SQS, EventBridge, S3, schedules) are never deliveries. With a collector older than 0.4.0, the first batch of deliveries is rejected (404 on its own path, so no outgoing calls are lost) and the SDK records no more of them.
+
+**Senders that need a declared route:** Adyen and Mailgun sign inside the body, so headers can't identify them; Clerk, Resend and other Svix customers all send `svix-*` headers and show as "Svix" unless you name them:
+
+```ts
+init({
+  // …
+  webhooks: [
+    { path: '/webhooks/adyen', provider: 'Adyen' },
+    { path: '/webhooks/:tenant/clerk', provider: 'Clerk' },
+  ],
+});
+```
+
+**Senders the SDK doesn't know:** a POST/PUT to a route like `/webhooks/orbitpay`, `/hooks/…` or `/callbacks/…` (also a final `/events`, `/notify` or `/notifications` when there's no `Authorization` header), or one with a generic signature header (`x-signature`, `x-webhook-signature`, `x-*-signature`), is reported as a **candidate**: once a minute per route, with a delivery count and a name suggested from the path (`orbitpay`). It shows in the dashboard under Settings → Providers → Discovered webhook routes. Nothing alerts on it until an admin confirms it with a name; from then on the SDK records it like a declared route. Ignored routes are no longer reported. Browser requests (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off.
+
+**Not covered yet:** other serverless runtimes (Google Cloud Functions, Azure Functions, Vercel, Netlify) and the fetch-only build (Cloudflare Workers, Deno, Bun) don't record incoming requests. Outgoing calls are recorded there as usual.
 
 ## Options
 
@@ -138,6 +182,9 @@ Paths are turned into templates inside your process, before anything is queued:
 | `shutdownTimeoutMs` | `2000`                                                      | Cap for the flush in `shutdown()` and on process exit.                                                                                                                                                                   |
 | `handleProcessExit` | `true` (`false` in serverless mode)                          | Flush on `beforeExit` and `SIGTERM` (the default `SIGTERM` exit is preserved).                                                                                                                                           |
 | `serverless`        | detected                                                    | Short-lived or frozen processes: no exit hooks, no heartbeat, no keep-alive sockets; send with `flush()`/`wrap()`. Detected from AWS Lambda, Google Cloud Functions, Azure Functions, Vercel, Netlify, Deno Deploy and Cloudflare Workers environment variables. |
+| `webhooks`          | `true`                                                      | Inbound webhook monitoring (Node servers, AWS Lambda through `wrap()`). `true`: known senders detected by their signature headers. A list of `{ path, provider }` declares routes (senders that sign in the body, like Adyen, or to name Svix customers); declared routes win. `false`: off, no subscription. |
+| `webhookDiscovery`  | `true`                                                      | Report POST/PUT requests that look like webhooks from senders the SDK can't identify (routes like `/webhooks/orbitpay`, a generic `x-*-signature` header) as candidates to confirm or ignore in the dashboard. Never alerted on until confirmed. `false`: off. |
+| `inbound`           | `false`                                                     | Record webhook deliveries without waiting for the collector's remote config to confirm it stores them. Set it on AWS Lambda. A collector older than 0.4.0 rejects them (404) and the SDK stops recording deliveries. |
 | `debug`             | `false`                                                     | Log SDK problems (bad config, flush failures, template overflow) with `console.warn`.                                                                                                                                    |
 | `enabled`           | `true`                                                      | `false` makes `init` a no-op.                                                                                                                                                                                            |
 
@@ -146,7 +193,7 @@ Paths are turned into templates inside your process, before anything is queued:
 - `init(options)`: start recording. Calling it twice is ignored.
 - `shutdown(timeoutMs?)`: stop recording and flush, capped (default 2 s). Never rejects.
 - `flush(timeoutMs?)`: send queued events now. Without an argument, one attempt; with `timeoutMs`, everything queued, resolving within that time whatever the collector does. Never rejects.
-- `wrap(handler, { flushTimeoutMs = 300 })`: run `handler`, then always flush (success or error) and return its result or rethrow its error unchanged. For functions, cron jobs and scripts.
+- `wrap(handler, { flushTimeoutMs = 300 })`: run `handler`, then always flush (success or error) and return its result or rethrow its error unchanged. For functions, cron jobs and scripts. On AWS Lambda it also records HTTP invocations from webhook senders (see [Inbound webhooks](#inbound-webhooks)).
 - `wrapFetch(handler, { waitUntil?, flushTimeoutMs })`: for fetch handlers with `waitUntil` (Cloudflare Workers, Netlify Edge, Deno Deploy; Vercel with `waitUntil` from `@vercel/functions`): returns the response first and sends afterwards.
 - `untracked(fn)`: run `fn` with capture off for every HTTP call it makes, sync or async (see above). `track()` calls inside it are still recorded.
 - `track(call)`: record a call made through something the SDK can't see: `track({ url, method, status, durationMs })`, or with `host` + `path`; optional `outcome`, `errorCode`, `provider`.
@@ -216,7 +263,15 @@ Things to know:
 - **Network:** the function must reach the collector (a VPC function needs a route to it, an edge function a public URL). An unreachable collector costs at most the flush cap per invocation; the events are kept for the next one and dropped beyond `maxQueue`.
 - **Path privacy:** keep the default, `strict`. `balanced` needs 5 sightings per process, which a short-lived process rarely reaches, so its endpoints stay `:id`; that count can't be shared between processes without sending more than templates.
 - **Pooled learning:** with collector 0.3.0+, a function's cold start fetches what all processes of its service learned (positions that turned out to be IDs) and applies it before its first calls are recorded, if the fetch lands first; it never blocks startup.
+- **Webhooks:** on AWS Lambda, `wrap()` records HTTP invocations from webhook senders; set `inbound: true` (see [Inbound webhooks](#inbound-webhooks)).
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
+
+## Upgrading to 0.3.0
+
+- **Webhooks you receive are recorded** with no code change: on Node servers (Express, Fastify, Nest, plain `http`) from Node's `http.server` diagnostics channels, on AWS Lambda through `wrap()` with `inbound: true`. Only requests from known senders (signature headers) or `webhooks: [{ path, provider }]` routes count; the one header value read is the sender's timestamp, never bodies ([Inbound webhooks](#inbound-webhooks), docs/privacy.md). Turn it off with `webhooks: false`.
+- **Webhook discovery**: POST/PUT routes that look like webhooks from unidentified senders are reported as candidates (one event per route a minute), for an admin to confirm in the dashboard. Turn it off with `webhookDiscovery: false`.
+- Needs collector 0.4.0. With an older collector a server records no deliveries (it waits for the remote config to say `inbound: true`), and with `inbound: true` the first probe gets a 404 and recording stops; outgoing calls are never affected.
+- Overhead on an ordinary incoming request: about 0.5 µs (`pnpm --filter @theirside/sdk bench:inbound`; docs/benchmarks.md).
 
 ## Upgrading to 0.2.0
 
@@ -230,6 +285,7 @@ Things to know:
 - **fetch / undici:** Node's `diagnostics_channel` (`undici:request:create`, `:headers`, `:error`). No patching. In the fetch-only build (Workers, Deno, Bun), `globalThis.fetch` is wrapped instead: the wrapper returns what fetch returns and rethrows its errors.
 - **http / https:** the `http.client.request.start` channel hands over each request; the SDK observes that request's events without adding listeners, so your error handling is unchanged. Runtimes without the channel fall back to wrapping `http(s).request/get`.
 - A call is recorded when response headers arrive, or when it fails before that. Each request is counted once, also when AWS X-Ray, OpenTelemetry or nock wrap the same functions.
+- **Incoming webhooks:** the `http.server.request.start` and `http.server.response.finish` channels (every supported Node version), with no listeners added to your requests or responses. A request without a known sender's headers (or a declared route) returns at once. On AWS Lambda, `wrap()` reads the invocation's event instead (only its method, path and header names, plus the sender's timestamp).
 - The SDK's own uploads use a dedicated agent, so they are never recorded and aren't seen by X-Ray or OpenTelemetry wrappers.
 
 ## Check that it works
