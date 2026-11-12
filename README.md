@@ -12,7 +12,7 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 
 ## Zero to first alert
 
-**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.4` on port 4318, amd64 and arm64). Needs Docker, no clone:
+**1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.5` on port 4318, amd64 and arm64). Needs Docker, no clone:
 
 ```sh
 mkdir theirside && cd theirside
@@ -21,7 +21,7 @@ docker compose -f compose.yml up -d --wait
 docker compose -f compose.yml logs collector | grep -m1 "/setup"
 ```
 
-`compose.yml` is [`docker/compose.selfhost.yml`](docker/compose.selfhost.yml) from the latest release; every setting in it is optional and commented. Nothing to configure: the first start generates your project API key and the last line prints a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. Running it on a server? Set `THEIRSIDE_PUBLIC_URL` to its address in `compose.yml` first, and create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. The image tag `0.4` follows patch releases (`docker compose -f compose.yml pull`, then `up -d --wait` again); pin `0.4.0` if you prefer. Coming from 0.3 (the file pulled `0.3`)? Download the file again, or change the tag to `0.4`: [upgrade notes](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure). Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
+`compose.yml` is [`docker/compose.selfhost.yml`](docker/compose.selfhost.yml) from the latest release; every setting in it is optional and commented. Nothing to configure: the first start generates your project API key and the last line prints a one-time link, `Open http://localhost:4318/setup?token=… to create the first account`. Running it on a server? Set `THEIRSIDE_PUBLIC_URL` to its address in `compose.yml` first, and create the account straight away: until then, whoever has the link can ([security](docs/security.md#first-run)). For two-factor sign-in, also set `THEIRSIDE_SECRET_KEY=$(openssl rand -base64 32)` and back it up. The image tag `0.5` follows patch releases (`docker compose -f compose.yml pull`, then `up -d --wait` again); pin `0.5.0` if you prefer. Coming from 0.4 or older (the file pulled `0.4`)? Download the file again, or change the tag to `0.5`: [upgrade notes](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure). Running it on ECS or another registry: [docs/nestjs-integration.md](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure).
 
 > Maintainers: theirside.dev serves this file from the latest release, so change `docker/compose.selfhost.yml` only for new settings or a new minor version (then bump its image tag). `docker/docker-compose.yml` is the dev/demo file for working on this repo.
 

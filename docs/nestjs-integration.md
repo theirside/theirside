@@ -226,7 +226,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.4.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.5.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -274,12 +274,21 @@ From 0.3.x to 0.4.0 (deploy it before your services move to SDK 0.3.0; older SDK
 - **Self-host compose file**: it pulled the `0.3` tag, which stays on 0.3.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.4`.
 - Migrations 018–021 run on the first start: new tables for webhooks and discovered routes, new nullable columns (no table rewrite) and dropped defaults on the latency histogram columns.
 
+From 0.4.x to 0.5.0 (deploy it before your services move to SDK 0.4.0; older SDKs keep working, and SDK 0.4.0 works with older collectors, which drop the new tag and count those answers as 4xx):
+
+- **Expected outcomes** ([5b](#5b-error-statuses-that-are-normal-answers), [scoring](scoring.md#expected-outcomes-error-statuses-that-are-normal-answers)): 4xx answers that are normal business answers (a consent check answering 400) can be tagged in code with SDK 0.4.0's `markExpected(reason)` or `expecting(reason, fn)`, and count as successful; untagged answers with the same status still alert. Without code changes, a status can be marked expected for one endpoint from the incident page, the endpoint row or provider settings (members and admins). A safety net still opens a `behaviour` incident when a marked status takes over: above max(80%, halfway from its normal share to 100%) of calls, with confidence, for about 10 minutes.
+- **Alerts**: incidents about 401/403, 404 or 400/409/422 carry `markExpectedUrl`, shown in Slack as a **Mark as expected** button and in emails as a link. Marking from an open incident resolves it with a note (`resolutionNote`, also in `/v1/incidents`).
+- **Endpoint rows**: "recovering · last bad minute N min ago" instead of a red badge while an incident's window is already healthy, and only the column the incident is about is coloured. The health API adds `recovering`, `lastBadMinuteAt`, `expectedStatuses` and `expectedRate` per endpoint (OpenAPI).
+- **Wider webhook discovery** (with SDK 0.4.0): CloudEvents requests, any header name containing `signature` or `hmac`, and hosts whose first label names webhooks (`webhook.example.com`) are candidates too, named after the CloudEvents source when there is one. `THEIRSIDE_DEBUG=inbound` in a service's environment logs why each incoming request was or wasn't picked up.
+- **Self-host compose file**: it pulled the `0.4` tag, which stays on 0.4.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.5`.
+- Migration 022 runs on the first start: a column with a constant default on `rollups_1m` and nullable columns on `events`, `providers` and `incidents` (no table rewrite), and a new table `rollups_expected_1m`.
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.4.0
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.5.0
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -296,8 +305,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.4.0 .
-docker push <registry>/theirside-collector:0.4.0
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.5.0 .
+docker push <registry>/theirside-collector:0.5.0
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -320,7 +329,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.4.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.5.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -338,7 +347,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.4.0",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.5.0",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [

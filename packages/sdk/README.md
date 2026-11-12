@@ -318,6 +318,13 @@ Things to know:
 - **Webhooks:** on AWS Lambda, `wrap()` records HTTP invocations from webhook senders; set `inbound: true` (see [Inbound webhooks](#inbound-webhooks)).
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
 
+## Upgrading to 0.4.0
+
+- **Expected outcomes**: `markExpected(reason)` and `expecting(reason, fn)` tag 4xx answers that are normal business answers, which then count as successful ([Error statuses that are normal answers](#error-statuses-that-are-normal-answers)). Nothing changes until your code calls them; once it has called `markExpected`, 4xx answers wait up to 5 s before they are sent. `getStats()` gains `expected: { tagged, missed }`. Each incoming request on a Node server now runs in its own AsyncLocalStorage context (entered from `http.server.request.start`).
+- **Wider webhook discovery**: CloudEvents requests, header names containing `signature` or `hmac`, and webhook hosts (`webhook.example.com`) are candidates; the suggested name comes from `ce-source`, a route word or the segment after a version. The header values read are `host`, `content-type`, `ce-source` and `ce-time` (docs/privacy.md). A confirmed or declared route with CloudEvents headers gets its send time from `ce-time`. The same rules on Node servers and every Lambda HTTP event type.
+- **`THEIRSIDE_DEBUG=inbound`**: one log line per incoming request saying whether it was recorded, discovered or ignored, and why (names only, never values).
+- Needs collector 0.5.0 for tagged answers to count as successful; an older collector ignores the tag and counts them as 4xx. Overhead on an ordinary incoming POST: about 1.5 µs (was 0.8 µs).
+
 ## Upgrading to 0.3.0
 
 - **Webhooks you receive are recorded** with no code change: on Node servers (Express, Fastify, Nest, plain `http`) from Node's `http.server` diagnostics channels, on AWS Lambda through `wrap()` with `inbound: true`. Only requests from known senders (signature headers) or `webhooks: [{ path, provider }]` routes count; the one header value read is the sender's timestamp, never bodies ([Inbound webhooks](#inbound-webhooks), docs/privacy.md). Turn it off with `webhooks: false`.
