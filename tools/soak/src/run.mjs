@@ -2,7 +2,7 @@
 // fake collector in THIS process and forks the measured host app (app.mjs), so
 // only the app's memory is sampled.
 //
-//   node src/run.mjs [--minutes 60 | --hours N] [--warmup 5] [--rps 300] [--sample-seconds 10]
+//   node src/run.mjs [--minutes 60 | --hours N] [--warmup 5] [--rps 300] [--inbound-rps 20] [--sample-seconds 10]
 //                    [--collector up|down|cycle|external] [--cycle-minutes 10] [--no-sdk]
 //                    [--endpoint URL --api-key KEY] [--snapshots 300,3300] [--out soak.csv]
 //                    [--ci] [--max-growth-mb 1] [--project-minutes N] [--leak-bytes 0]
@@ -32,6 +32,8 @@ const opt = (name, dflt) => {
 const MINUTES = opt('hours') !== undefined ? Number(opt('hours')) * 60 : Number(opt('minutes', 60));
 const WARMUP = Number(opt('warmup', 5));
 const RPS = Number(opt('rps', 300));
+/** Requests the app receives per second (webhooks, candidates, API and browser requests). */
+const INBOUND_RPS = Number(opt('inbound-rps', 20));
 const SAMPLE_MS = Number(opt('sample-seconds', 10)) * 1000;
 const MODE = opt('collector', 'cycle');
 const CYCLE_MS = Number(opt('cycle-minutes', 10)) * 60_000;
@@ -74,7 +76,7 @@ const collector = http.createServer((req, res) => {
   if (req.method === 'GET') {
     // remote config, like a current collector
     res.setHeader('content-type', 'application/json');
-    return res.end('{"hidden":[],"internal":[],"providers":[],"sampleRate":null}');
+    return res.end('{"hidden":[],"internal":[],"providers":[],"sampleRate":null,"inbound":true}');
   }
   req.on('end', () => {
     batches++;
@@ -110,6 +112,7 @@ const child = fork(path.join(here, 'app.mjs'), [], {
     SOAK_CONFIG: JSON.stringify({
       sdk: SDK,
       rps: RPS,
+      inboundRps: INBOUND_RPS,
       providerPort,
       collectorPort,
       deadPort,
@@ -128,7 +131,7 @@ const ask = (msg) =>
 await new Promise((r) => child.once('message', r)); // ready
 
 console.log(
-  `soak: ${MINUTES} min (warm-up ${WARMUP}), ${RPS} calls/s, collector=${MODE}, sdk=${SDK ? 'on' : 'off'}, node ${process.version}`,
+  `soak: ${MINUTES} min (warm-up ${WARMUP}), ${RPS} calls/s, ${INBOUND_RPS} incoming/s, collector=${MODE}, sdk=${SDK ? 'on' : 'off'}, node ${process.version}`,
 );
 console.log(
   'elapsed  collector  heapMB  rssMB  extMB  calls     queued  dropped   sent      flushErr',
@@ -147,6 +150,12 @@ const COLS = [
   'dropped',
   'sent',
   'lastFlushError',
+  'received',
+  'inboundSent',
+  'inboundHeld',
+  'inboundDropped',
+  'candidatesSeen',
+  'expectedTagged',
 ];
 if (OUT) writeFileSync(OUT, COLS.join(',') + '\n');
 

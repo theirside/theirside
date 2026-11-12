@@ -1,5 +1,8 @@
 // The measured process: a host app making a steady mix of fetch, http and axios
-// calls through the BUILT SDK (what users run; no tsx or source condition).
+// calls through the BUILT SDK (what users run; no tsx or source condition), and
+// receiving requests (--inbound-rps): webhook deliveries from a known sender,
+// webhook candidates over more routes and names than the SDK keeps, ordinary API
+// and browser requests whose handlers call a provider and mark 4xx answers expected.
 // Started by run.mjs with --expose-gc; config arrives as JSON in SOAK_CONFIG.
 // Answers {type:'sample'} with memory + SDK stats after a forced GC, and
 // {type:'snapshot', path} with a heap snapshot.
@@ -19,6 +22,8 @@ sdk?.init({
   providers: [{ name: 'Soak Provider', hosts: ['localhost'] }],
   flushIntervalMs: 1000,
   handleProcessExit: false,
+  // held deliveries go to /v1/ingest/inbound at each flush until the collector answers
+  inbound: true,
 });
 
 const base = `http://localhost:${cfg.providerPort}`;
@@ -176,6 +181,93 @@ const traffic = setInterval(() => {
   for (let k = 0; k < perTick; k++) call();
 }, 10);
 
+// ---- incoming requests (SDK 0.3+: inbound webhooks, discovery, expected outcomes) ----
+let received = 0;
+const incoming = http.createServer((req, res) => {
+  received++;
+  req.resume();
+  const u = req.url ?? '/';
+  if (u.startsWith('/api/orders/')) {
+    // an API handler: calls a provider that answers 404, and half the time reads it as
+    // a normal answer (markExpected holds 4xx answers for 5 s once used)
+    const mark = received % 2 === 0;
+    http
+      .get(`${base}/v1/lookup/${uuid()}?r=notfound`, { agent }, (pres) => {
+        pres.resume();
+        pres.on('end', () => {
+          if (mark && pres.statusCode === 404) sdk?.markExpected('soak_not_found');
+          res.end('{}');
+        });
+      })
+      .on('error', () => res.end('{}'));
+    return;
+  }
+  res.statusCode = received % 50 === 0 ? 500 : received % 23 === 0 ? 401 : 200;
+  res.end('');
+});
+const incomingPort = await new Promise((r) =>
+  incoming.listen(0, '127.0.0.1', () => r(incoming.address().port)),
+);
+// 127.0.0.1 is not a tracked host: the app's own client calls are not recorded
+const selfAgent = new http.Agent({ keepAlive: true, maxSockets: 20 });
+// 80 sender words: more than the SDK's 50 candidate routes and 16 names per process
+const WORDS = Array.from(
+  { length: 80 },
+  (_, i) =>
+    `sender-${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`,
+);
+let m = 0;
+function send() {
+  m++;
+  const r = m % 10;
+  let method = 'POST';
+  let path;
+  const headers = {};
+  if (r < 4) {
+    path = '/webhooks/stripe';
+    headers['stripe-signature'] = `t=${Math.floor(Date.now() / 1000)},v1=${uuid()}`;
+  } else if (r < 6) {
+    const w = pick(WORDS);
+    path = `/v1/${w}`;
+    Object.assign(headers, {
+      host: 'webhook.soak.test',
+      'ce-specversion': '1.0',
+      'ce-source': `com.${w.replace('sender-', 'src')}`,
+      'ce-type': 'soak.event',
+      'ce-id': uuid(),
+      'ce-time': new Date().toISOString(),
+      'x-hmac-signature-sha-256': 'c29haw==',
+    });
+  } else if (r < 7) {
+    path = `/hooks/${uuid()}`;
+    headers['x-signature'] = uuid();
+  } else if (r < 9) {
+    path = `/api/orders/${m}`;
+    headers.authorization = 'Bearer soak';
+  } else {
+    method = m % 20 === 9 ? 'GET' : 'POST';
+    path = method === 'GET' ? `/v1/health` : `/api/cart/${m}`;
+    if (method === 'POST') headers.cookie = 'session=soak';
+  }
+  const req = http.request(
+    { host: '127.0.0.1', port: incomingPort, method, path, headers, agent: selfAgent },
+    (res) => {
+      res.resume();
+    },
+  );
+  req.on('error', swallow);
+  req.end(method === 'POST' ? '{"soak":true}' : undefined);
+}
+const inboundPerTick = (cfg.inboundRps ?? 0) / 10;
+let inboundCarry = 0;
+const inboundTraffic =
+  inboundPerTick > 0
+    ? setInterval(() => {
+        inboundCarry += inboundPerTick;
+        for (; inboundCarry >= 1; inboundCarry--) send();
+      }, 100)
+    : undefined;
+
 process.on('message', (msg) => {
   if (msg.type === 'sample') {
     global.gc();
@@ -193,6 +285,12 @@ process.on('message', (msg) => {
       dropped: s?.dropped ?? null,
       sent: s?.sent ?? null,
       lastFlushError: s?.lastFlushError ?? null,
+      received,
+      inboundSent: s?.inbound?.sent ?? null,
+      inboundHeld: s?.inbound?.held ?? null,
+      inboundDropped: s?.inbound?.dropped ?? null,
+      candidatesSeen: s?.inbound?.candidates?.seen ?? null,
+      expectedTagged: s?.expected?.tagged ?? null,
     });
   } else if (msg.type === 'snapshot') {
     global.gc();
@@ -200,8 +298,11 @@ process.on('message', (msg) => {
     process.send({ type: 'snapshot', path: msg.path });
   } else if (msg.type === 'stop') {
     clearInterval(traffic);
+    if (inboundTraffic) clearInterval(inboundTraffic);
     Promise.resolve(sdk?.shutdown(1000)).finally(() => {
       agent.destroy();
+      selfAgent.destroy();
+      incoming.close();
       process.exit(0);
     });
   }

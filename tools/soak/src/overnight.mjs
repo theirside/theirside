@@ -5,7 +5,7 @@
 //   (c) SDK off (control)
 //
 //   node src/overnight.mjs --out-dir results/2026-11-04 [--hours 8] [--sample-seconds 30]
-//        [--warmup 10] [--rps 300] [--endpoint http://localhost:4318] [--api-key KEY]
+//        [--warmup 10] [--rps 300] [--inbound-rps 20] [--endpoint http://localhost:4318] [--api-key KEY]
 //
 // Writes into --out-dir: one CSV and one log per variant, pids.json, and
 // SUMMARY.md when the runs end. SIGTERM (kill <pid of this process>) stops
@@ -27,6 +27,7 @@ const HOURS = Number(opt('hours', 8));
 const SAMPLE_SECONDS = Number(opt('sample-seconds', 30));
 const WARMUP = Number(opt('warmup', 10));
 const RPS = opt('rps', '300');
+const INBOUND_RPS = opt('inbound-rps', '20');
 const ENDPOINT = opt('endpoint', 'http://localhost:4318');
 const API_KEY = opt(
   'api-key',
@@ -60,6 +61,8 @@ const common = [
   String(WARMUP),
   '--rps',
   RPS,
+  '--inbound-rps',
+  INBOUND_RPS,
 ];
 const args = {
   a: ['--collector', 'external', '--endpoint', ENDPOINT, '--api-key', API_KEY],
