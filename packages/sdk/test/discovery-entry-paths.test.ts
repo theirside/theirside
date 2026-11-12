@@ -48,7 +48,8 @@ const CASES: Case[] = [
     },
     expect: {
       candidate: 'orbitpay',
-      endpoint: '/v1/:id',
+      // the plain word after the version stays in the route, also with a name from ce-source
+      endpoint: '/v1/orbitpay',
       signals: 'signature header, cloudevents, webhook host; name from ce-source',
     },
   },

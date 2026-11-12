@@ -225,4 +225,37 @@ describe('webhook discovery signals (generic, names made up)', () => {
     expect(req('/api/zephyr', { 'x-signature': 'v' })?.name).toBeUndefined();
     expect(req('/v1/9f3b2c1a77d0', { 'x-signature': 'v' })?.name).toBeUndefined();
   });
+
+  it('a plain lower-case word after a version or next to a route word is kept, whatever names the sender', () => {
+    const req = (path: string, headers: Record<string, string>) =>
+      classifyWebhookCandidate({
+        method: 'POST',
+        path,
+        has: (n) => n in headers,
+        anyName: (t) => Object.keys(headers).some(t),
+        get: (n) => headers[n],
+      }).candidate;
+    const ce = { 'ce-specversion': '1.0', 'ce-source': 'com.orbitpay' };
+    // the name from ce-source, the path word kept: /v1/inbox stays /v1/inbox
+    expect(req('/v1/inbox', ce)).toMatchObject({
+      name: 'orbitpay',
+      nameFrom: 'ce-source',
+      nameIndex: 1,
+      pathName: 'inbox',
+    });
+    expect(req('/webhooks/zephyr', ce)).toMatchObject({
+      name: 'orbitpay',
+      nameIndex: 1,
+      pathName: 'zephyr',
+    });
+    expect(req('/api/v2/zephyr', { 'x-signature': 'v' })).toMatchObject({
+      nameIndex: 2,
+      pathName: 'zephyr',
+    });
+    // only a plain lower-case name as sent: never an ID, a mixed-case token or a generic word
+    for (const path of ['/v1/Zephyr', '/v1/zephyr2', '/v1/9f3b2c1a77d0', '/v1/inbound', '/v1/x'])
+      expect(req(path, ce)).not.toHaveProperty('pathName');
+    // no version segment before it, no route word: nothing kept
+    expect(req('/api/zephyr', ce)).not.toHaveProperty('pathName');
+  });
 });

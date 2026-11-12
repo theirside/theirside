@@ -74,6 +74,24 @@ export const INBOUND_HOLD_MAX = 500;
 /** How long a long-running process holds deliveries waiting for the remote config. */
 export const INBOUND_HOLD_MS = 60_000;
 
+/** `getStats().inbound`: deliveries and candidate reports, as events (a candidate report carries `count`). */
+export interface InboundStats {
+  /** Does the collector store inbound deliveries: `unknown` until it answers. */
+  support: InboundSupport;
+  /** Held in memory until the collector answers (sent at the next flush with `inbound: true`). */
+  held: number;
+  /** Accepted by the collector. */
+  sent: number;
+  /** Dropped: hold or queue full, a collector that doesn't store them, a rejected batch. */
+  dropped: number;
+  candidates: {
+    /** Incoming requests taken as webhook candidates. */
+    seen: number;
+    /** Candidate reports accepted by the collector. */
+    sent: number;
+  };
+}
+
 /** What became of a batch of held deliveries sent to INGEST_INBOUND_PATH. */
 export type ProbeOutcome = 'accepted' | 'rejected' | 'retry' | 'dropped';
 
@@ -110,6 +128,7 @@ export class InboundRecorder {
   private ignored: ReadonlySet<string> = new Set();
   private readonly names = new Set<string>();
   private readonly candidateReports = new Map<string, { last: number; pending: number }>();
+  private readonly counts = { sent: 0, dropped: 0, candidatesSeen: 0, candidatesSent: 0 };
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -147,6 +166,40 @@ export class InboundRecorder {
           `more than ${CANDIDATE_ROUTES_MAX} candidate webhook routes; new ones are not recorded`,
         ),
     });
+  }
+
+  stats(): InboundStats {
+    const c = this.counts;
+    return {
+      support: this.supportState,
+      held: this.held.length,
+      sent: c.sent,
+      dropped: c.dropped,
+      candidates: { seen: c.candidatesSeen, sent: c.candidatesSent },
+    };
+  }
+
+  /** The collector accepted these inbound events (from the transport). */
+  countSent(events: readonly CallEvent[]): void {
+    for (const e of events) {
+      this.counts.sent++;
+      if (e.candidate) this.counts.candidatesSent++;
+    }
+  }
+
+  /** Inbound events dropped from the queue (from the transport). */
+  countDropped(n: number): void {
+    this.counts.dropped += n;
+  }
+
+  /** Held deliveries, oldest first (THEIRSIDE_DEBUG=inbound flush lines). */
+  get heldEvents(): readonly CallEvent[] {
+    return this.held;
+  }
+
+  /** `inbound: true` in init: held deliveries go to INGEST_INBOUND_PATH at each flush. */
+  get optedIn(): boolean {
+    return this.cfg.inboundOptIn;
   }
 
   /** Webhook discovery is on (`webhookDiscovery` not false). */
@@ -228,6 +281,7 @@ export class InboundRecorder {
   }
 
   private discardHeld(): void {
+    this.counts.dropped += this.held.length;
     this.held = [];
     this.heldDropped = 0;
   }
@@ -247,6 +301,7 @@ export class InboundRecorder {
   probeResult(outcome: ProbeOutcome, events: CallEvent[]): void {
     if (outcome === 'accepted') this.setSupport('yes');
     else if (outcome === 'rejected') {
+      this.counts.dropped += events.length;
       this.log(
         'the collector does not store inbound webhooks (collector 0.4.0+); not sending them',
       );
@@ -254,8 +309,18 @@ export class InboundRecorder {
     } else if (outcome === 'retry' && this.supportState === 'unknown') {
       const room = Math.max(0, INBOUND_HOLD_MAX - this.held.length);
       this.held.unshift(...events.slice(0, room));
-      this.queue.dropped += events.length - Math.min(room, events.length);
-    } else if (outcome === 'dropped') this.queue.dropped += events.length;
+      const lost = events.length - Math.min(room, events.length);
+      this.queue.dropped += lost;
+      this.counts.dropped += lost;
+    } else if (outcome === 'retry' && this.supportState === 'yes') {
+      // the remote config said yes while this batch was in flight: the usual path now
+      for (const e of events) this.queue.push(e);
+      this.onEnqueue();
+    } else {
+      // dropped, or a retry after the collector said no
+      this.queue.dropped += events.length;
+      this.counts.dropped += events.length;
+    }
   }
 
   /**
@@ -384,26 +449,30 @@ export class InboundRecorder {
         );
       return undefined;
     }
+    // Names that leave the process as words (the privacy exception, docs/privacy.md
+    // "Webhook discovery"): at most MAX_CANDIDATE_NAMES distinct ones, path words and
+    // suggested names together.
+    const room = (w: string) => this.names.has(w) || this.names.size < MAX_CANDIDATE_NAMES;
     let provider = 'unknown';
-    if (c.name !== undefined) {
-      // a suggested name within the cap; from the path it stays literal in the route
-      // (a plain word, never an ID)
-      const known = this.names.has(c.name);
-      if (known || this.names.size < MAX_CANDIDATE_NAMES) {
-        if (c.nameIndex === undefined) {
-          if (!known) this.names.add(c.name);
-          provider = c.name;
-        } else {
-          const t = endpoint.split('/');
-          const segs = path.split('/').filter((x) => x !== '');
-          if (t.length === segs.length + 1) {
-            if (!known) this.names.add(c.name);
-            t[c.nameIndex + 1] = c.name;
-            endpoint = t.join('/');
-            provider = c.name;
-          }
-        }
+    let pathKept = false;
+    if (c.nameIndex !== undefined && c.pathName !== undefined && room(c.pathName)) {
+      // a plain lower-case word naming the sender stays literal in the route (never an ID)
+      const t = endpoint.split('/');
+      const segs = path.split('/').filter((x) => x !== '');
+      if (t.length === segs.length + 1) {
+        this.names.add(c.pathName);
+        t[c.nameIndex + 1] = c.pathName;
+        endpoint = t.join('/');
+        pathKept = true;
       }
+    }
+    if (c.name !== undefined) {
+      if (c.nameFrom === 'ce-source') {
+        if (room(c.name)) {
+          this.names.add(c.name);
+          provider = c.name;
+        }
+      } else if (pathKept) provider = c.name;
     }
     if (this.ignored.has(endpoint)) {
       if (trace)
@@ -456,6 +525,7 @@ export class InboundRecorder {
         this.candidateReports.set(p.endpoint, (r = { last: 0, pending: 0 }));
       }
       r.pending++;
+      this.counts.candidatesSeen++;
       if (r.last !== 0 && now - r.last < CANDIDATE_REPORT_MS) return;
       ev.candidate = true;
       ev.count = r.pending;
@@ -466,6 +536,9 @@ export class InboundRecorder {
       this.queue.push(ev);
       this.onEnqueue();
     } else if (this.held.length < INBOUND_HOLD_MAX) this.held.push(ev);
-    else this.heldDropped++;
+    else {
+      this.heldDropped++;
+      this.counts.dropped++;
+    }
   }
 }

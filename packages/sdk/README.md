@@ -175,6 +175,8 @@ export const handler = wrap(async (event) => {
 });
 ```
 
+A delivery is recorded when your handler returns (its status is your handler's result), so `wrap()` sends it after the handler, within the same invocation: a `flush()` in your own `finally` runs too early to include it. That holds with `flushTimeoutMs: 0` too: after a delivery, `wrap()` still flushes (capped at 300 ms and the invocation's deadline).
+
 The status recorded is the one the sender got: your `statusCode`; a thrown error is 500 on HTTP APIs and function URLs and 502 on REST APIs and ALB; a result without `statusCode` is 200 on HTTP APIs and function URLs and 502 on REST APIs and ALB (AWS rejects it there). Non-HTTP events (SQS, EventBridge, S3, schedules) are never deliveries. With a collector older than 0.4.0, the first batch of deliveries is rejected (404 on its own path, so no outgoing calls are lost) and the SDK records no more of them.
 
 **Senders that need a declared route:** Adyen and Mailgun sign inside the body, so headers can't identify them; Clerk, Resend and other Svix customers all send `svix-*` headers and show as "Svix" unless you name them:
@@ -196,17 +198,21 @@ init({
 - CloudEvents: `ce-specversion` with `ce-source` or `ce-type`, or `content-type: application/cloudevents+json`;
 - a `Host` whose first label contains `webhook`, `hook` or `callback` (`webhook.example.com`).
 
-The suggested name comes from `ce-source` (`com.example` or `https://api.example.com/…` → `example`), else the segment next to the route word (`/webhooks/orbitpay` → `orbitpay`), else the segment after a version (`/v1/example` → `example`), else `unknown`. It shows in the dashboard under Settings → Providers → Discovered webhook routes. Nothing alerts on it until an admin confirms it with a name; from then on the SDK records it like a declared route. Ignored routes are no longer reported. Browser requests (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off. A delivery from a confirmed or declared route that carries CloudEvents headers gets its send time from `ce-time` (delivery lag). The rules are the same on a Node server and on AWS Lambda (`wrap()`; API Gateway REST and HTTP APIs, ALB, function URLs).
+The suggested name comes from `ce-source` (`com.example` or `https://api.example.com/…` → `example`), else the segment next to the route word (`/webhooks/orbitpay` → `orbitpay`), else the segment after a version (`/v1/example` → `example`), else `unknown`. That path segment stays in the route whichever name is suggested (`/v1/example`, not `/v1/:id`) when it is a plain lower-case name as sent (letters and inner hyphens, no digits), at most 16 such words per process. It shows in the dashboard under Settings → Providers → Discovered webhook routes. Nothing alerts on it until an admin confirms it with a name; from then on the SDK records it like a declared route. Ignored routes are no longer reported. Browser requests (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off. A delivery from a confirmed or declared route that carries CloudEvents headers gets its send time from `ce-time` (delivery lag). The rules are the same on a Node server and on AWS Lambda (`wrap()`; API Gateway REST and HTTP APIs, ALB, function URLs).
 
-**Why was (or wasn't) a request picked up?** Start the app with `THEIRSIDE_DEBUG=inbound`: the SDK logs one line per incoming request, on every entry path including `wrap()`, for example
+**Why was (or wasn't) a request picked up, and was it sent?** Start the app with `THEIRSIDE_DEBUG=inbound`, or pass `debug: 'inbound'` to `init()` (for settings that never reach `process.env`, such as a secrets store). The SDK logs one line per incoming request, on every entry path including `wrap()`, and one line per flush saying what it sent, to which route and the collector's answer, or why not:
 
 ```
-[theirside] inbound POST /v1/orbitpay: candidate /v1/:id, suggested name orbitpay (signature header, cloudevents, webhook host; name from ce-source)
+[theirside] inbound POST /v1/orbitpay: candidate /v1/orbitpay, suggested name orbitpay (signature header, cloudevents, webhook host; name from ce-source)
 [theirside] inbound POST /v1/orders: ignored, no webhook signal
 [theirside] inbound POST /v1/cart: ignored, browser or front-end request (cookie header)
+[theirside] inbound flush: nothing to send
+[theirside] inbound flush: 1 candidate to /v1/ingest/inbound: 202
+[theirside] inbound flush: 2 deliveries not sent: timeout (still in flight)
+[theirside] inbound flush: 1 delivery held: waiting for the remote config to confirm the collector stores inbound webhooks
 ```
 
-Lines name rules and header names only, with IDs in the path as `:id`; never a header value or a body.
+Lines name rules, header names, routes and counts only, with IDs in the path as `:id`; never a header value or a body. `getStats().inbound` has the counters: `{ support, held, sent, dropped, candidates: { seen, sent } }`.
 
 **Not covered yet:** other serverless runtimes (Google Cloud Functions, Azure Functions, Vercel, Netlify) and the fetch-only build (Cloudflare Workers, Deno, Bun) don't record incoming requests. Outgoing calls are recorded there as usual.
 
@@ -235,7 +241,7 @@ Lines name rules and header names only, with IDs in the path as `:id`; never a h
 | `webhooks`          | `true`                                                      | Inbound webhook monitoring (Node servers, AWS Lambda through `wrap()`). `true`: known senders detected by their signature headers. A list of `{ path, provider }` declares routes (senders that sign in the body, like Adyen, or to name Svix customers); declared routes win. `false`: off, no subscription. |
 | `webhookDiscovery`  | `true`                                                      | Report POST/PUT requests that look like webhooks from senders the SDK can't identify (routes like `/webhooks/orbitpay`, a signature or HMAC header, CloudEvents, a webhook host) as candidates to confirm or ignore in the dashboard. Never alerted on until confirmed. `false`: off. |
 | `inbound`           | `false`                                                     | Record webhook deliveries without waiting for the collector's remote config to confirm it stores them. Set it on AWS Lambda. A collector older than 0.4.0 rejects them (404) and the SDK stops recording deliveries. |
-| `debug`             | `false`                                                     | Log SDK problems (bad config, flush failures, template overflow) with `console.warn`.                                                                                                                                    |
+| `debug`             | `false`                                                     | `true`: log SDK problems (bad config, flush failures, template overflow) with `console.warn`. `'inbound'`: log what became of each incoming request and each flush's webhook deliveries (the same as `THEIRSIDE_DEBUG=inbound`). |
 | `enabled`           | `true`                                                      | `false` makes `init` a no-op.                                                                                                                                                                                            |
 
 ## API
@@ -243,13 +249,13 @@ Lines name rules and header names only, with IDs in the path as `:id`; never a h
 - `init(options)`: start recording. Calling it twice is ignored.
 - `shutdown(timeoutMs?)`: stop recording and flush, capped (default 2 s). Never rejects.
 - `flush(timeoutMs?)`: send queued events now. Without an argument, one attempt; with `timeoutMs`, everything queued, resolving within that time whatever the collector does. Never rejects.
-- `wrap(handler, { flushTimeoutMs = 300 })`: run `handler`, then always flush (success or error) and return its result or rethrow its error unchanged. For functions, cron jobs and scripts. On AWS Lambda it also records HTTP invocations from webhook senders (see [Inbound webhooks](#inbound-webhooks)).
+- `wrap(handler, { flushTimeoutMs = 300 })`: run `handler`, then always flush (success or error) and return its result or rethrow its error unchanged. For functions, cron jobs and scripts. On AWS Lambda it also records HTTP invocations from webhook senders (see [Inbound webhooks](#inbound-webhooks)). `flushTimeoutMs: 0` turns its flush off, except after a webhook delivery, which only `wrap()` can send (capped at 300 ms).
 - `wrapFetch(handler, { waitUntil?, flushTimeoutMs })`: for fetch handlers with `waitUntil` (Cloudflare Workers, Netlify Edge, Deno Deploy; Vercel with `waitUntil` from `@vercel/functions`): returns the response first and sends afterwards.
 - `untracked(fn)`: run `fn` with capture off for every HTTP call it makes, sync or async (see above). `track()` calls inside it are still recorded.
 - `track(call)`: record a call made through something the SDK can't see: `track({ url, method, status, durationMs })`, or with `host` + `path`; optional `outcome`, `errorCode`, `provider`.
 - `markExpected(reason)`: the latest outgoing call in this incoming request answered with a 4xx that is a normal business answer: count it as successful (see [Error statuses that are normal answers](#error-statuses-that-are-normal-answers)).
 - `expecting(reason, fn)`: run `fn`; 4xx answers to the calls it makes are expected, with this reason. Returns what `fn` returns and rethrows its errors.
-- `getStats()`: `{ queued, dropped, sent, failedFlushes, lastFlushError, expected: { tagged, missed } }` for health checks, or `undefined` while the SDK is off (not initialised, or no `apiKey`/`endpoint`).
+- `getStats()`: `{ queued, dropped, sent, failedFlushes, lastFlushError, expected: { tagged, missed }, inbound: { support, held, sent, dropped, candidates: { seen, sent } } }` for health checks, or `undefined` while the SDK is off (not initialised, or no `apiKey`/`endpoint`).
 
 Outcomes: `ok`, `http_4xx` (429 keeps its status), `http_5xx`, `timeout` (including your client's own timeout firing), `conn_reset`, `conn_refused`, `dns`, `tls`, `aborted` (you cancelled it; not counted against the provider), `other_error`.
 
@@ -282,6 +288,8 @@ export const handler = async (event) => {
   }
 };
 ```
+
+Webhooks you receive on Lambda are recorded only through `wrap()`; keep it around such a handler (`wrap(handler, { flushTimeoutMs: 0 })` if you flush yourself): it sends the delivery after your `finally`.
 
 **Cloudflare Workers, Netlify Edge, Deno Deploy, Vercel:** respond first, send afterwards with `waitUntil`, so the user doesn't wait for the upload. `init()` at the top level is fine: it sets nothing up that needs a request.
 
@@ -317,6 +325,13 @@ Things to know:
 - **Pooled learning:** with collector 0.3.0+, a function's cold start fetches what all processes of its service learned (positions that turned out to be IDs) and applies it before its first calls are recorded, if the fetch lands first; it never blocks startup.
 - **Webhooks:** on AWS Lambda, `wrap()` records HTTP invocations from webhook senders; set `inbound: true` (see [Inbound webhooks](#inbound-webhooks)).
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
+
+## Upgrading to 0.4.1
+
+- **Fix: webhook deliveries on AWS Lambda were not sent** when the handler flushed in its own `finally` and `wrap()` had `flushTimeoutMs: 0`. A delivery is recorded only after the handler returns, so neither flush included it, and the frozen process sent it at best on a later invocation. `wrap()` now sends it after the handler even with `flushTimeoutMs: 0`.
+- **Discovered routes keep their path word with a `ce-source` name**: `/v1/example` with a CloudEvents source stays `/v1/example` (was `/v1/:id`). Only a plain lower-case name as sent is kept (`/v1/Example` is now `/v1/:id` with no name from the path).
+- **Diagnostics**: `debug: 'inbound'` in `init()` (same as `THEIRSIDE_DEBUG=inbound`), one `inbound flush:` line per flush, and `getStats().inbound`.
+- Works with collector 0.5.0; no collector change.
 
 ## Upgrading to 0.4.0
 

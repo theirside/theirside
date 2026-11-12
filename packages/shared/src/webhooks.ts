@@ -442,8 +442,14 @@ export interface WebhookCandidate {
   reason: 'route' | 'signature' | 'cloudevents' | 'host';
   /** Every signal that held. */
   signals: CandidateSignal[];
-  /** Index (in the path's segments) of the segment suggested as the sender's name, if it comes from the path. */
+  /**
+   * Index (in the path's segments) of a plain lower-case segment that names the sender
+   * (next to a route word, or last after a version segment): kept literal in the route,
+   * even when the suggested name comes from `ce-source`.
+   */
   nameIndex?: number;
+  /** That segment, as sent (already a plain lower-case name). */
+  pathName?: string;
   /** The suggested sender name, lower-cased. */
   name?: string;
   /** Where the name came from. */
@@ -541,26 +547,25 @@ export function classifyWebhookCandidate(req: CandidateRequest): CandidateDecisi
         : 'host';
   const c: WebhookCandidate = { reason, signals };
 
-  // the sender's name: CloudEvents source, then the route word's neighbour, then the
-  // segment after a version segment
-  const fromSource = ce ? nameFromCloudEventsSource(req.get?.('ce-source')) : undefined;
-  if (fromSource) return { candidate: { ...c, name: fromSource, nameFrom: 'ce-source' } };
+  // a plain lower-case word in the path that names the sender: the route word's neighbour,
+  // else the last segment after a version segment. It stays literal in the route whatever
+  // the suggested name comes from.
   const ss = segs();
   const last = ss.length - 1;
+  let word: { i: number; from: 'route' | 'path' } | undefined;
   if (routeCounts) {
-    const lastSeg = ss[last]!.toLowerCase();
-    if (at < last && isSenderName(lastSeg))
-      return { candidate: { ...c, nameIndex: last, name: lastSeg, nameFrom: 'route' } };
-    const before = at > 0 ? ss[at - 1]!.toLowerCase() : undefined;
-    if (at === last && isSenderName(before))
-      return { candidate: { ...c, nameIndex: at - 1, name: before, nameFrom: 'route' } };
+    if (at < last && isSenderName(ss[last])) word = { i: last, from: 'route' };
+    else if (at === last && at > 0 && isSenderName(ss[at - 1])) word = { i: at - 1, from: 'route' };
   }
-  if (last >= 1) {
-    const lastSeg = ss[last]!.toLowerCase();
+  if (!word && last >= 1 && isSenderName(ss[last])) {
     const version = ss.findIndex((x, i) => i < last && isVersionSegment(x));
-    if (version >= 0 && isSenderName(lastSeg))
-      return { candidate: { ...c, nameIndex: last, name: lastSeg, nameFrom: 'path' } };
+    if (version >= 0) word = { i: last, from: 'path' };
   }
+  const kept = word ? { nameIndex: word.i, pathName: ss[word.i]! } : {};
+  // the suggested name: CloudEvents source first (the sender says who it is), then that word
+  const fromSource = ce ? nameFromCloudEventsSource(req.get?.('ce-source')) : undefined;
+  if (fromSource) return { candidate: { ...c, ...kept, name: fromSource, nameFrom: 'ce-source' } };
+  if (word) return { candidate: { ...c, ...kept, name: ss[word.i]!, nameFrom: word.from } };
   return { candidate: c };
 }
 

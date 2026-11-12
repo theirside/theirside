@@ -200,6 +200,10 @@ export function createApi(runtime: Runtime) {
       };
       const after = () => {
         let ms = cap();
+        // A delivery is recorded only now (its status is the handler's result), so no
+        // flush inside the handler could send it, and a frozen process sends nothing
+        // later: it goes now even with flushTimeoutMs: 0.
+        if (ms === 0 && delivery) ms = DEFAULT_WRAP_FLUSH_MS;
         const left = lambdaRemainingMs(args as unknown[]);
         if (left !== undefined) ms = Math.min(ms, Math.max(0, left - LAMBDA_DEADLINE_MARGIN_MS));
         return flush(ms);

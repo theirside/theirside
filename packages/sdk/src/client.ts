@@ -3,7 +3,7 @@ import { resolveConfig, type InitOptions, type ResolvedConfig } from './config.j
 import type { ExpectedStats, FrameScope } from './expected.js';
 import { createLogger, safely, warn, type Logger } from './log.js';
 import { RingBuffer } from './queue.js';
-import { INBOUND_HOLD_MS, type InboundPending } from './inbound.js';
+import { INBOUND_HOLD_MS, type InboundPending, type InboundStats } from './inbound.js';
 import { lambdaHttpRequest, lambdaStatus, type LambdaHttpKind } from './lambda.js';
 import { Recorder, type ManualCall } from './recorder.js';
 import { RemoteConfigClient } from './remote-config.js';
@@ -64,9 +64,27 @@ export interface Runtime {
   version(): string | undefined;
 }
 
-/** `getStats()`: the transport's counters and the expected-outcome ones. */
+/** `getStats()`: the transport's counters, the expected-outcome ones and inbound webhooks. */
 export interface SdkStats extends TransportStats {
   expected: ExpectedStats;
+  inbound: InboundStats;
+}
+
+/** One POST of a flush that carried inbound events (THEIRSIDE_DEBUG=inbound). */
+interface InboundPost {
+  route: string;
+  events: readonly CallEvent[];
+  result: string;
+}
+
+/** `1 delivery and 2 candidates`, `3 deliveries` (a candidate report counts once). */
+function inboundCount(events: readonly CallEvent[]): string {
+  const c = events.filter((e) => e.candidate).length;
+  const d = events.length - c;
+  const parts = [];
+  if (d > 0 || c === 0) parts.push(`${d} ${d === 1 ? 'delivery' : 'deliveries'}`);
+  if (c > 0) parts.push(`${c} ${c === 1 ? 'candidate' : 'candidates'}`);
+  return parts.join(' and ');
 }
 
 export class Client {
@@ -82,6 +100,8 @@ export class Client {
   private readonly timers: boolean;
   private heartbeatTimer: unknown;
   private readonly heartbeatMs: number;
+  /** Flushes in progress that write a THEIRSIDE_DEBUG=inbound line when they end. */
+  private readonly tracedFlushes = new Set<InboundPost[]>();
 
   constructor(
     cfg: ResolvedConfig,
@@ -121,6 +141,17 @@ export class Client {
     this.recorder.inbound.onRejected = () =>
       this.transport.discard((e) => e.direction === 'inbound');
     this.transport.probe = this.recorder.inbound;
+    const inbound = this.recorder.inbound;
+    this.transport.inbound = {
+      sent: (events) => inbound.countSent(events),
+      dropped: (n) => inbound.countDropped(n),
+      posted: (route, events, result) => {
+        for (const posts of this.tracedFlushes) posts.push({ route, events, result });
+      },
+    };
+    this.queue.onDrop = (e) => {
+      if (e.direction === 'inbound') inbound.countDropped(1);
+    };
     this.remote = cfg.remoteConfig
       ? new RemoteConfigClient(
           this.transport,
@@ -220,22 +251,68 @@ export class Client {
    * config is refreshed. Never rejects.
    */
   flush(timeoutMs?: number): Promise<void> {
+    const trace = this.recorder.inbound.trace;
+    const posts: InboundPost[] | undefined = trace ? [] : undefined;
+    if (posts) this.tracedFlushes.add(posts);
     const remote = this.timers ? undefined : this.remote?.pollIfDue();
+    let timedOut = false;
     const send =
       typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
-        ? this.transport.flushWithin(timeoutMs)
+        ? this.transport.flushWithin(timeoutMs).then((done) => {
+            timedOut = !done;
+          })
         : this.transport.flush(true).catch(() => {});
-    if (!remote) return send;
-    const cap = typeof timeoutMs === 'number' ? timeoutMs : undefined;
-    const bounded =
-      cap === undefined
-        ? remote
-        : Promise.race([remote, new Promise<void>((r) => setTimeout(r, Math.max(0, cap)))]);
-    return Promise.all([send, bounded.catch(() => {})]).then(() => {});
+    let all = send;
+    if (remote) {
+      const cap = typeof timeoutMs === 'number' ? timeoutMs : undefined;
+      const bounded =
+        cap === undefined
+          ? remote
+          : Promise.race([remote, new Promise<void>((r) => setTimeout(r, Math.max(0, cap)))]);
+      all = Promise.all([send, bounded.catch(() => {})]).then(() => {});
+    }
+    if (!posts || !trace) return all;
+    return all.then(() => {
+      this.tracedFlushes.delete(posts);
+      safely(this.log, 'inbound trace', () => trace(this.inboundFlushLine(posts, timedOut)));
+    });
+  }
+
+  /**
+   * THEIRSIDE_DEBUG=inbound, one line per flush: what each POST carried, to which route,
+   * and the collector's answer; then what is left and why. Counts and routes only.
+   */
+  private inboundFlushLine(posts: readonly InboundPost[], timedOut: boolean): string {
+    const parts = posts.map((p) => `${inboundCount(p.events)} to ${p.route}: ${p.result}`);
+    const inFlight = this.transport.inFlightInbound;
+    if (inFlight.length > 0)
+      parts.push(`${inboundCount(inFlight)} not sent: timeout (still in flight)`);
+    const waiting = this.transport.inboundWaiting();
+    if (waiting.length > 0)
+      parts.push(
+        `${inboundCount(waiting)} not sent: ${timedOut ? 'timeout' : 'kept for the next flush'}`,
+      );
+    const inbound = this.recorder.inbound;
+    const held = inbound.heldEvents;
+    if (held.length > 0)
+      parts.push(
+        `${inboundCount(held)} held: ${
+          !inbound.optedIn
+            ? 'waiting for the remote config to confirm the collector stores inbound webhooks'
+            : timedOut
+              ? 'not sent: timeout'
+              : 'kept for the next flush'
+        }`,
+      );
+    return `inbound flush: ${parts.length > 0 ? parts.join('; ') : 'nothing to send'}`;
   }
 
   stats(): SdkStats {
-    return { ...this.transport.stats(), expected: { ...this.recorder.expected } };
+    return {
+      ...this.transport.stats(),
+      expected: { ...this.recorder.expected },
+      inbound: this.recorder.inbound.stats(),
+    };
   }
 
   /** `markExpected(reason)`; see Recorder.markExpected. */

@@ -1,5 +1,6 @@
 import {
   INGEST_INBOUND_PATH,
+  INGEST_PATH,
   PROTOCOL_VERSION,
   SDK_PACKAGE_NAME,
   type CallEvent,
@@ -36,6 +37,21 @@ export interface EventHold {
   /** These events left the queue: too late to mark them. */
   taken(events: readonly CallEvent[]): void;
 }
+
+/**
+ * Inbound deliveries in the main queue (getStats, THEIRSIDE_DEBUG=inbound); set by the
+ * client. Held deliveries are counted by the inbound recorder itself.
+ */
+export interface InboundObserver {
+  /** The collector accepted these inbound events (either route). */
+  sent(events: readonly CallEvent[]): void;
+  /** This many inbound events were dropped from the queue. */
+  dropped(n: number): void;
+  /** A POST that carried inbound events: the route, and the status or the error. */
+  posted(route: string, events: readonly CallEvent[], result: string): void;
+}
+
+const isInbound = (e: CallEvent) => e.direction === 'inbound';
 
 const MAX_BACKOFF_MS = 60_000;
 const BASE_BACKOFF_MS = 1000;
@@ -78,6 +94,10 @@ export class Transport {
   probe: InboundProbe | undefined;
   /** Expected outcomes: 4xx answers held for a `markExpected`; set by the client. */
   hold: EventHold | undefined;
+  /** Inbound bookkeeping; set by the client. */
+  inbound: InboundObserver | undefined;
+  /** Inbound events in the POST now in flight. */
+  inFlightInbound: readonly CallEvent[] = [];
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -130,13 +150,25 @@ export class Transport {
 
   /** Drop queued (and retry-pending) events matching pred; they count as dropped. */
   discard(pred: (e: CallEvent) => boolean): void {
-    let n = this.queue.discard(pred);
+    let inbound = 0;
+    const match = (e: CallEvent) => {
+      const m = pred(e);
+      if (m && isInbound(e)) inbound++;
+      return m;
+    };
+    let n = this.queue.discard(match);
     if (this.retryBatch) {
-      const kept = this.retryBatch.filter((e) => !pred(e));
+      const kept = this.retryBatch.filter((e) => !match(e));
       n += this.retryBatch.length - kept.length;
       this.retryBatch = kept.length > 0 ? kept : undefined;
     }
     this.droppedBatchEvents += n;
+    if (inbound > 0) this.inbound?.dropped(inbound);
+  }
+
+  /** Inbound events queued or waiting for a retry (not those held by the inbound recorder). */
+  inboundWaiting(): CallEvent[] {
+    return [...this.queue.filter(isInbound), ...(this.retryBatch ?? []).filter(isInbound)];
   }
 
   private totalDropped(): number {
@@ -209,15 +241,20 @@ export class Transport {
    * collector does (an unreachable collector costs at most the timeout). Never
    * rejects. Events not sent stay queued for the next flush.
    */
-  flushWithin(timeoutMs: number): Promise<void> {
+  flushWithin(timeoutMs: number): Promise<boolean> {
     const ms = Math.max(0, Math.floor(timeoutMs));
-    if (this.idle() || ms === 0) return Promise.resolve();
+    if (this.idle() || ms === 0) return Promise.resolve(this.idle());
     let timer: unknown;
-    const cap = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ms);
+    const cap = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
     });
-    return Promise.race([this.drain(Date.now() + ms).catch(() => {}), cap]).then(() => {
+    const drained = this.drain(Date.now() + ms).then(
+      () => true,
+      () => true,
+    );
+    return Promise.race([drained, cap]).then((done) => {
       clearTimeout(timer as ReturnType<typeof setTimeout>);
+      return done;
     });
   }
 
@@ -257,12 +294,20 @@ export class Transport {
   private async sendProbe(events: CallEvent[]): Promise<void> {
     const probe = this.probe!;
     this.lastPostAt = Date.now();
+    this.inFlightInbound = events;
     const result = await this.sender.post(this.batchFor(events, 0), INGEST_INBOUND_PATH);
+    this.inFlightInbound = [];
     const status = 'status' in result ? result.status : 0;
+    this.inbound?.posted(
+      INGEST_INBOUND_PATH,
+      events,
+      'error' in result ? result.error : `${status}`,
+    );
     if (status >= 200 && status < 300) {
       this.sent += events.length;
       this.failures = 0;
       this.backoffUntil = 0;
+      this.inbound?.sent(events);
       probe.probeResult('accepted', events);
       return;
     }
@@ -284,9 +329,14 @@ export class Transport {
   private async sendBatch(events: CallEvent[]): Promise<void> {
     const dropped = this.totalDropped() - this.reportedDrops;
     const batch = this.batchFor(events, dropped);
+    const inbound = this.inbound ? events.filter(isInbound) : [];
     this.lastPostAt = Date.now();
+    this.inFlightInbound = inbound;
     const result = await this.post(batch);
+    this.inFlightInbound = [];
     const status = 'status' in result ? result.status : 0;
+    if (inbound.length > 0)
+      this.inbound?.posted(INGEST_PATH, inbound, 'error' in result ? result.error : `${status}`);
 
     if (status >= 200 && status < 300) {
       this.sent += events.length;
@@ -294,6 +344,7 @@ export class Transport {
       this.failures = 0;
       this.backoffUntil = 0;
       this.lastFlushError = undefined;
+      if (inbound.length > 0) this.inbound?.sent(inbound);
       return;
     }
 
@@ -306,6 +357,7 @@ export class Transport {
         this.retryBatch = events;
       } else {
         this.droppedBatchEvents += events.length;
+        if (inbound.length > 0) this.inbound?.dropped(inbound.length);
       }
     }
     this.failures++;

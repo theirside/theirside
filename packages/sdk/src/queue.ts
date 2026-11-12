@@ -5,6 +5,8 @@ export class RingBuffer<T> {
   private size = 0;
   /** Items dropped because the buffer was full (monotonic). */
   dropped = 0;
+  /** Called with each item dropped because the buffer was full. */
+  onDrop: ((item: T) => void) | undefined;
 
   constructor(readonly capacity: number) {
     this.items = new Array<T | undefined>(capacity);
@@ -16,13 +18,25 @@ export class RingBuffer<T> {
 
   push(item: T): void {
     const tail = (this.head + this.size) % this.capacity;
+    const lost = this.size < this.capacity ? undefined : this.items[tail];
     this.items[tail] = item;
     if (this.size < this.capacity) {
       this.size++;
     } else {
       this.head = (this.head + 1) % this.capacity;
       this.dropped++;
+      if (this.onDrop && lost !== undefined) this.onDrop(lost);
     }
+  }
+
+  /** The queued items matching pred, oldest first (the queue is unchanged). */
+  filter(pred: (item: T) => boolean): T[] {
+    const out: T[] = [];
+    for (let i = 0; i < this.size; i++) {
+      const x = this.items[(this.head + i) % this.capacity] as T;
+      if (pred(x)) out.push(x);
+    }
+    return out;
   }
 
   /** Remove and return up to n oldest items. */

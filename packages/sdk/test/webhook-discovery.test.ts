@@ -153,6 +153,39 @@ describe('InboundRecorder candidates', () => {
     );
   });
 
+  it('a path word after a version stays in the route with a ce-source name; both count toward the 16', () => {
+    const queue = new RingBuffer<CallEvent>(1000);
+    const r = new InboundRecorder(
+      cfg(),
+      queue,
+      () => {},
+      () => {},
+    );
+    const ce = (path: string, source: string) => {
+      const h: H = { 'ce-specversion': '1.0', 'ce-source': source };
+      const names = Object.keys(h);
+      const p = r.begin(
+        path,
+        'POST',
+        (n) => names.includes(n),
+        (n) => h[n],
+        (test) => names.some(test),
+      );
+      if (p) r.end(p, 200);
+    };
+    ce('/v1/inbox', 'com.orbitpay'); // 2 words: inbox, orbitpay
+    ce('/v1/inbox', 'com.orbitpay'); // within the minute: no new report
+    const letters = 'abcdefghij'.split('');
+    // 7 more pairs: 16 words in all; the 9th pair finds no room for either
+    for (const c of letters.slice(0, 8)) ce(`/v1/path-${c}${c}`, `com.sender-${c}${c}`);
+    const events = queue.take(100);
+    expect(events[0]).toMatchObject({ provider: 'orbitpay', endpoint: '/v1/inbox', count: 1 });
+    expect(events.slice(1, 8).map((e) => `${e.provider} ${e.endpoint}`)).toEqual(
+      letters.slice(0, 7).map((c) => `sender-${c}${c} /v1/path-${c}${c}`),
+    );
+    expect(events.slice(8).map((e) => `${e.provider} ${e.endpoint}`)).toEqual(['unknown /v1/:id']);
+  });
+
   it('confirmed routes become ordinary deliveries; ignored ones are not recorded', () => {
     const { r, queue, deliver } = recorder();
     r.setRemoteRoutes([{ path: '/webhooks/orbitpay', provider: 'OrbitPay' }], ['/webhooks/:id']);

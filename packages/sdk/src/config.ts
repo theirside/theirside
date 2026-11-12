@@ -96,8 +96,12 @@ export interface InitOptions {
    * still recorded.
    */
   webhookDiscovery?: boolean;
-  /** Log SDK problems to console.warn. */
-  debug?: boolean;
+  /**
+   * `true`: log SDK problems to console.warn. `'inbound'`: log what became of each
+   * incoming request and of each flush's webhook deliveries (the same as
+   * `THEIRSIDE_DEBUG=inbound`, for apps whose settings don't reach `process.env`).
+   */
+  debug?: boolean | 'inbound';
   enabled?: boolean;
   /** Cap for the flush done by shutdown() and on process exit. Default 2000 ms. */
   shutdownTimeoutMs?: number;
@@ -156,7 +160,7 @@ export interface ResolvedConfig {
   inboundOptIn: boolean;
   /** Webhook discovery: candidate routes are reported (`webhookDiscovery !== false`). */
   webhookDiscovery: boolean;
-  /** THEIRSIDE_DEBUG=inbound: log what became of each incoming request, and why. */
+  /** `debug: 'inbound'` or THEIRSIDE_DEBUG=inbound: log what became of each incoming request and flush. */
   debugInbound: boolean;
 }
 
@@ -255,7 +259,7 @@ export function resolveConfig(
     webhooksEnabled: opts.webhooks !== false,
     inboundOptIn: opts.inbound === true,
     webhookDiscovery: opts.webhookDiscovery !== false,
-    debugInbound: debugTopic('inbound'),
+    debugInbound: opts.debug === 'inbound' || debugTopic('inbound'),
     webhookRoutes: (Array.isArray(opts.webhooks) ? opts.webhooks : [])
       .filter(
         (w) => !!w && typeof w.path === 'string' && w.path !== '' && typeof w.provider === 'string',
