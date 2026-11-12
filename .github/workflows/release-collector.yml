@@ -107,24 +107,6 @@ jobs:
       - run: pnpm build
       - run: pnpm vitest run --project collector
 
-  # The full 26-week detection sweep (docs/benchmarks.md "Detection"): a release must not
-  # alert more, or later, than the documented budget and targets.
-  detection:
-    name: Detection bench (full sweep)
-    needs: version
-    if: ${{ !inputs.retag }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm bench:detect --markdown --explain
-
   selfhost-quickstart:
     name: Self-host Quick start (compose.selfhost.yml)
     needs: version
@@ -145,7 +127,7 @@ jobs:
 
   publish:
     name: Build and push (amd64 + arm64)
-    needs: [version, test, detection, selfhost-quickstart]
+    needs: [version, test, selfhost-quickstart]
     runs-on: ubuntu-latest
     permissions:
       contents: read

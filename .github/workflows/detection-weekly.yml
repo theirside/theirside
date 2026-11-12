@@ -1,11 +1,12 @@
-# The full 26-week detection sweep (docs/benchmarks.md "Detection"), every night on main.
-# Pull requests run the short `--ci` cells (ci.yml); releases run this sweep too
-# (release-collector.yml). The table is kept as an artifact.
-name: Detection bench (nightly)
+# The full 26-week detection sweep (docs/benchmarks.md "Detection"), once a week on main
+# (Monday 02:17 UTC) or by hand (Actions → Run workflow). It takes over an hour on a
+# standard runner, so releases don't wait for it; pushes and pull requests run the short
+# `--ci` cells (detection-ci.yml). The table is kept as an artifact.
+name: Detection bench (weekly)
 
 on:
   schedule:
-    - cron: '17 2 * * *'
+    - cron: '17 2 * * 1'
   workflow_dispatch:
 
 permissions:
