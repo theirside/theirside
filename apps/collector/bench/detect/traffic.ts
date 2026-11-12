@@ -127,8 +127,10 @@ export class Arrivals {
 // ------------------------------------------------------------------ faults
 
 export const OUTBOUND_FAULTS = ['outage', 'errors30', 'errors10', 'latency3x', 'auth'] as const;
+/** Expected outcomes (consent-style endpoints): a contract change answering untagged 400 to every call, and an outage. */
+export const EXPECTED_FAULTS = ['contract400', 'outage'] as const;
 export const INBOUND_FAULTS = ['silence', 'rejections401', 'rejections5xx', 'slow', 'lag'] as const;
-export type OutboundFault = (typeof OUTBOUND_FAULTS)[number];
+export type OutboundFault = (typeof OUTBOUND_FAULTS)[number] | (typeof EXPECTED_FAULTS)[number];
 export type InboundFault = (typeof INBOUND_FAULTS)[number];
 export type Fault = OutboundFault | InboundFault;
 
@@ -138,6 +140,7 @@ export const FAULT_LABEL: Record<Fault, string> = {
   errors10: '10% 5xx, 60 min',
   latency3x: 'latency 3×, 15 min',
   auth: '50% 401/403 (provider auth change), 30 min',
+  contract400: 'contract change: every call answers 400, not tagged expected, 30 min',
   silence: 'deliveries stop, 12 h',
   rejections401: 'our app answers 401 to all (signing secret), 30 min',
   rejections5xx: 'our app answers 5xx to half, 30 min',
@@ -147,6 +150,7 @@ export const FAULT_LABEL: Record<Fault, string> = {
 
 export const FAULT_MINUTES: Record<Fault, number> = {
   outage: 30,
+  contract400: 30,
   errors30: 60,
   errors10: 60,
   latency3x: 15,
@@ -197,16 +201,41 @@ class Noise {
   }
 }
 
+/**
+ * Expected outcomes: a share of calls answered 400 as a normal business answer (a
+ * consent check), drifting inside [lo, hi] hour by hour; tagged in code (counted as
+ * successful, `expected`) or plain 400s (marked expected from the dashboard).
+ */
+export interface ExpectedAnswers {
+  range: [number, number];
+  tagged: boolean;
+}
+
 export class OutboundTraffic {
   private readonly r: Rand;
   private readonly noise: Noise;
+  private hour = -1;
+  private share = 0;
   constructor(
     private readonly tenant: Tenant,
     readonly key: RollupKey,
     seed: number,
+    private readonly expected?: ExpectedAnswers,
   ) {
     this.r = new Rand(rng(seed));
     this.noise = new Noise(this.r);
+  }
+
+  private expectedShare(m: number): number {
+    if (!this.expected) return 0;
+    const [lo, hi] = this.expected.range;
+    const h = Math.floor(m / HOUR);
+    if (h !== this.hour) {
+      const from = this.hour < 0 ? this.r.uniform(lo, hi) : this.share;
+      this.hour = h;
+      this.share = Math.min(hi, Math.max(lo, from + (hi - lo) * this.r.uniform(-0.25, 0.25)));
+    }
+    return this.share;
   }
 
   /** The rollup row for minute m with n calls (undefined: no calls), with an optional fault. */
@@ -220,6 +249,8 @@ export class OutboundTraffic {
     const h = emptyHistogram();
     let sum = 0;
     let s429 = 0;
+    let expected = 0;
+    const expectedShare = this.expectedShare(m);
     const add = (status: number | null, outcome: Outcome, ms: number) => {
       outcomes[outcome]++;
       addStatus(statusCounts, status, 1);
@@ -234,9 +265,25 @@ export class OutboundTraffic {
     };
     let lone = nz.lone5xx;
     for (let i = 0; i < n; i++) {
+      if (fault === 'contract400') {
+        add(400, 'http_4xx', r.lognormal(60, 0.3));
+        continue;
+      }
+      // an outage answers nothing, business answers included
       if (fault === 'outage') {
         if (r.next() < 0.3) add(null, 'timeout', r.uniform(10000, 30000));
         else add(503, 'http_5xx', r.lognormal(40, 0.3));
+        continue;
+      }
+      if (expectedShare > 0 && r.next() < expectedShare) {
+        // a business answer: tagged in code (successful) or a plain 400
+        const ms = r.lognormal(150, 0.5);
+        if (this.expected!.tagged) {
+          outcomes.ok++;
+          expected++;
+          h[bucketIndex(ms)]!++;
+          sum += ms;
+        } else add(400, 'http_4xx', ms);
         continue;
       }
       if (fault === 'auth') {
@@ -276,6 +323,7 @@ export class OutboundTraffic {
       outcomes,
       status429: s429,
       statusCounts,
+      expected,
       latencyHistogram: h,
       latencySumMs: sum,
     };

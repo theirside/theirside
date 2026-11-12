@@ -1,5 +1,6 @@
 import diagnosticsChannel from 'node:diagnostics_channel';
 import type http from 'node:http';
+import { enterRequestFrame } from '../expected-node.js';
 import type { InboundPending, InboundRecorder } from '../inbound.js';
 import { safely, type Logger } from '../log.js';
 
@@ -109,5 +110,31 @@ export class ServerInstrumentation {
       return originalEmit.call(this, event, ...args);
     };
     res.emit = wrapped as typeof res.emit;
+  }
+}
+
+/**
+ * Expected outcomes: each incoming request's handler runs in its own frame, so
+ * `markExpected()` there tags that request's own latest outgoing call. Entered at
+ * `http.server.request.start`, which Node publishes synchronously just before the
+ * server emits `request`. Subscribed once per process like the channels above.
+ */
+let framesOn = false;
+let framesSubscribed = false;
+function onFrameStart(): void {
+  if (framesOn) enterRequestFrame();
+}
+
+export class RequestFrames {
+  enable(): void {
+    framesOn = true;
+    if (framesSubscribed) return;
+    framesSubscribed = true;
+    if (typeof diagnosticsChannel.subscribe !== 'function') return;
+    diagnosticsChannel.subscribe(START_CHANNEL, onFrameStart);
+  }
+
+  disable(): void {
+    framesOn = false;
   }
 }

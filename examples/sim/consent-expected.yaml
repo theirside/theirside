@@ -1,0 +1,43 @@
+name: consent-expected
+description: >-
+  Expected outcomes: a consent check answers 400 to 10–40% of calls as a normal business
+  answer, tagged in code (markExpected), so it stays quiet. Then a contract change makes it
+  answer untagged 400s, and later the provider has an outage: both must alert. Starts with 8
+  days of seeded history.
+start: 2026-01-05T00:00:00Z
+duration: 3d
+seed: 1
+history: { mode: seeded, days: 8 }
+providers:
+  - name: ConsentCo
+    host: api.consentco.test
+    endpoints:
+      - method: GET
+        path: /v1/consent
+        traffic: { pattern: daily, rate: 50 }
+        normal: { expected: [0.1, 0.4], expectedReason: consent_required, latencyMs: 90 }
+      - method: POST
+        path: /v1/consent
+        traffic: { pattern: daily, rate: 15 }
+        normal: { latencyMs: 140 }
+faults:
+  - id: contract-change
+    target: ConsentCo GET /v1/consent
+    at: day 1 10:00
+    duration: 45m
+    type: validation
+    status: 400
+    size: 0.6
+  - id: outage
+    target: ConsentCo GET /v1/consent
+    at: day 2 10:00
+    duration: 30m
+    type: 5xx
+    size: 0.4
+expect:
+  - incident:
+      { kind: validation, target: ConsentCo GET /v1/consent, fault: contract-change, within: 10m }
+  - incident: { kind: errors, target: ConsentCo GET /v1/consent, fault: outage, within: 10m }
+  - quiet: { from: day 0 00:00, to: day 1 10:00 }
+  - quiet: { from: day 1 12:00, to: day 2 10:00 }
+  - quiet: { from: day 2 12:00, to: day 3 00:00 }

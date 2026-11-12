@@ -25,6 +25,12 @@ import {
   type BaselineView,
   type Evaluation,
 } from '../scoring/evaluate.js';
+import {
+  applyExpected,
+  expectedLookup,
+  noExpected,
+  type ExpectedLookup,
+} from '../scoring/expected.js';
 import { resolveThresholds, thresholdsFor, type Thresholds } from '../scoring/thresholds.js';
 import { decide, type AlertEvent, type Decision, type EndpointView } from './engine.js';
 import {
@@ -35,6 +41,7 @@ import {
   pct,
   sideSignals,
   statusCodes,
+  surgeText,
 } from './summary.js';
 
 const MIN = 60_000;
@@ -60,6 +67,8 @@ export function evaluateKeys(
   T: Date,
   count: number,
   t: Thresholds,
+  /** Statuses marked expected from the dashboard: successful, with the safety net. */
+  expectedFor: ExpectedLookup = noExpected,
 ): EvaluatedKey[] {
   const perKey = new Map<string, Map<number, RollupRow>>();
   for (const r of rows) {
@@ -72,14 +81,18 @@ export function evaluateKeys(
   for (const key of keys) {
     const minutes = perKey.get(keyId(key)) ?? new Map<number, RollupRow>();
     const baseline = baselines.get(keyId(key)) ?? defaultBaseline(t);
+    const marked = expectedFor(key);
     const evals: Evaluation[] = [];
     // every minute any of the windows below can reach
     const span = count - 1 + Math.max(t.windowMinutes, MAX_WINDOW_MINUTES);
     const start = T.getTime() - (span - 1) * MIN;
-    const sums = new MinuteSums(start, span, (m) => minutes.get(m));
+    const sums = new MinuteSums(start, span, (m) => {
+      const r = minutes.get(m);
+      return r && marked.length > 0 ? applyExpected(r, marked) : r;
+    });
     // low traffic: wider windows (docs/scoring.md "Low traffic")
     for (let k = 0; k < count; k++)
-      evals.push(evaluateAt(sums, T.getTime() - k * MIN, baseline, t));
+      evals.push(evaluateAt(sums, T.getTime() - k * MIN, baseline, t, marked));
     out.push({ ...key, baseline, evals });
   }
   return out;
@@ -94,6 +107,7 @@ export async function baselinesFor(
   t: Thresholds,
   /** A key's own thresholds (its provider's overrides) for its slow class; default `t`. */
   tFor?: (key: RollupKey) => Thresholds,
+  expectedFor: ExpectedLookup = noExpected,
 ): Promise<Map<string, Baseline>> {
   const stored = new Map((await storage.incidents.getBaselines(tenant)).map((b) => [keyId(b), b]));
   const stale = keys.filter((k) => {
@@ -101,7 +115,7 @@ export async function baselinesFor(
     return !b || now.getTime() - b.computedAt.getTime() >= BASELINE_REFRESH_MS;
   });
   if (stale.length > 0) {
-    for (const [id, b] of await refreshBaselines(storage, tenant, stale, now, t, tFor))
+    for (const [id, b] of await refreshBaselines(storage, tenant, stale, now, t, tFor, expectedFor))
       stored.set(id, b);
   }
   return stored;
@@ -127,6 +141,16 @@ function alertTitle(event: AlertEvent, inc: Incident, views: readonly EndpointVi
     }
   }
   const rate = calls > 0 ? errors / calls : 0;
+  // the expected-outcome safety net says which marked status took over
+  const surge =
+    inc.kind === 'behaviour'
+      ? active
+          .map((e) => byKey.get(`${e.method} ${e.endpoint}`)?.evals[0]?.stats)
+          .map((st) => (st ? surgeText(st) : null))
+          .find((x) => x)
+      : null;
+  if (surge)
+    return `${inc.provider}: ${what} ${surge}${event === 'escalation' ? ', getting worse' : ''}`;
   // low volume: counts say more than a percentage of a few calls
   const low = inc.windowMinutes > 5;
   const how =
@@ -182,6 +206,11 @@ export function buildPayload(
     kind: inc.kind,
     // no link rather than a localhost one nobody can open
     url: publicUrl ? `${publicUrl}/#/incidents/${inc.id}` : null,
+    // a status that may be a normal answer: the coarse "mark as expected" (never on resolve)
+    markExpectedUrl:
+      publicUrl && event !== 'resolve' && STATUS_KINDS.has(inc.kind)
+        ? `${publicUrl}/#/incidents/${inc.id}/expected`
+        : null,
     openedAt: inc.openedAt.toISOString(),
     resolvedAt: inc.resolvedAt ? inc.resolvedAt.toISOString() : null,
     durationMinutes: minutesBetween(inc.openedAt, inc.resolvedAt ?? now),
@@ -206,6 +235,9 @@ export function buildPayload(
 }
 
 const emptyStats = windowStats([]);
+
+/** Incident kinds about one status class: the ones a status marked expected can explain. */
+const STATUS_KINDS = new Set<string>(['auth', 'not_found', 'validation']);
 
 const MIN_MS = 60_000;
 /** A restart this long before the start (or 2 minutes after) counts as "around this time". */
@@ -313,9 +345,9 @@ export function incidentJob(
 
       for (const { tenant, keys } of tenants.values()) {
         const projectT = resolveThresholds(await storage.config.getThresholds(tenant));
-        const providers = new Map(
-          (await storage.config.listProviders(tenant)).map((p) => [p.name, p]),
-        );
+        const providerRows = await storage.config.listProviders(tenant);
+        const providers = new Map(providerRows.map((p) => [p.name, p]));
+        const expectedFor = expectedLookup(providerRows);
         // the provider's overrides first, then the project's (docs/scoring.md)
         const tOf = (provider: string) =>
           thresholdsFor(projectT, providers.get(provider)?.thresholds);
@@ -328,8 +360,14 @@ export function incidentJob(
             (count - 1 + Math.max(projectT.windowMinutes, MAX_WINDOW_MINUTES) - 1) * MIN,
         );
         const rows = await storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN) });
-        const baselines = await baselinesFor(storage, tenant, keyList, now, projectT, (k) =>
-          tOf(k.provider),
+        const baselines = await baselinesFor(
+          storage,
+          tenant,
+          keyList,
+          now,
+          projectT,
+          (k) => tOf(k.provider),
+          expectedFor,
         );
         const byProvider = new Map<string, typeof keyList>();
         for (const k of keyList)
@@ -337,7 +375,7 @@ export function incidentJob(
         const evaluated: EvaluatedKey[] = [];
         for (const [provider, ks] of byProvider) {
           const t = tOf(provider);
-          evaluated.push(...evaluateKeys(ks, rows, baselines, T, countOf(t), t));
+          evaluated.push(...evaluateKeys(ks, rows, baselines, T, countOf(t), t, expectedFor));
         }
 
         const groups = new Map<string, EvaluatedKey[]>();

@@ -4,6 +4,7 @@ import {
   MAX_ID_LENGTH,
   RouteLearner,
   findProvider,
+  isExpectedReason,
   isOutcome,
   outcomeForStatus,
   type CallEvent,
@@ -13,6 +14,13 @@ import {
   type SdkLearnedPosition,
 } from '@theirside/shared/core';
 import type { ResolvedConfig, ResolvedProvider } from './config.js';
+import {
+  EXPECTED_WINDOW_MS,
+  frameReason,
+  type ExpectedFrame,
+  type ExpectedStats,
+  type FrameScope,
+} from './expected.js';
 import { HostPolicy } from './discovery.js';
 import { InboundRecorder } from './inbound.js';
 import type { Logger } from './log.js';
@@ -30,6 +38,8 @@ export interface Pending {
   method: string;
   path: string;
   correlationId: string | undefined;
+  /** Expected outcomes: the frame current when the call started (see expected.ts). */
+  frame: ExpectedFrame | undefined;
 }
 
 /** Looks up one (lower-case) response header; only allowlisted names are ever asked for. */
@@ -75,6 +85,11 @@ export class Recorder {
     value: ResolvedProvider;
     matchers: ResolvedProvider['matchers'];
   }[];
+  /** Queued 4xx answers that `markExpected` may still tag → when they ended (ms). */
+  private readonly markable = new WeakMap<CallEvent, number>();
+  /** `markExpected` has been called: hold markable answers from the periodic flush. */
+  private holding = false;
+  readonly expected: ExpectedStats = { tagged: 0, missed: 0 };
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -84,6 +99,9 @@ export class Recorder {
     minPathSightings?: number,
     /** True inside `untracked()` (Node: AsyncLocalStorage; fetch runtimes: synchronous scope). */
     private readonly isUntracked: () => boolean = () => false,
+    /** Expected outcomes: the runtime's frames (Node: AsyncLocalStorage). */
+    readonly frames?: FrameScope,
+    private readonly expectedWindowMs = EXPECTED_WINDOW_MS,
   ) {
     this.providerMatchers = cfg.providers.map((p) => ({ value: p, matchers: p.matchers }));
     this.policy = new HostPolicy(cfg);
@@ -173,6 +191,7 @@ export class Recorder {
       method: (method || 'GET').toUpperCase(),
       path,
       correlationId,
+      frame: this.frames?.current(),
     };
   }
 
@@ -191,19 +210,22 @@ export class Recorder {
         if (providerRequestId) break;
       }
     }
-    this.push({
-      ts: p.ts,
-      provider: p.providerName,
-      host: p.host,
-      method: p.method,
-      endpoint: this.templater.template(p.host, p.path, p.routes, p.pathPolicy),
-      status,
-      durationMs: Math.round(durationMs * 100) / 100,
-      outcome,
-      ...(errorCode ? { errorCode } : {}),
-      ...(p.correlationId ? { correlationId: p.correlationId } : {}),
-      ...(providerRequestId ? { providerRequestId } : {}),
-    });
+    this.push(
+      {
+        ts: p.ts,
+        provider: p.providerName,
+        host: p.host,
+        method: p.method,
+        endpoint: this.templater.template(p.host, p.path, p.routes, p.pathPolicy),
+        status,
+        durationMs: Math.round(durationMs * 100) / 100,
+        outcome,
+        ...(errorCode ? { errorCode } : {}),
+        ...(p.correlationId ? { correlationId: p.correlationId } : {}),
+        ...(providerRequestId ? { providerRequestId } : {}),
+      },
+      p.frame,
+    );
   }
 
   /** Manual instrumentation (`track()`). */
@@ -249,25 +271,86 @@ export class Recorder {
         ? call.errorCode.slice(0, MAX_ERROR_CODE_LENGTH)
         : undefined;
     const providerRequestId = cleanId(call.providerRequestId);
-    this.push({
-      ts: typeof call.startedAt === 'number' ? call.startedAt : Date.now() - durationMs,
-      provider: resolved.providerName,
-      host,
-      method: (call.method ?? 'GET').toUpperCase().slice(0, 16),
-      endpoint: this.templater.template(host, path, resolved.routes, resolved.pathPolicy),
-      status,
-      durationMs: Math.round(durationMs * 100) / 100,
-      outcome,
-      ...(errorCode ? { errorCode } : {}),
-      ...(providerRequestId ? { providerRequestId } : {}),
-    });
+    this.push(
+      {
+        ts: typeof call.startedAt === 'number' ? call.startedAt : Date.now() - durationMs,
+        provider: resolved.providerName,
+        host,
+        method: (call.method ?? 'GET').toUpperCase().slice(0, 16),
+        endpoint: this.templater.template(host, path, resolved.routes, resolved.pathPolicy),
+        status,
+        durationMs: Math.round(durationMs * 100) / 100,
+        outcome,
+        ...(errorCode ? { errorCode } : {}),
+        ...(providerRequestId ? { providerRequestId } : {}),
+      },
+      this.frames?.current(),
+    );
   }
 
-  private push(ev: CallEvent): void {
+  private push(ev: CallEvent, frame?: ExpectedFrame): void {
+    if (frame) {
+      // inside expecting(reason, fn): a 4xx answer is tagged at once
+      const reason = ev.outcome === 'http_4xx' ? frameReason(frame) : undefined;
+      if (reason) {
+        ev.expected = reason;
+        this.expected.tagged++;
+      }
+      // the latest call of this frame and the frames around it, for markExpected
+      const last = { ev, at: Date.now() };
+      for (let f: ExpectedFrame | undefined = frame; f; f = f.parent) f.last = last;
+    }
     if (ev.outcome === 'ok' && this.sampleRate < 1 && Math.random() >= this.sampleRate) {
       return;
     }
     this.queue.push(ev);
+    if (frame && ev.outcome === 'http_4xx') this.markable.set(ev, Date.now());
     this.onEnqueue();
   }
+
+  /**
+   * `markExpected(reason)`: tag the latest call that ended in the current frame, if
+   * it ended in the last few seconds, was a 4xx and isn't sent yet. Else count a miss.
+   */
+  markExpected(reason: unknown): boolean {
+    this.holding = true;
+    const miss = (why: string) => {
+      this.expected.missed++;
+      // debug only, and not for every call of a busy endpoint
+      const n = this.expected.missed;
+      if (n <= 20 || n % 1000 === 0) this.log(`markExpected(${String(reason)}): ${why}`);
+      return false;
+    };
+    if (!isExpectedReason(reason))
+      return miss('reason must be a short label (letters, digits, _ . : -, at most 64)');
+    const frame = this.frames?.current();
+    if (!frame)
+      return miss(
+        this.frames?.async === false
+          ? 'needs AsyncLocalStorage (fetch runtimes): use expecting() instead'
+          : 'no outgoing call in this context (outside an incoming request: use expecting())',
+      );
+    const last = frame.last;
+    if (!last) return miss('no outgoing call in this context yet');
+    if (Date.now() - last.at > this.expectedWindowMs)
+      return miss(`the latest call ended more than ${this.expectedWindowMs / 1000} s ago`);
+    if (last.ev.outcome !== 'http_4xx')
+      return miss(`the latest call was not a 4xx (${last.ev.status ?? last.ev.outcome})`);
+    if (!this.markable.has(last.ev)) return miss('the latest call was already sent');
+    if (last.ev.expected === undefined) this.expected.tagged++;
+    last.ev.expected = reason;
+    return true;
+  }
+
+  /** For the transport (`EventHold`): 4xx answers wait up to the mark window for a mark. */
+  readonly hold = {
+    active: () => this.holding,
+    ready: (e: CallEvent, now: number) => {
+      const at = this.markable.get(e);
+      return at === undefined || now - at >= this.expectedWindowMs;
+    },
+    taken: (events: readonly CallEvent[]) => {
+      for (const e of events) if (e.outcome === 'http_4xx') this.markable.delete(e);
+    },
+  };
 }

@@ -1,5 +1,14 @@
 import { api, type Incident as IncidentData } from '../api';
-import { Badge, Card, CopyButton, Empty, ErrorBox, Table, usePoll } from '../components/ui';
+import {
+  Badge,
+  Callout,
+  Card,
+  CopyButton,
+  Empty,
+  ErrorBox,
+  Table,
+  usePoll,
+} from '../components/ui';
 import { ago, lag, ms, pct, when, KIND_LABEL } from '../format';
 
 /** The incident's peak in its own unit: p95 for slowness and lag, a share otherwise, none for silence. */
@@ -10,6 +19,7 @@ function peak(i: IncidentData): string {
   return pct(i.peakErrorRate);
 }
 import { href } from '../router';
+import { MarkExpected, STATUSES_OF_KIND } from './Expected';
 
 export function Incidents() {
   const [data, error] = usePoll(
@@ -70,11 +80,19 @@ export function Incidents() {
   );
 }
 
-export function Incident({ id }: { id: string }) {
+export function Incident({ id, markExpected = false }: { id: string; markExpected?: boolean }) {
   const [inc, error] = usePoll(
     () => api<IncidentData>(`/v1/admin/incidents/${encodeURIComponent(id)}`),
     [id],
   );
+  // a status-class incident: the status may be a normal answer for the endpoint
+  const statuses = inc ? STATUSES_OF_KIND[inc.kind] : undefined;
+  // not for the safety net's own incidents: that status is already marked and has taken over
+  const surge = inc?.summary.includes('(marked expected)') ?? false;
+  const markable =
+    inc && statuses && !surge && inc.status === 'open' && inc.direction !== 'inbound'
+      ? inc.endpoints.filter((e) => !e.recoveredAt)
+      : [];
   return (
     <>
       <div className="page-h">
@@ -106,6 +124,34 @@ export function Incident({ id }: { id: string }) {
             <div>{inc.durationMinutes} min</div>
             {inc.alertsMuted && <Badge>muted (cooldown)</Badge>}
           </div>
+          {inc.resolutionNote && (
+            <Callout tone="info" data-testid="resolution-note">
+              {inc.resolutionNote}
+            </Callout>
+          )}
+          {markable.length > 0 && (
+            <Card
+              title="Is this a normal answer for the endpoint?"
+              className={markExpected ? 'highlight' : undefined}
+              data-testid="incident-mark-expected"
+            >
+              <p className="muted">
+                Some APIs answer a normal business case with an error status (a consent check
+                answering 400 when the user hasn&apos;t consented). If that is what this is, mark
+                the status as expected: the incident resolves and those answers stop counting as
+                failures.
+              </p>
+              {markable.map((e, i) => (
+                <MarkExpected
+                  key={e.method + e.endpoint}
+                  provider={inc.provider}
+                  ep={e}
+                  statuses={statuses!}
+                  autoFocus={markExpected && i === 0}
+                />
+              ))}
+            </Card>
+          )}
           <Card
             title="Summary for the provider"
             actions={<CopyButton text={inc.summary} label="Copy summary" />}

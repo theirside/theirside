@@ -100,7 +100,10 @@ const FAULT_ENTRIES: Record<
       '`size` share of calls answer 401/403 (changed access rules, a revoked key); incident `auth`.',
   },
   not_found: { summary: '`size` share of calls answer 404; incident `not_found`.' },
-  validation: { summary: '`size` share of calls answer 422; incident `validation`.' },
+  validation: {
+    summary:
+      '`size` share of calls answer 422 (or `status`, e.g. 400), never tagged expected; incident `validation`.',
+  },
   latency: {
     summary:
       'Every call takes `size` × longer; with `ramp`, grows from 1× to `size` over the duration; incident `latency`.',
@@ -248,6 +251,12 @@ export const REFERENCE: RefSection[] = [
       { key: 'path', summary: 'Path template, e.g. /v1/charges/:id.' },
       { key: 'traffic', summary: 'How many calls, when (see Traffic patterns).' },
       { key: 'normal', summary: 'Normal error and latency levels (see Normal levels, outgoing).' },
+      {
+        key: 'markedExpected',
+        summary:
+          'Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409, 422): counted as successful, with the safety net. Pair with `normal.expected` and `expectedTagged: false`.',
+        example: 'markedExpected: [400]',
+      },
     ],
   },
   {
@@ -354,6 +363,29 @@ export const REFERENCE: RefSection[] = [
           'Everyday noise: a lone 5xx and a few very slow calls a day, short latency wobbles.',
         default: 'on',
       },
+      {
+        key: 'expected',
+        summary:
+          'Expected outcomes: a share of calls answered with a 4xx that is a normal business answer (a consent check answering 400 when the user has not consented). A number, or `[min, max]`: the share drifts between them hour by hour.',
+        default: 'none',
+        example: 'expected: [0.1, 0.4]',
+      },
+      {
+        key: 'expectedStatus',
+        summary: 'The status of those answers (a 4xx).',
+        default: String(OUT.expectedStatus),
+      },
+      {
+        key: 'expectedTagged',
+        summary:
+          'Tagged in code (SDK `markExpected`), so they count as successful; off: plain 4xx answers (for marking them from the dashboard).',
+        default: 'on',
+      },
+      {
+        key: 'expectedReason',
+        summary: 'The reason label tagged answers carry.',
+        default: OUT.expectedReason,
+      },
     ],
   },
   {
@@ -409,8 +441,9 @@ export const REFERENCE: RefSection[] = [
       },
       {
         key: 'status',
-        summary: 'rejected: the status our app answers (401 for a signing-secret mismatch).',
-        default: '500',
+        summary:
+          'rejected: the status our app answers (401 for a signing-secret mismatch). auth, not_found, validation: the status the provider answers instead of the usual one, never tagged expected (a contract change: `type: validation, status: 400`).',
+        default: 'rejected 500; auth 401/403; not_found 404; validation 422',
       },
     ],
   },

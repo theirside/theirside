@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  EXPECTED_REASON_PATTERN,
   MAX_BATCH_EVENTS,
   MAX_ENDPOINT_LENGTH,
   MAX_ERROR_CODE_LENGTH,
@@ -38,6 +39,7 @@ export const callEventSchema = z.object({
   sentAt: z.number().int().nonnegative().optional(),
   candidate: z.boolean().optional(),
   count: z.number().int().min(1).max(10_000_000).optional(),
+  expected: z.string().regex(EXPECTED_REASON_PATTERN).optional(),
 });
 
 export const ingestBatchSchema = z.object({

@@ -70,6 +70,37 @@ const image = await untracked(() => fetch(userSuppliedUrl).then((r) => r.arrayBu
 
 Every HTTP call made inside the callback is skipped, also from async work it starts (awaits, timers, promise chains), while calls elsewhere in your app, even concurrent ones, are recorded as usual. It returns what the callback returns and rethrows its errors. It uses `AsyncLocalStorage`, which Node only switches on the first time `untracked()` runs.
 
+### Error statuses that are normal answers
+
+Some APIs answer a normal business case with an error status: a consent check answers `400` when the user hasn't consented, a lookup answers `404` for "no such customer yet". Tell the SDK after your code has read the answer, and that call counts as successful (SDK 0.4.0+, collector 0.5.0+):
+
+```ts
+import { markExpected } from '@theirside/sdk';
+
+const res = await fetch('https://api.consentco.test/v1/consent?user=…');
+if (res.status === 400) {
+  const body = await res.json();
+  if (body.code === 'consent_required') markExpected('consent_required');
+}
+```
+
+`markExpected(reason)` tags the latest outgoing call that ended in the same incoming request (any Node HTTP server: Express, Fastify, NestJS…), if it was a 4xx and ended within the last 5 seconds. When your code knows up front, wrap the calls instead; 4xx answers to calls made inside (also from async work it starts) are tagged:
+
+```ts
+import { expecting } from '@theirside/sdk';
+
+const consent = await expecting('consent_required', () => consentClient.check(userId));
+```
+
+- Only the reason label is sent: letters, digits and `_ . : -`, up to 64 characters. The SDK never reads the response.
+- Tagged calls count as successful in every rule and score, and show as their own series per reason on the endpoint page. **Untagged** calls with the same status stay failures, so if the provider changes its contract and starts answering 400 to everything, you still get an alert.
+- Only 4xx answers can be expected; a 5xx, timeout or connection error never is.
+- `markExpected` outside an incoming request (queue consumers, cron jobs) has nothing to match: use `expecting()` there. With concurrent calls in one request it tags whichever ended last; use `expecting()` around the one you mean. On fetch runtimes (Workers, Deno, Bun) there is no `AsyncLocalStorage`: `expecting()` covers calls started synchronously inside it, and `markExpected()` does nothing.
+- When nothing is tagged it does nothing and counts `getStats().expected.missed` (with `debug: true` it says why).
+- Once your code has called `markExpected`, 4xx answers wait up to 5 seconds before they are sent, so a late mark still reaches them; `flush()`, `wrap()` and shutdown send them at once.
+
+Without code changes, the dashboard can also mark a status as expected for a whole endpoint ("Mark 400 as expected"). That is less precise: every 400 of that endpoint counts as fine, with only a safety net for a surge.
+
 ### NestJS
 
 Call `init` at the very top of `main.ts`, before `NestFactory.create` and before any module that makes HTTP calls is imported:
@@ -109,6 +140,8 @@ async onApplicationShutdown() {
 Each call becomes one small event: provider host, HTTP method, **endpoint template**, status code, duration, outcome, and optionally the value of a provider request-ID response header and your own correlation ID.
 
 **Inbound webhooks** (Node servers; AWS Lambda HTTP events through `wrap()`): a request your app receives is recorded only when it carries a known sender's signature headers, or matches a route you declared in `webhooks`. Then one event: sender, route template, the status you answered, handling time, and the sender's signed timestamp when it has one. Nothing else from the request is read (on Lambda: never `event.body`, the query string or other header values); other requests and non-HTTP Lambda events are ignored. The full sender list: the collector's docs/privacy.md.
+
+**Expected outcomes**: when your code marks a 4xx as a normal answer, the event also carries the reason label you gave (`consent_required`).
 
 Never sent: request or response bodies, query strings, request headers (including `Authorization`, cookies, API keys), other response headers, raw paths, error messages, client IP addresses.
 
@@ -197,7 +230,9 @@ init({
 - `wrapFetch(handler, { waitUntil?, flushTimeoutMs })`: for fetch handlers with `waitUntil` (Cloudflare Workers, Netlify Edge, Deno Deploy; Vercel with `waitUntil` from `@vercel/functions`): returns the response first and sends afterwards.
 - `untracked(fn)`: run `fn` with capture off for every HTTP call it makes, sync or async (see above). `track()` calls inside it are still recorded.
 - `track(call)`: record a call made through something the SDK can't see: `track({ url, method, status, durationMs })`, or with `host` + `path`; optional `outcome`, `errorCode`, `provider`.
-- `getStats()`: `{ queued, dropped, sent, failedFlushes, lastFlushError }` for health checks, or `undefined` while the SDK is off (not initialised, or no `apiKey`/`endpoint`).
+- `markExpected(reason)`: the latest outgoing call in this incoming request answered with a 4xx that is a normal business answer: count it as successful (see [Error statuses that are normal answers](#error-statuses-that-are-normal-answers)).
+- `expecting(reason, fn)`: run `fn`; 4xx answers to the calls it makes are expected, with this reason. Returns what `fn` returns and rethrows its errors.
+- `getStats()`: `{ queued, dropped, sent, failedFlushes, lastFlushError, expected: { tagged, missed } }` for health checks, or `undefined` while the SDK is off (not initialised, or no `apiKey`/`endpoint`).
 
 Outcomes: `ok`, `http_4xx` (429 keeps its status), `http_5xx`, `timeout` (including your client's own timeout firing), `conn_reset`, `conn_refused`, `dns`, `tls`, `aborted` (you cancelled it; not counted against the provider), `other_error`.
 

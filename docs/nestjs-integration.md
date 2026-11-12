@@ -168,6 +168,36 @@ Notes:
 - Webhooks show on the provider's dashboard page and under **Webhooks**; their incidents are in the same incident list and go to the same alert channels. They are not on the public status page unless you switch that on per provider.
 - On AWS Lambda (API Gateway REST or HTTP API, ALB, function URL), deliveries are recorded through `wrap(handler)`; add `inbound: true` so a cold start doesn't wait for the remote config (SDK README, "Webhooks on AWS Lambda"). Other serverless runtimes (Google Cloud Functions, Azure Functions, Vercel, Netlify, Cloudflare Workers) aren't covered yet.
 
+## 5b. Error statuses that are normal answers
+
+Some providers answer a normal business case with an error status: a consent check answers `400` when the user hasn't consented, a lookup answers `404` for "no such customer yet". Counted as failures, these answers make the endpoint's normal noisy, and a change in how often users hit them can open a `validation` or `not_found` incident. Tell Theirside which answers are normal (SDK 0.4.0+, collector 0.5.0+; docs/scoring.md "Expected outcomes").
+
+**In code (recommended).** After your service has read the answer and decided it is a business answer, call `markExpected(reason)`. It tags that request's latest outgoing call; every Nest controller runs inside an incoming HTTP request, so this works in services called from controllers:
+
+```ts
+import { markExpected } from '@theirside/sdk';
+
+@Injectable()
+export class ConsentService {
+  constructor(private readonly http: HttpService) {}
+
+  async hasConsent(userId: string): Promise<boolean> {
+    const res = await firstValueFrom(
+      this.http.get(`https://api.consentco.test/v1/consent/${userId}`, { validateStatus: () => true }),
+    );
+    if (res.status === 400 && res.data?.code === 'consent_required') {
+      markExpected('consent_required'); // a normal answer, not a failure
+      return false;
+    }
+    return res.status === 200;
+  }
+}
+```
+
+In queue consumers, cron jobs and other code outside an incoming request, wrap the call instead: `await expecting('consent_required', () => this.consent.check(userId))` tags 4xx answers to the calls made inside. Only the reason label is sent. Tagged answers count as successful and show as their own series on the endpoint page; **untagged** answers with the same status are still failures, so if the provider changes its contract and answers `400` to everything, you still get an alert. `getStats().expected` counts tags and misses (`debug: true` says why a mark missed).
+
+**From the dashboard (no code change).** On the incident, on the endpoint's row ("A status here is a normal answer…") or in Settings → Providers → the provider → Expected answers: "Mark 400 as expected for GET /v1/consent". Slack alerts of 401/403, 404 and 400/409/422 incidents link to it. Every answer with that status from that endpoint then counts as successful, so it is less precise; an open incident it explains resolves with a note, and a safety net opens an incident if the status takes over (above max(80%, halfway from its normal share to 100%) of calls for 10 minutes). Only 400, 401, 403, 404, 409 and 422 can be marked; never 5xx, timeouts or connection errors.
+
 ## 6. Correlation IDs
 
 `getCorrelationId` is read at the start of every outgoing call, inside the incoming request's async context. With `nestjs-cls`:

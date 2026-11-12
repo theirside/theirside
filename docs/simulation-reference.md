@@ -85,6 +85,12 @@ history: { mode: seeded, days: 8 }
 | `path` | Path template, e.g. /v1/charges/:id. |  |
 | `traffic` | How many calls, when (see Traffic patterns). |  |
 | `normal` | Normal error and latency levels (see Normal levels, outgoing). |  |
+| `markedExpected` | Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409, 422): counted as successful, with the safety net. Pair with `normal.expected` and `expectedTagged: false`. |  |
+
+```yaml
+# markedExpected
+markedExpected: [400]
+```
 
 <a id="webhooks"></a>
 
@@ -170,6 +176,15 @@ An endpoint's everyday behaviour, before any fault.
 | `latencyMs` | Median latency in ms. | 250 ms |
 | `latencySigma` | Latency spread (log-normal sigma, 0–3): higher means a longer slow tail. | 0.5 |
 | `noise` | Everyday noise: a lone 5xx and a few very slow calls a day, short latency wobbles. | on |
+| `expected` | Expected outcomes: a share of calls answered with a 4xx that is a normal business answer (a consent check answering 400 when the user has not consented). A number, or `[min, max]`: the share drifts between them hour by hour. | none |
+| `expectedStatus` | The status of those answers (a 4xx). | 400 |
+| `expectedTagged` | Tagged in code (SDK `markExpected`), so they count as successful; off: plain 4xx answers (for marking them from the dashboard). | on |
+| `expectedReason` | The reason label tagged answers carry. | consent_required |
+
+```yaml
+# expected
+expected: [0.1, 0.4]
+```
 
 <a id="normal-inbound"></a>
 
@@ -197,7 +212,7 @@ An endpoint's everyday behaviour, before any fault.
 | `type` | What goes wrong (see Fault types). |  |
 | `size` | How bad: a share of calls (0–1) for error faults and rejected, × for latency, ms for slow, seconds for late. | per type (see Fault types) |
 | `ramp` | latency: grow from 1× to `size` over the duration (slow degradation). |  |
-| `status` | rejected: the status our app answers (401 for a signing-secret mismatch). | 500 |
+| `status` | rejected: the status our app answers (401 for a signing-secret mismatch). auth, not_found, validation: the status the provider answers instead of the usual one, never tagged expected (a contract change: `type: validation, status: 400`). | rejected 500; auth 401/403; not_found 404; validation 422 |
 
 ```yaml
 # at
@@ -219,7 +234,7 @@ Outgoing types apply to endpoints, webhook types to webhook sources.
 | `resets` | `size` share of calls fail with a connection reset; incident `errors`. | 30% | `outgoing` |
 | `auth` | `size` share of calls answer 401/403 (changed access rules, a revoked key); incident `auth`. | 50% | `outgoing` |
 | `not_found` | `size` share of calls answer 404; incident `not_found`. | 50% | `outgoing` |
-| `validation` | `size` share of calls answer 422; incident `validation`. | 50% | `outgoing` |
+| `validation` | `size` share of calls answer 422 (or `status`, e.g. 400), never tagged expected; incident `validation`. | 50% | `outgoing` |
 | `latency` | Every call takes `size` × longer; with `ramp`, grows from 1× to `size` over the duration; incident `latency`. | 3× | `outgoing` |
 | `silent` | The sender stops delivering; incident `webhook_silence`. |  | `webhooks` |
 | `rejected` | `size` share of deliveries get `status` from our app (500, or 401 for a signing-secret mismatch); incident `webhook_rejections`. | 100% | `webhooks` |

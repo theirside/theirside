@@ -124,10 +124,20 @@ export function statusCodes(s: WindowStats, kind: IncidentKind): string {
   return (seen.length ? seen : codes.slice(0, 1)).map(([, c]) => c).join('/');
 }
 
+/** "400 (marked expected) now 95% of calls, normally 10%": the expected-outcome safety net. */
+export function surgeText(s: WindowStats): string | null {
+  const g = s.surge;
+  if (!g) return null;
+  return `${g.status} (marked expected) now ${pct(g.share)} of calls, normally ${pct(g.normalShare)}`;
+}
+
 /** "returns 401 for 62% of calls" / "62% of calls fail" for one endpoint's window. */
 export function kindLine(s: WindowStats, b: BaselineView | null, kind: IncidentKind): string {
   const rate = pct(failureRate(s, kind));
   const normal = pct(b ? normalRate(b, kind) : 0);
+  const surge = kind === 'behaviour' ? surgeText(s) : null;
+  if (surge)
+    return `${surge}: it is marked as a normal answer for this endpoint, but has taken over; the provider may have changed its contract`;
   if (kind === 'behaviour')
     return `${rate} of calls are not successful (normally ${normal}): ${KIND_HINT.behaviour}`;
   return `returns ${statusCodes(s, kind)} for ${rate} of calls (normally ${normal}); ${KIND_HINT[kind]}`;

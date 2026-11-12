@@ -48,6 +48,13 @@ export interface CallEvent {
   candidate?: boolean;
   /** Candidates only: deliveries to this route this event stands for (the SDK sends one a minute). */
   count?: number;
+  /**
+   * Outbound 4xx only (SDK 0.4.0+): the app marked this answer as expected, a normal
+   * business answer (`markExpected` / `expecting`), with this reason label
+   * (`EXPECTED_REASON_PATTERN`). Counted as successful by collectors that know the
+   * field; older ones drop it and count the call as a 4xx.
+   */
+  expected?: string;
 }
 
 export interface IngestBatch {

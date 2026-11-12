@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ALLOWED_WORD, normalizePathWord } from '@theirside/shared/core';
-import { api, type Provider } from '../api';
+import { api, type Overview, type Provider } from '../api';
 import {
   Badge,
   Button,
@@ -15,6 +15,7 @@ import {
 import { ago, nowMs } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
+import { ExpectedMarks, MarkExpected } from './Expected';
 
 /**
  * Settings → Providers: a compact, searchable, sortable table (tabs: all, new,
@@ -389,7 +390,89 @@ export function ProviderPanel({ name }: { name: string }) {
           onSaved={reload}
         />
       )}
+      {p && <ExpectedSection p={p} onChange={reload} />}
     </>
+  );
+}
+
+/**
+ * Statuses marked expected per endpoint (docs/scoring.md "Expected outcomes"): the
+ * list with "Unmark", and marking one more for an endpoint seen in the last 7 days.
+ * Members and admins. Outside the provider form: it saves on its own.
+ */
+function ExpectedSection({ p, onChange }: { p: Provider; onChange: () => void }) {
+  const [overview] = usePoll(
+    () =>
+      api<Overview>(`/v1/admin/overview?${new URLSearchParams({ provider: p.name, range: '7d' })}`),
+    [p.name],
+    300_000,
+  );
+  const marks = Object.entries(p.expectedStatuses ?? {});
+  const seen = [
+    ...new Map(
+      (overview?.providers.find((x) => x.name === p.name)?.endpoints ?? []).map((e) => [
+        `${e.method} ${e.endpoint}`,
+        { method: e.method, endpoint: e.endpoint },
+      ]),
+    ).values(),
+  ];
+  const [pick, setPick] = useState('');
+  const chosen = seen.find((e) => `${e.method} ${e.endpoint}` === pick) ?? seen[0];
+  return (
+    <Section title="Expected answers">
+      <p className="muted">
+        Statuses that are normal business answers for an endpoint (a consent check answering 400
+        when the user hasn&apos;t consented) count as successful.
+      </p>
+      {marks.length > 0 ? (
+        <Table data-testid="expected-marks">
+          <tbody>
+            {marks.map(([key, statuses]) => {
+              const [method, ...rest] = key.split(' ');
+              const ep = { method: method!, endpoint: rest.join(' ') };
+              return (
+                <tr key={key}>
+                  <td>
+                    <code>{ep.method}</code> <code>{ep.endpoint}</code>
+                  </td>
+                  <td>
+                    <ExpectedMarks
+                      provider={p.name}
+                      ep={ep}
+                      statuses={statuses}
+                      onChange={onChange}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      ) : (
+        <div className="empty">None marked.</div>
+      )}
+      {seen.length > 0 && chosen && (
+        <div className="expected-add">
+          <Field label="Endpoint">
+            <select
+              value={`${chosen.method} ${chosen.endpoint}`}
+              onChange={(e) => setPick(e.target.value)}
+            >
+              {seen.map((e) => (
+                <option key={`${e.method} ${e.endpoint}`}>{`${e.method} ${e.endpoint}`}</option>
+              ))}
+            </select>
+          </Field>
+          <MarkExpected
+            key={`${chosen.method} ${chosen.endpoint}`}
+            provider={p.name}
+            ep={chosen}
+            marked={p.expectedStatuses?.[`${chosen.method} ${chosen.endpoint}`] ?? []}
+            onDone={onChange}
+          />
+        </div>
+      )}
+    </Section>
   );
 }
 

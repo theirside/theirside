@@ -1280,3 +1280,43 @@ details.infra summary {
   white-space: nowrap;
   cursor: grab;
 }
+
+/* expected outcomes: "Mark 400 as expected" (pages/Expected.tsx) */
+.mark-expected + .mark-expected {
+  margin-top: var(--space-3);
+}
+.mark-expected-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.expected-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.expected-marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: var(--space-1);
+}
+.expected-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.expected-controls {
+  margin-top: var(--space-3);
+}
+.expected-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.card.highlight {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md);
+}

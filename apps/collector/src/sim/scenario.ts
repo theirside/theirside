@@ -106,6 +106,22 @@ export const outboundNormalSchema = z.object({
   latencySigma: z.number().min(0).max(3).optional(),
   /** Everyday noise (lone 5xx, single very slow calls, short latency wobbles); default on. */
   noise: z.boolean().optional(),
+  /**
+   * Expected outcomes: a share of calls answered with a 4xx that is a normal business
+   * answer (a consent check's 400). A number, or [min, max]: the share drifts between
+   * them hour by hour.
+   */
+  expected: z
+    .union([
+      z.number().min(0).max(1),
+      z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]),
+    ])
+    .optional(),
+  /** Their status (a 4xx; default 400). */
+  expectedStatus: z.number().int().min(400).max(499).optional(),
+  /** Tagged in code (SDK markExpected) with `expectedReason`; false: plain 4xx answers. */
+  expectedTagged: z.boolean().optional(),
+  expectedReason: z.string().min(1).max(64).optional(),
 });
 
 export const inboundNormalSchema = z.object({
@@ -126,6 +142,11 @@ export const endpointSchema = z.object({
   path: z.string().startsWith('/'),
   traffic: trafficSchema,
   normal: outboundNormalSchema.default({}),
+  /**
+   * Statuses marked expected for this endpoint from the dashboard (400, 401, 403, 404, 409,
+   * 422): counted as successful when scoring, with the safety net. Set from the start.
+   */
+  markedExpected: z.array(z.number().int()).optional(),
 });
 
 export const providerSchema = z.object({
@@ -153,7 +174,11 @@ export const faultSchema = z.object({
   size: z.number().min(0).optional(),
   /** latency: grow from 1× to `size` over the duration (slow degradation). */
   ramp: z.boolean().optional(),
-  /** rejected: the status our app answers (default 500; 401 for a signing-secret mismatch). */
+  /**
+   * rejected: the status our app answers (default 500; 401 for a signing-secret mismatch).
+   * auth, not_found, validation: the status the provider answers (default 401/403, 404, 422),
+   * never tagged as expected: a contract change.
+   */
   status: z.number().int().optional(),
 });
 
@@ -213,6 +238,7 @@ export interface OutboundSource {
   endpoint: string;
   traffic: Traffic;
   normal: z.infer<typeof outboundNormalSchema>;
+  markedExpected?: number[];
 }
 export interface InboundSource {
   kind: 'inbound';
@@ -242,6 +268,7 @@ export function sourcesOf(s: Scenario): Source[] {
         endpoint: e.path,
         traffic: e.traffic,
         normal: e.normal,
+        ...(e.markedExpected ? { markedExpected: e.markedExpected } : {}),
       });
   for (const w of s.webhooks)
     out.push({

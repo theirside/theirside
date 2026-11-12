@@ -363,3 +363,37 @@ describe('inbound webhook alerts', () => {
     expect(renderEmail(SILENCE).text).toMatchSnapshot();
   });
 });
+
+describe('"Mark as expected" (status-class incidents)', () => {
+  const VALIDATION: AlertPayload = {
+    ...OPEN,
+    kind: 'validation',
+    title: 'ConsentCo: GET /v1/consent answering 400 (75%)',
+    markExpectedUrl: 'https://theirside.internal.example/#/incidents/inc_01/expected',
+  };
+
+  it('Slack: a second button next to "Open in dashboard", with a note that code is more precise', () => {
+    const blocks = renderSlack(VALIDATION).blocks as {
+      type: string;
+      elements?: { text?: { text: string } | string; url?: string }[];
+    }[];
+    const actions = blocks.find((b) => b.type === 'actions')!;
+    expect(actions.elements!.map((e) => (e.text as { text: string }).text)).toEqual([
+      'Open in dashboard',
+      'Mark as expected',
+    ]);
+    expect(actions.elements![1]!.url).toBe(VALIDATION.markExpectedUrl);
+    expect(JSON.stringify(blocks)).toMatch(
+      /Marking it in your code \(`markExpected`\) is more precise/,
+    );
+    // other incidents: no such button
+    const plain = renderSlack(OPEN).blocks as typeof blocks;
+    expect(plain.find((b) => b.type === 'actions')!.elements).toHaveLength(1);
+  });
+
+  it('email: the link in the text part', () => {
+    const { text } = renderEmail(VALIDATION);
+    expect(text).toContain(`Mark it as expected: ${VALIDATION.markExpectedUrl}`);
+    expect(renderEmail(OPEN).text).not.toContain('Mark it as expected');
+  });
+});

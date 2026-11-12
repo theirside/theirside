@@ -39,6 +39,18 @@ export const MAX_ENDPOINT_LENGTH = 512;
 export const MAX_ERROR_CODE_LENGTH = 64;
 
 /**
+ * Expected outcomes (SDK `markExpected` / `expecting`): the reason label the app gives
+ * a 4xx it treats as a business answer. A short label, never free text: starts with a
+ * letter or digit, then letters, digits, `_ . : -`, at most 64 characters.
+ */
+export const MAX_EXPECTED_REASON_LENGTH = 64;
+export const EXPECTED_REASON_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+
+export function isExpectedReason(value: unknown): value is string {
+  return typeof value === 'string' && EXPECTED_REASON_PATTERN.test(value);
+}
+
+/**
  * Distinct subdomains of one domain (`cust1.saasco.com`, `cust2.saasco.com`…)
  * after which they count as one tenant-style host `*.domain`: the collector
  * folds them into one provider pattern, the SDK route learner shares one key.

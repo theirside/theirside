@@ -13,6 +13,13 @@ import {
   type RateClass,
   type RollupCounts,
 } from './evaluate.js';
+import {
+  applyExpected,
+  noExpected,
+  statusKey,
+  type ExpectableStatus,
+  type ExpectedLookup,
+} from './expected.js';
 import { slowModel } from './model.js';
 import { estimateRho } from './stats.js';
 import type { Thresholds } from './thresholds.js';
@@ -25,12 +32,16 @@ function subtract(a: RollupCounts, b: RollupCounts): RollupCounts {
   const outcomes = { ...a.outcomes };
   for (const o of OUTCOMES) outcomes[o] = Math.max(0, (outcomes[o] ?? 0) - (b.outcomes[o] ?? 0));
   const statusCounts = emptyStatusCounts();
-  for (const k of STATUS_COUNT_KEYS)
+  const marked = emptyStatusCounts();
+  for (const k of STATUS_COUNT_KEYS) {
     statusCounts[k] = Math.max(0, (a.statusCounts?.[k] ?? 0) - (b.statusCounts?.[k] ?? 0));
+    marked[k] = Math.max(0, (a.marked?.[k] ?? 0) - (b.marked?.[k] ?? 0));
+  }
   return {
     total: Math.max(0, a.total - b.total),
     status429: Math.max(0, a.status429 - b.status429),
     statusCounts,
+    marked,
     outcomes,
     latencyHistogram: a.latencyHistogram.map((v, i) =>
       Math.max(0, v - (b.latencyHistogram[i] ?? 0)),
@@ -119,6 +130,8 @@ export function outboundModel(
   counts: RollupCounts,
   hours: readonly RollupCounts[],
   t: Pick<Thresholds, 'latencyMultiplier' | 'latencyDeltaMs'>,
+  /** Statuses marked expected from the dashboard: their normal share (the safety net's base). */
+  marked: readonly ExpectableStatus[] = [],
 ): OutboundModel {
   const stats = hours.map((h) => windowStats([h]));
   const rho: OutboundModel['rho'] = {};
@@ -135,7 +148,16 @@ export function outboundModel(
     t.latencyMultiplier,
     t.latencyDeltaMs,
   );
-  return { rho, ...(slow ? { slow } : {}) };
+  const all = windowStats([counts]);
+  const expected: Partial<Record<string, number>> = {};
+  if (all.calls > 0)
+    for (const st of marked)
+      expected[String(st)] = Math.round((all.marked[statusKey(st)] / all.calls) * 1e6) / 1e6;
+  return {
+    rho,
+    ...(slow ? { slow } : {}),
+    ...(marked.length > 0 ? { expected } : {}),
+  };
 }
 
 const HOUR = 60 * MIN;
@@ -159,6 +181,8 @@ export async function refreshBaselines(
   t: Thresholds,
   /** A key's own thresholds (its provider's overrides) for its slow class; default `t`. */
   tFor: (key: RollupKey) => Thresholds = () => t,
+  /** Statuses marked expected from the dashboard: counted as successful (scoring/expected.ts). */
+  expectedFor: ExpectedLookup = noExpected,
 ): Promise<Map<string, Baseline>> {
   const out = new Map<string, Baseline>();
   if (keys.length === 0) return out;
@@ -189,8 +213,11 @@ export async function refreshBaselines(
   for (const key of keys) {
     const agg = byKey.get(keyId(key));
     if (!agg) continue; // no history yet: callers use the default baseline
-    let counts: RollupCounts = agg;
-    let split = splitByKey?.get(keyId(key));
+    const marked = expectedFor(key);
+    const scored = <T extends RollupCounts>(r: T): T => applyExpected(r, marked);
+    let counts: RollupCounts = scored(agg);
+    const splitRaw = splitByKey?.get(keyId(key));
+    let split = splitRaw ? scored(splitRaw) : undefined;
     const excludedWindows: { from: Date; to: Date }[] = [];
     for (const w of await storage.incidents.incidentWindows(tenant, key, from)) {
       const wFrom = new Date(Math.max(w.from.getTime() - t.windowMinutes * MIN, from.getTime()));
@@ -202,22 +229,25 @@ export async function refreshBaselines(
         to: wTo,
         ...key,
       });
-      if (excluded[0]) counts = subtract(counts, excluded[0]);
+      if (excluded[0]) counts = subtract(counts, scored(excluded[0]));
       // the per-status counts too: an incident opened on a success collapse while the mix was
       // learning mustn't become the endpoint's normal
       if (split && since) {
         const sFrom = new Date(Math.max(wFrom.getTime(), since.getTime()));
         if (sFrom < wTo) {
           const ex = await storage.rollups.aggregateByKey(tenant, { from: sFrom, to: wTo, ...key });
-          if (ex[0]) split = subtract(split, ex[0]);
+          if (ex[0]) split = subtract(split, scored(ex[0]));
         }
       }
     }
     // whole clock hours of the history, hours an incident touched left out
-    const hours = (await storage.rollups.hourly(tenant, key, from, to)).filter(
-      (h) =>
-        h.hour.getTime() + HOUR <= to.getTime() && !hourTouches(h.hour.getTime(), excludedWindows),
-    );
+    const hours = (await storage.rollups.hourly(tenant, key, from, to))
+      .filter(
+        (h) =>
+          h.hour.getTime() + HOUR <= to.getTime() &&
+          !hourTouches(h.hour.getTime(), excludedWindows),
+      )
+      .map(scored);
     const b: Baseline = {
       ...baselineFrom(
         key,
@@ -227,7 +257,7 @@ export async function refreshBaselines(
         t,
         splitByKey ? { counts: split, minutes: splitMinutes } : undefined,
       ),
-      model: outboundModel(counts, hours, tFor(key)),
+      model: outboundModel(counts, hours, tFor(key), marked),
     };
     if (wanted.has(keyId(key))) baselines.push(b);
     out.set(keyId(key), b);

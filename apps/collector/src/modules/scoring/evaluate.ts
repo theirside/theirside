@@ -9,6 +9,12 @@ import {
   mergeHistograms,
   type Outcome,
 } from '@theirside/shared';
+import {
+  EXPECTED_SURGE_MINUTES,
+  surgeIn,
+  type ExpectableStatus,
+  type ExpectedSurge,
+} from './expected.js';
 import { countTest, slowClassTest } from './model.js';
 import type { SlowModel } from './model.js';
 import type { Thresholds } from './thresholds.js';
@@ -20,6 +26,11 @@ export interface RollupCounts {
   status429: number;
   /** 3xx and common 4xx one by one (missing in rows from before collector 0.3.0: zeros). */
   statusCounts?: StatusCounts;
+  /**
+   * Statuses marked expected from the dashboard, moved out of `statusCounts` into `ok`
+   * by `applyExpected` (scoring/expected.ts); missing: none.
+   */
+  marked?: StatusCounts;
   latencyHistogram: number[];
 }
 
@@ -81,6 +92,13 @@ export interface WindowStats {
   aborted: number;
   outcomes: Record<Outcome, number>;
   statusCounts: StatusCounts;
+  /** Calls with a status marked expected from the dashboard (counted in `ok`). */
+  marked: StatusCounts;
+  /**
+   * Set by `evaluateAt` when a marked status has taken over (the safety net): the
+   * behaviour incident's failure count includes those calls.
+   */
+  surge?: ExpectedSurge;
   /** Calls per failure group. */
   groups: Record<FailureGroup, number>;
   /** Calls that weren't successful (calls minus `ok`). */
@@ -105,6 +123,8 @@ export type RateClass = FailureGroup | 'nonSuccess';
 export interface OutboundModel {
   rho: Partial<Record<RateClass, number>>;
   slow?: SlowModel;
+  /** Normal share of each status marked expected from the dashboard (`"400"` → 0.1). */
+  expected?: Partial<Record<string, number>>;
 }
 
 export interface BaselineView {
@@ -146,12 +166,14 @@ export function windowStats(rows: readonly RollupCounts[]): WindowStats {
   let total = 0;
   let throttled = 0;
   const statusCounts = emptyStatusCounts();
+  const marked = emptyStatusCounts();
   for (const r of rows) {
     total += r.total;
     throttled += r.status429;
     for (const o of OUTCOMES) outcomes[o] += r.outcomes[o] ?? 0;
     if (r.statusCounts)
       for (const k of STATUS_COUNT_KEYS) statusCounts[k] += r.statusCounts[k] ?? 0;
+    if (r.marked) for (const k of STATUS_COUNT_KEYS) marked[k] += r.marked[k] ?? 0;
     mergeHistograms(histogram, r.latencyHistogram);
   }
   const aborted = outcomes.aborted;
@@ -181,6 +203,7 @@ export function windowStats(rows: readonly RollupCounts[]): WindowStats {
     aborted,
     outcomes,
     statusCounts,
+    marked,
     groups,
     nonSuccess: Math.max(0, calls - outcomes.ok),
     histogram,
@@ -220,7 +243,8 @@ export function failureCount(s: WindowStats, kind: IncidentKind): number {
     case 'rate_limited':
       return s.groups.rate_limited;
     case 'behaviour':
-      return s.nonSuccess;
+      // the safety net: a marked status that took over counts as failing
+      return s.nonSuccess + (s.surge?.count ?? 0);
   }
 }
 
@@ -264,6 +288,11 @@ export interface Evaluation {
   groupBreach: Exclude<FailureGroup, 'outage'> | null;
   /** Successful calls dropped significantly with no single group to blame. */
   behaviourBreach: boolean;
+  /**
+   * The safety net for statuses marked expected from the dashboard: one of them has been
+   * above its limit for `EXPECTED_SURGE_MINUTES` (a behaviour incident); null when none.
+   */
+  expectedSurge: ExpectedSurge | null;
   /** The incident kind this window points at (null when not bad). */
   kind: IncidentKind | null;
   /** Any breach. */
@@ -379,6 +408,7 @@ export function evaluate(
     latencyBreach,
     groupBreach,
     behaviourBreach,
+    expectedSurge: null,
     kind,
     bad: kind !== null,
   };
@@ -397,7 +427,7 @@ export const SMALL_SAMPLE_CALLS = 100;
  * each of the last ten minutes).
  */
 export class MinuteSums {
-  private static readonly SCALARS = 3 + OUTCOMES.length + STATUS_COUNT_KEYS.length;
+  private static readonly SCALARS = 3 + OUTCOMES.length + 2 * STATUS_COUNT_KEYS.length;
   private readonly width: number;
   private readonly cum: Float64Array;
 
@@ -422,6 +452,7 @@ export class MinuteSums {
       this.cum[f++]! += 1;
       for (const o of OUTCOMES) this.cum[f++]! += r.outcomes[o] ?? 0;
       for (const k of STATUS_COUNT_KEYS) this.cum[f++]! += r.statusCounts?.[k] ?? 0;
+      for (const k of STATUS_COUNT_KEYS) this.cum[f++]! += r.marked?.[k] ?? 0;
       const h = r.latencyHistogram;
       for (let j = 0; j < LATENCY_BUCKETS; j++) this.cum[f++]! += h[j] ?? 0;
     }
@@ -452,9 +483,11 @@ export class MinuteSums {
     for (const o of OUTCOMES) outcomes[o] = d(f++);
     const statusCounts = emptyStatusCounts();
     for (const k of STATUS_COUNT_KEYS) statusCounts[k] = d(f++);
+    const marked = emptyStatusCounts();
+    for (const k of STATUS_COUNT_KEYS) marked[k] = d(f++);
     const latencyHistogram = new Array<number>(LATENCY_BUCKETS);
     for (let j = 0; j < LATENCY_BUCKETS; j++) latencyHistogram[j] = d(f++);
-    return windowStats([{ total, status429, outcomes, statusCounts, latencyHistogram }]);
+    return windowStats([{ total, status429, outcomes, statusCounts, marked, latencyHistogram }]);
   }
 }
 
@@ -475,6 +508,8 @@ export function evaluateAt(
   end: number,
   b: BaselineView,
   t: Thresholds,
+  /** Statuses of this key marked expected from the dashboard (the safety net watches them). */
+  marked: readonly ExpectableStatus[] = [],
 ): Evaluation {
   const windows = chainWindows((n) => sums.calls(end, n), t);
   const tk = windows.length > 1 ? { ...t, maxPValue: t.maxPValue / windows.length } : t;
@@ -485,7 +520,27 @@ export function evaluateAt(
     first ??= e;
     if (e.kind && (!best || kindOutranks(e.kind, best.kind!))) best = e;
   }
-  return best ?? first!;
+  const result = best ?? first!;
+  if (marked.length === 0) return result;
+  // Safety net: a marked status above its limit in the windows ending at each of the last
+  // minutes. With the openAfterMinutes bad minutes the incident rules need on top, an
+  // incident opens after EXPECTED_SURGE_MINUTES minutes of it.
+  const span = Math.max(1, EXPECTED_SURGE_MINUTES - t.openAfterMinutes + 1);
+  let surge: ExpectedSurge | null = null;
+  for (let j = 0; j < span; j++) {
+    const s = sums.window(end - j * MINUTE, windows[0]!);
+    const hit = b.learning ? null : surgeIn(s, marked, b.model?.expected, t);
+    if (!hit) return result;
+    if (j === 0) surge = hit;
+  }
+  if (!surge) return result;
+  const out = { ...result, expectedSurge: surge, stats: { ...result.stats, surge } };
+  if (!out.kind || kindOutranks('behaviour', out.kind)) {
+    out.kind = 'behaviour';
+    out.behaviourBreach = true;
+    out.bad = true;
+  }
+  return out;
 }
 
 /**

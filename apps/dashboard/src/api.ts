@@ -66,6 +66,14 @@ export interface EndpointHealth {
   inIncident: boolean;
   /** errors, latency, auth, not_found, validation, rate_limited, behaviour; null: none open. */
   incidentKind: string | null;
+  /** In an open incident, but the current window is healthy. */
+  recovering?: boolean;
+  /** While recovering: the latest minute whose window was bad. */
+  lastBadMinuteAt?: string | null;
+  /** Statuses marked expected for this endpoint from the dashboard. */
+  expectedStatuses?: number[];
+  /** Share of calls in the window the app marked expected in code. */
+  expectedRate?: number;
   outcomes: Record<string, number>;
   /** Start of the latest minute with calls within the range. */
   lastCallAt: string;
@@ -119,6 +127,8 @@ export interface Incident {
   direction?: 'outbound' | 'inbound';
   windowMinutes?: number;
   deployHint?: string | null;
+  /** Why it was resolved when not by recovery (a status marked expected). */
+  resolutionNote?: string | null;
   status: 'open' | 'resolved';
   openedAt: string;
   resolvedAt: string | null;
@@ -159,6 +169,10 @@ export interface SeriesPoint {
   errorRate: number;
   outcomeRates: Record<string, number>;
   statusMix: Record<string, number>;
+  /** Share of calls marked expected in code, per reason label. */
+  expected?: Record<string, number>;
+  /** Share of calls with a status marked expected from the dashboard (`"400"`). */
+  marked?: Record<string, number>;
   p50Ms: number | null;
   p95Ms: number | null;
 }
@@ -204,6 +218,8 @@ export interface Provider {
   webhookThresholds: Record<string, number>;
   /** Show its webhooks on the public status page (off by default). */
   webhooksPublic: boolean;
+  /** Statuses marked expected per endpoint (`GET /v1/consent` → [400]). */
+  expectedStatuses?: Record<string, number[]>;
   /** Latest call seen; null = never called. */
   lastCallAt: string | null;
 }

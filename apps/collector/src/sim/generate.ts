@@ -49,6 +49,10 @@ export const OUTBOUND_NORMAL_DEFAULTS = {
   latencyMs: 250,
   latencySigma: 0.5,
   noise: true,
+  expected: 0,
+  expectedStatus: 400,
+  expectedTagged: true,
+  expectedReason: 'consent_required',
 };
 
 /** Normal levels of a webhook source a scenario leaves out. */
@@ -224,6 +228,9 @@ const latencyMultiplier = (f: ResolvedFault, m: number) =>
 export class OutboundGenerator {
   private readonly r: Rand;
   private readonly noise: Noise;
+  /** expected: [min, max] — the share drifts between them, a new step each hour. */
+  private expectedHour = -1;
+  private expectedShare = 0;
   constructor(
     private src: OutboundSource,
     seed: number,
@@ -236,26 +243,54 @@ export class OutboundGenerator {
     this.src = src;
   }
 
+  /** Share of calls answering the business-answer 4xx at minute m (expected outcomes). */
+  private expectedAt(m: number): number {
+    const e = this.src.normal.expected ?? OUTBOUND_NORMAL_DEFAULTS.expected;
+    if (typeof e === 'number') return e;
+    const [lo, hi] = e[0] <= e[1] ? e : [e[1], e[0]];
+    const hour = Math.floor(m / HOUR);
+    if (hour !== this.expectedHour) {
+      // a random walk inside [lo, hi]: some hours many users haven't consented, some few
+      const start = this.expectedHour < 0 ? this.r.uniform(lo, hi) : this.expectedShare;
+      this.expectedHour = hour;
+      const step = (hi - lo) * this.r.uniform(-0.25, 0.25);
+      this.expectedShare = Math.min(hi, Math.max(lo, start + step));
+    }
+    return this.expectedShare;
+  }
+
   /** The rollup row (tenant ids left empty) for minute m with n calls; undefined without calls. */
   row(
     m: number,
     n: number,
     faults: readonly ResolvedFault[],
-  ): Omit<RollupRow, 'orgId' | 'projectId'> | undefined {
+  ):
+    | (Omit<RollupRow, 'orgId' | 'projectId'> & { expectedReasons?: Record<string, number> })
+    | undefined {
     const nz = this.noise.minute(m);
     if (n <= 0) return undefined;
     const r = this.r;
     const N = this.src.normal;
+    const expectedShare = this.expectedAt(m);
+    const expectedStatus = N.expectedStatus ?? OUTBOUND_NORMAL_DEFAULTS.expectedStatus;
+    const tagged = N.expectedTagged ?? OUTBOUND_NORMAL_DEFAULTS.expectedTagged;
+    const reason = N.expectedReason ?? OUTBOUND_NORMAL_DEFAULTS.expectedReason;
+    let expected = 0;
     const errRate = (N.errors ?? OUTBOUND_NORMAL_DEFAULTS.errors) * this.noise.jitter;
     const notFound = N.notFound ?? OUTBOUND_NORMAL_DEFAULTS.notFound;
     const validation = N.validation ?? OUTBOUND_NORMAL_DEFAULTS.validation;
     const median = N.latencyMs ?? OUTBOUND_NORMAL_DEFAULTS.latencyMs;
     const sigma = N.latencySigma ?? OUTBOUND_NORMAL_DEFAULTS.latencySigma;
     let latency = nz.latencyFactor;
-    const failures: { type: string; share: number }[] = [];
+    const failures: { type: string; share: number; status?: number }[] = [];
     for (const f of faults) {
       if (f.type === 'latency') latency *= latencyMultiplier(f, m);
-      else failures.push({ type: f.type, share: Math.min(1, faultSize(f)) });
+      else
+        failures.push({
+          type: f.type,
+          share: Math.min(1, faultSize(f)),
+          ...(f.status !== undefined ? { status: f.status } : {}),
+        });
     }
     const outcomes = {} as Record<Outcome, number>;
     for (const o of OUTCOMES) outcomes[o] = 0;
@@ -289,13 +324,13 @@ export class OutboundGenerator {
               add(null, 'conn_reset', r.lognormal(40, 0.5));
               break;
             case 'auth':
-              add(r.next() < 0.5 ? 401 : 403, 'http_4xx', r.lognormal(60, 0.3));
+              add(f.status ?? (r.next() < 0.5 ? 401 : 403), 'http_4xx', r.lognormal(60, 0.3));
               break;
             case 'not_found':
-              add(404, 'http_4xx', r.lognormal(60, 0.3));
+              add(f.status ?? 404, 'http_4xx', r.lognormal(60, 0.3));
               break;
             case 'validation':
-              add(422, 'http_4xx', r.lognormal(80, 0.3));
+              add(f.status ?? 422, 'http_4xx', r.lognormal(80, 0.3));
               break;
           }
           break;
@@ -306,6 +341,17 @@ export class OutboundGenerator {
       if (lone) {
         lone = false;
         add(503, 'http_5xx', r.lognormal(120, 0.4));
+        continue;
+      }
+      // business answers: a normal 4xx, tagged in code (counted as successful) or plain
+      if (expectedShare > 0 && r.next() < expectedShare) {
+        const ms = r.lognormal(median * 0.6, sigma) * latency;
+        if (tagged) {
+          outcomes.ok++;
+          expected++;
+          h[bucketIndex(ms)]!++;
+          sum += ms;
+        } else add(expectedStatus, 'http_4xx', ms);
         continue;
       }
       const y = r.next();
@@ -335,6 +381,8 @@ export class OutboundGenerator {
       outcomes,
       status429: s429,
       statusCounts,
+      expected,
+      ...(expected > 0 ? { expectedReasons: { [reason]: expected } } : {}),
       latencyHistogram: h,
       latencySumMs: sum,
     };
