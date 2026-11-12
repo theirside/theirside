@@ -3,6 +3,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The response body, for errors that say more than a message (409 with the existing item). */
+    readonly body?: unknown,
   ) {
     super(message);
   }
@@ -36,7 +38,7 @@ export async function api<T>(
   if (!res.ok) {
     // `detail` is the human-readable explanation when the server sends one
     const d = data as { error?: string; detail?: string };
-    throw new ApiError(res.status, d.detail ?? d.error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, d.detail ?? d.error ?? `HTTP ${res.status}`, data);
   }
   const token = (data as { csrfToken?: unknown }).csrfToken;
   if (typeof token === 'string') csrfToken = token;
@@ -159,6 +161,13 @@ export interface Overview {
   discovery: {
     recent: { name: string; label: string; category: string | null; firstSeenAt: string }[];
     overflow: boolean;
+    /** Webhook routes first seen in the last 24 h, not decided yet (missing: older collector). */
+    webhookRoutes?: {
+      method: string;
+      endpoint: string;
+      suggestedName: string | null;
+      firstSeenAt: string;
+    }[];
   };
 }
 
@@ -365,14 +374,17 @@ export interface TwoFactorStatus {
   available: boolean;
 }
 
-export type WebhookStatus = 'incident' | 'quiet' | 'learning' | 'irregular' | 'all_quiet' | 'ok';
+/** `waiting`: a confirmed route that hasn't delivered since (no numbers yet). */
+export type WebhookStatus =
+  'incident' | 'quiet' | 'learning' | 'irregular' | 'all_quiet' | 'ok' | 'waiting';
 
 /** One webhook source (provider + route) in /v1/admin/webhooks. */
 export interface WebhookSource {
+  /** Empty for a `waiting` route (no delivery, so no environment yet). */
   environment: string;
   endpoint: string;
-  firstSeenAt: string;
-  lastDeliveryAt: string;
+  firstSeenAt: string | null;
+  lastDeliveryAt: string | null;
   lastService: string | null;
   expectedQuiet: boolean;
   status: WebhookStatus;
@@ -428,6 +440,18 @@ export interface WebhookCandidate {
   lastSeenAt: string;
   lastService: string | null;
   decidedAt: string | null;
+  /** Pending routes: the provider to link to (or create) when confirming, and why. */
+  match?: ProviderMatch | null;
+}
+
+/** The best provider for a discovered route (collector: discovery/candidate-match.ts). */
+export interface ProviderMatch {
+  /** `existing`: link to it; `catalog` / `new`: create it. */
+  kind: 'existing' | 'catalog' | 'new';
+  provider: string;
+  label: string;
+  /** "same domain as example.com", "known provider (example.com)", "same name"… */
+  reason: string;
 }
 
 export interface WebhookCandidatesResponse {
