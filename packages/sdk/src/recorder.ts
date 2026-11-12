@@ -15,7 +15,7 @@ import {
 import type { ResolvedConfig, ResolvedProvider } from './config.js';
 import { HostPolicy } from './discovery.js';
 import { InboundRecorder } from './inbound.js';
-import type { Logger } from './log.js';
+import { warn, type Logger } from './log.js';
 import type { RingBuffer } from './queue.js';
 
 /** State kept between the start and the end of one call. */
@@ -87,7 +87,13 @@ export class Recorder {
   ) {
     this.providerMatchers = cfg.providers.map((p) => ({ value: p, matchers: p.matchers }));
     this.policy = new HostPolicy(cfg);
-    this.inbound = new InboundRecorder(cfg, queue, log, onEnqueue);
+    this.inbound = new InboundRecorder(
+      cfg,
+      queue,
+      log,
+      onEnqueue,
+      cfg.debugInbound ? (line) => warn(line) : undefined,
+    );
     this.sampleRate = cfg.sampleRate;
     this.learner = new RouteLearner({ minSightings: minPathSightings });
     this.templater = new EndpointTemplater({

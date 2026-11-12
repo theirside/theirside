@@ -5,9 +5,13 @@ import {
   OVERFLOW_TEMPLATE,
   RouteLearner,
   WEBHOOK_PATH_WORDS,
+  CLOUDEVENTS_TIMESTAMP,
+  classifyWebhookCandidate,
   compileRoute,
   detectWebhook,
-  detectWebhookCandidate,
+  isCloudEvent,
+  isIdSegment,
+  isVersionSegment,
   normalizePathWord,
   outcomeForStatus,
   parseWebhookTimestamp,
@@ -38,9 +42,16 @@ export interface InboundPending {
 /** Tests every request header *name* (never a value). */
 export type HeaderNames = (test: (name: string) => boolean) => boolean;
 
-/** Cheap pre-check: could the path hold a candidate route word at all? */
-const MAYBE_ROUTE_WORD = /hook|callback|notif|event/i;
-const NO_SEGMENTS: readonly string[] = [];
+/** A path for THEIRSIDE_DEBUG=inbound lines: IDs as `:id` (the query string is already gone). */
+function tracePath(path: string): string {
+  return (
+    path
+      .split('/')
+      .map((s) => (s === '' || isVersionSegment(s) || !isIdSegment(s) ? s : ':id'))
+      .join('/')
+      .slice(0, 200) || '/'
+  );
+}
 
 /** Distinct candidate routes a process tracks (and templates); others are dropped. */
 export const CANDIDATE_ROUTES_MAX = 50;
@@ -105,6 +116,12 @@ export class InboundRecorder {
     private readonly queue: RingBuffer<CallEvent>,
     private readonly log: Logger,
     private readonly onEnqueue: () => void,
+    /**
+     * THEIRSIDE_DEBUG=inbound: one line per incoming request saying what became of it
+     * and why (rule names, header names, the path with IDs as `:id`; never a header
+     * value or a body). Undefined: off, and nothing is formatted.
+     */
+    readonly trace?: (line: string) => void,
   ) {
     this.supportState = cfg.remoteConfig ? 'unknown' : 'yes';
     this.holdUntil = Date.now() + INBOUND_HOLD_MS;
@@ -252,80 +269,155 @@ export class InboundRecorder {
     get: RequestHeaders,
     anyName?: HeaderNames,
   ) {
-    if (!this.active) return undefined;
-    // header names first: the path is parsed only for declared routes, a detected sender,
-    // or (webhook discovery) a POST/PUT
-    const rule = detectWebhook(has);
+    const trace = this.trace;
     const verb = (typeof method === 'string' && method ? method : 'POST')
       .toUpperCase()
       .slice(0, 16);
+    if (!this.active) {
+      if (trace)
+        trace(
+          `inbound ${verb} ${tracePath(pathOnly(typeof rawUrl === 'string' && rawUrl ? rawUrl : '/'))}: ignored, ${
+            !this.cfg.webhooksEnabled
+              ? 'webhooks: false'
+              : this.supportState === 'no'
+                ? 'the collector does not store inbound webhooks'
+                : 'waiting for the collector to confirm it stores inbound webhooks timed out'
+          }`,
+        );
+      return undefined;
+    }
+    // header names first: the path is parsed only for declared routes, a detected sender,
+    // or (webhook discovery) a POST/PUT
+    const rule = detectWebhook(has);
     const maybeCandidate = this.cfg.webhookDiscovery && (verb === 'POST' || verb === 'PUT');
-    if (!rule && this.routes.length === 0 && !maybeCandidate) return undefined;
+    if (!rule && this.routes.length === 0 && !maybeCandidate && !trace) return undefined;
     const path = pathOnly(typeof rawUrl === 'string' && rawUrl ? rawUrl : '/');
     let provider: string | undefined;
     let timestamp: WebhookTimestamp | undefined;
+    let why = '';
     if (this.routes.length > 0) {
       const segs = path.split('/').slice(1);
       if (segs.length > 0 && segs[segs.length - 1] === '') segs.pop();
-      const hit = this.routes.find((r) => r.route.match(segs));
+      const i = this.routes.findIndex((r) => r.route.match(segs));
+      const hit = i >= 0 ? this.routes[i] : undefined;
       if (hit) {
         provider = hit.provider;
-        // a declared route still gets its sender's timestamp when the sender is known
-        timestamp = rule?.timestamp ?? timestampRuleFor(hit.provider);
+        // a declared route still gets its sender's timestamp when the sender is known,
+        // or the CloudEvents send time
+        timestamp =
+          rule?.timestamp ??
+          timestampRuleFor(hit.provider) ??
+          (isCloudEvent(has) ? CLOUDEVENTS_TIMESTAMP : undefined);
+        if (trace)
+          why = `${i < this.cfg.webhookRoutes.length ? 'declared' : 'confirmed'} route ${hit.route.template}`;
       }
     }
     if (provider === undefined) {
-      if (!rule) return maybeCandidate ? this.candidate(path, verb, has, anyName) : undefined;
+      if (!rule) {
+        if (maybeCandidate) return this.candidate(path, verb, has, get, anyName);
+        if (trace)
+          trace(
+            `inbound ${verb} ${tracePath(path)}: ignored, ${
+              this.cfg.webhookDiscovery
+                ? `no known sender and no declared route (discovery looks only at POST and PUT)`
+                : 'no known sender and no declared route (webhookDiscovery: false)'
+            }`,
+          );
+        return undefined;
+      }
       provider = rule.provider;
       timestamp = rule.timestamp;
+      if (trace) why = `known sender headers ${rule.headers.join(', ')}`;
     }
     const ts = Date.now();
     const sentAt = timestamp
       ? parseWebhookTimestamp(timestamp, get(timestamp.header), ts)
       : undefined;
+    const endpoint = this.templater.template(INBOUND_HOST, path, this.compiledRoutes, this.policy);
+    if (trace)
+      trace(
+        `inbound ${verb} ${tracePath(path)}: recorded as a delivery from ${provider} to ${endpoint} (${why}${
+          timestamp
+            ? `; send time from ${timestamp.header}${sentAt === undefined ? ', unreadable' : ''}`
+            : ''
+        })`,
+      );
     return {
       ts,
       t0: performance.now(),
       provider,
       method: verb,
-      endpoint: this.templater.template(INBOUND_HOST, path, this.compiledRoutes, this.policy),
+      endpoint,
       sentAt,
     } satisfies InboundPending;
   }
 
   /**
-   * Webhook discovery: a POST/PUT whose route or headers look like a delivery
+   * Webhook discovery: a POST/PUT whose route, headers or host look like a delivery
    * from a sender we can't identify (docs/privacy.md "Webhook discovery").
    */
   private candidate(
     path: string,
     verb: string,
     has: (name: string) => boolean,
+    get: RequestHeaders,
     anyName: HeaderNames | undefined,
   ): InboundPending | undefined {
-    // most POSTs have no route word: then only the signature header names are checked
-    const segs = MAYBE_ROUTE_WORD.test(path)
-      ? path.split('/').filter((s) => s !== '')
-      : NO_SEGMENTS;
-    const c = detectWebhookCandidate(verb, segs, has, anyName ?? (() => false));
-    if (!c) return undefined;
+    const trace = this.trace;
+    const d = classifyWebhookCandidate({
+      method: verb,
+      path,
+      has,
+      anyName: anyName ?? (() => false),
+      get,
+    });
+    const c = d.candidate;
+    if (!c) {
+      if (trace) trace(`inbound ${verb} ${tracePath(path)}: ignored, ${d.ignored}`);
+      return undefined;
+    }
     let endpoint = this.candidateTemplater.template('@candidate', path, undefined, this.policy);
-    if (endpoint === OVERFLOW_TEMPLATE) return undefined;
+    if (endpoint === OVERFLOW_TEMPLATE) {
+      if (trace)
+        trace(
+          `inbound ${verb} ${tracePath(path)}: ignored, over ${CANDIDATE_ROUTES_MAX} candidate routes in this process`,
+        );
+      return undefined;
+    }
     let provider = 'unknown';
-    if (c.name !== undefined && c.nameIndex !== undefined) {
-      // the suggested name stays literal in the route (a plain word, never an ID), within a cap
+    if (c.name !== undefined) {
+      // a suggested name within the cap; from the path it stays literal in the route
+      // (a plain word, never an ID)
       const known = this.names.has(c.name);
       if (known || this.names.size < MAX_CANDIDATE_NAMES) {
-        const t = endpoint.split('/');
-        if (t.length === segs.length + 1) {
+        if (c.nameIndex === undefined) {
           if (!known) this.names.add(c.name);
-          t[c.nameIndex + 1] = c.name;
-          endpoint = t.join('/');
           provider = c.name;
+        } else {
+          const t = endpoint.split('/');
+          const segs = path.split('/').filter((x) => x !== '');
+          if (t.length === segs.length + 1) {
+            if (!known) this.names.add(c.name);
+            t[c.nameIndex + 1] = c.name;
+            endpoint = t.join('/');
+            provider = c.name;
+          }
         }
       }
     }
-    if (this.ignored.has(endpoint)) return undefined;
+    if (this.ignored.has(endpoint)) {
+      if (trace)
+        trace(
+          `inbound ${verb} ${tracePath(path)}: ignored, ${endpoint} was ignored in the dashboard`,
+        );
+      return undefined;
+    }
+    if (trace)
+      trace(
+        `inbound ${verb} ${tracePath(path)}: candidate ${endpoint}, suggested name ${provider} (${c.signals.join(', ')}${
+          c.nameFrom && provider !== 'unknown' ? `; name from ${c.nameFrom}` : ''
+        })`,
+      );
     return {
       ts: Date.now(),
       t0: performance.now(),

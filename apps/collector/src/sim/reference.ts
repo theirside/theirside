@@ -266,6 +266,15 @@ export const REFERENCE: RefSection[] = [
         key: 'normal',
         summary: 'Normal rejection, handling and lag levels (see Normal levels, webhooks).',
       },
+      {
+        key: 'discovery',
+        summary:
+          'A sender the SDK does not know yet: its deliveries go through the SDK’s webhook discovery rules with this request shape and become a candidate route; the source is monitored (as `provider`) only from `confirm`, as when an admin confirms the route in the dashboard.',
+        detail:
+          '`method` (POST or PUT), `headers` (as the sender sends them: CloudEvents `ce-*`, signature headers, `host`), `confirm` (a time; absent: it stays a candidate). The candidate route is the `route` as written.',
+        example:
+          "discovery:\n  headers: { ce-specversion: '1.0', ce-source: com.orbitpay, x-hmac-signature-sha-256: x }\n  confirm: day 1 10:00",
+      },
     ],
   },
   {
@@ -460,7 +469,15 @@ export const REFERENCE: RefSection[] = [
         example:
           'expect:\n  - irregular: { target: NotifyCo webhooks /webhooks/notifyco, by: day 6 }',
       },
-      { key: 'by', summary: 'irregular: the latest time.' },
+      { key: 'by', summary: 'irregular / discovered: the latest time.' },
+      {
+        key: 'discovered',
+        summary:
+          'Webhook source `target` (one with `discovery`) must be a candidate route by `by`, with the suggested `name` if given.',
+        example:
+          'expect:\n  - discovered: { target: OrbitPay webhooks /v1/orbitpay, by: day 0 01:00, name: orbitpay }',
+      },
+      { key: 'name', summary: 'discovered: the name the SDK should suggest.' },
     ],
   },
   {

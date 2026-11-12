@@ -1,3 +1,5 @@
+import { isVersionSegment } from './templating.js';
+
 /**
  * Inbound webhook detection (docs/privacy.md "Inbound webhooks", architecture §3.1).
  *
@@ -288,18 +290,62 @@ export const CANDIDATE_API_CLIENT_HEADERS: readonly string[] = ['authorization',
 /** At most this many distinct suggested names per process; after that, `unknown`. */
 export const MAX_CANDIDATE_NAMES = 16;
 
-const GENERIC_SIGNATURE = /^(?:x-(?:[a-z0-9-]+-)?signature(?:-256)?|webhook-signature)$/;
+/**
+ * A signature header NAME (never its value): any name containing `signature` or
+ * `hmac` (`x-signature`, `x-hub-signature-256`, `x-hmac-signature-sha-256`,
+ * `x-foo-hmac`, `webhook-signature`), at most 64 characters.
+ */
+export function isSignatureHeaderName(name: string): boolean {
+  return name.length <= 64 && (name.includes('signature') || name.includes('hmac'));
+}
+
+/** @deprecated Kept for callers of the older, narrower rule; same as isSignatureHeaderName. */
+export const isGenericSignatureHeader = isSignatureHeaderName;
 
 /**
- * A generic signature header name: `x-signature`, `x-webhook-signature`,
- * `x-hub-signature(-256)`, `x-<anything>-signature`, `webhook-signature`.
+ * CloudEvents (cloudevents.io), the vendor-neutral event envelope: binary mode puts
+ * the attributes in `ce-*` headers (`ce-specversion` plus `ce-source` or `ce-type`
+ * mark one), structured mode sends `content-type: application/cloudevents+json`
+ * (or the batch type) with the attributes in the body, which is never read.
+ * Of the `ce-*` headers only two VALUES are read: `ce-source` (a suggested name)
+ * and `ce-time` (the send time, for delivery lag).
  */
-export function isGenericSignatureHeader(name: string): boolean {
-  return (
-    name.length <= 64 &&
-    (name.endsWith('signature') || name.endsWith('signature-256')) &&
-    GENERIC_SIGNATURE.test(name)
-  );
+export const CLOUDEVENTS_TIMESTAMP: WebhookTimestamp = { header: 'ce-time', format: 'iso' };
+
+/** Header values webhook discovery may read, and why (docs/privacy.md "Webhook discovery"). */
+export const CANDIDATE_VALUE_HEADERS: readonly string[] = [
+  // only its first label is compared with the webhook words
+  'host',
+  // only compared with the CloudEvents structured-mode types
+  'content-type',
+  // a suggested name: the domain part only
+  'ce-source',
+  // the send time (deliveries from confirmed or declared routes)
+  'ce-time',
+];
+
+const STRUCTURED_CE = /^application\/cloudevents(?:-batch)?\+json\b/i;
+
+/** Binary- or structured-mode CloudEvents; `get` is asked only for `content-type`. */
+export function isCloudEvent(
+  has: (name: string) => boolean,
+  get?: (name: string) => unknown,
+): boolean {
+  if (has('ce-specversion') && (has('ce-source') || has('ce-type'))) return true;
+  const ct = get?.('content-type');
+  return typeof ct === 'string' && STRUCTURED_CE.test(ct.trim());
+}
+
+/**
+ * A first label containing a webhook word, followed by a domain (`webhook.example.com`,
+ * `hooks-eu.example.com:8443`); a bare name (`localhost`) has no domain behind it.
+ */
+const WEBHOOK_HOST = /^[^.:]*(?:hook|callback)[^.:]*\./i;
+
+/** The Host's first label names webhooks (only that label is looked at; the port is ignored). */
+export function isWebhookHost(host: unknown): boolean {
+  if (Array.isArray(host)) host = host[0];
+  return typeof host === 'string' && host.length <= 255 && WEBHOOK_HOST.test(host);
 }
 
 /** A plain lower-case name (letters and inner hyphens, 2–32): never an ID, token or number. */
@@ -334,68 +380,201 @@ const NOT_A_SENDER = new Set([
   'notification',
   'event',
   'v',
+  // host and URL parts a CloudEvents source may start with
+  'www',
+  'localhost',
 ]);
-
-export interface WebhookCandidate {
-  /** What made it a candidate. */
-  reason: 'route' | 'signature';
-  /** Index (in the path's segments) of the segment suggested as the sender's name. */
-  nameIndex?: number;
-  /** That segment, lower-cased. */
-  name?: string;
-}
 
 const isSenderName = (seg: string | undefined): seg is string =>
   seg !== undefined && NAME_LIKE.test(seg) && !NOT_A_SENDER.has(seg);
 
+/** Second-level labels under a country code that are public suffixes (`co.uk`, `com.au`). */
+const CC_SECOND_LEVEL = new Set(['co', 'com', 'org', 'net', 'ac', 'gov', 'edu', 'ne', 'or', 'go']);
+
 /**
- * Is this incoming request a webhook candidate? Only for POST/PUT; `segs` are
- * the raw path's segments, `has` answers for one lower-case header name and
- * `anyName` tests every header *name* (never a value). Returns undefined for
- * everything else, including any request with browser headers.
+ * The registrable label of a host's labels given TLD first (`com.example.payments`
+ * reversed, or a hostname's labels reversed): the label after the public suffix,
+ * approximated without the public suffix list (the SDK doesn't carry it): one
+ * label, or two for `co.uk`-style country suffixes.
+ */
+function registrableLabel(tldFirst: readonly string[]): string | undefined {
+  if (tldFirst.length < 2) return undefined;
+  const two = tldFirst[0]!.length === 2 && CC_SECOND_LEVEL.has(tldFirst[1]!);
+  return two ? tldFirst[2] : tldFirst[1];
+}
+
+const DNS_LABELS = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+/**
+ * A sender name from a CloudEvents `ce-source` value: a reverse-DNS id
+ * (`com.example.payments` → `example`) or a URL (`https://api.example.com/x/123`
+ * → `example`); anything after the domain (paths, IDs) is ignored, and a source
+ * without a domain (`/sensors/12`, a URN) gives none. Only a plain name is returned.
+ */
+export function nameFromCloudEventsSource(source: unknown): string | undefined {
+  if (Array.isArray(source)) source = source[0];
+  if (typeof source !== 'string' || source === '' || source.length > 512) return undefined;
+  const v = source.trim().toLowerCase();
+  let host: string | undefined;
+  let reverse = false;
+  const url = /^(?:[a-z][a-z0-9+.-]*:)?\/\/([^/?#]+)/.exec(v);
+  if (url) host = url[1]!.replace(/^[^@]*@/, '').replace(/:\d+$/, '');
+  else {
+    // reverse-DNS, possibly followed by a path or an id (`com.example/orders/1`, `com.example:1`)
+    const id = /^([a-z0-9.-]+)/.exec(v)?.[1];
+    if (id && id.includes('.')) {
+      host = id;
+      reverse = true;
+    }
+  }
+  if (!host || !DNS_LABELS.test(host) || /^\d+(?:\.\d+)*$/.test(host)) return undefined;
+  const labels = host.split('.');
+  const name = registrableLabel(reverse ? labels : [...labels].reverse());
+  return isSenderName(name) ? name : undefined;
+}
+
+/** What made a request a webhook candidate (several may hold at once). */
+export type CandidateSignal =
+  'route word' | 'weak route word' | 'signature header' | 'cloudevents' | 'webhook host';
+
+export interface WebhookCandidate {
+  /** The strongest signal (`route`: a route word; kept for older callers). */
+  reason: 'route' | 'signature' | 'cloudevents' | 'host';
+  /** Every signal that held. */
+  signals: CandidateSignal[];
+  /** Index (in the path's segments) of the segment suggested as the sender's name, if it comes from the path. */
+  nameIndex?: number;
+  /** The suggested sender name, lower-cased. */
+  name?: string;
+  /** Where the name came from. */
+  nameFrom?: 'ce-source' | 'route' | 'path';
+}
+
+/** Why a request is not a candidate (for THEIRSIDE_DEBUG=inbound; names only, never values). */
+export type CandidateDecision =
+  { candidate: WebhookCandidate; ignored?: undefined } | { candidate?: undefined; ignored: string };
+
+/** The common answer, shared (no allocation for an ordinary POST). */
+const NOT_A_CANDIDATE: CandidateDecision = Object.freeze({ ignored: 'no webhook signal' });
+
+/** Cheap pre-check before splitting a path: could it hold a route word at all? */
+const MAYBE_ROUTE_WORD = /hook|callback|notif|event/i;
+
+export interface CandidateRequest {
+  method: string;
+  /** The raw path (no query string), or its segments. */
+  path: string | readonly string[];
+  /** Is this (lower-case) header present? */
+  has(name: string): boolean;
+  /** Tests every (lower-case) header NAME. */
+  anyName(test: (name: string) => boolean): boolean;
+  /** One header's value; asked only for `CANDIDATE_VALUE_HEADERS`. */
+  get?(name: string): unknown;
+}
+
+/**
+ * Webhook discovery (docs/privacy.md "Webhook discovery"): is this incoming
+ * request a delivery from a sender the SDK can't identify? Only POST/PUT, never
+ * with a browser header. Signals: a route word (`/webhooks/…`; the weak words
+ * `events`, `notify`, `notifications` only at the end and without API
+ * credentials), a signature header name, CloudEvents headers, or a webhook host.
+ * The same function decides for every entry path (a Node server, each kind of
+ * Lambda HTTP event), from the same normalised view of the request.
+ */
+export function classifyWebhookCandidate(req: CandidateRequest): CandidateDecision {
+  const { method, has, anyName } = req;
+  if (method !== 'POST' && method !== 'PUT')
+    return { ignored: `${method}: discovery looks only at POST and PUT` };
+  let segsCache: readonly string[] | undefined;
+  const segs = () =>
+    (segsCache ??=
+      typeof req.path === 'string' ? req.path.split('/').filter((x) => x !== '') : req.path);
+  // route words (no split for ordinary paths: words are 4 to 13 characters)
+  let at = -1;
+  let weak = false;
+  if (typeof req.path !== 'string' || MAYBE_ROUTE_WORD.test(req.path)) {
+    const ss = segs();
+    const last = ss.length - 1;
+    for (let i = 0; i <= last; i++) {
+      const raw = ss[i]!;
+      if (raw.length < 4 || raw.length > 13) continue;
+      const s = raw.toLowerCase();
+      if (CANDIDATE_ROUTE_WORDS.includes(s)) {
+        at = i;
+        weak = false;
+        break;
+      }
+      if (
+        at < 0 &&
+        CANDIDATE_WEAK_ROUTE_WORDS.includes(s) &&
+        (i === last || (i === last - 1 && isSenderName(ss[last]!.toLowerCase())))
+      ) {
+        at = i;
+        weak = true;
+      }
+    }
+  }
+  // a weak word with API credentials is an API call to an `events`-style resource
+  const cred = at >= 0 && weak ? CANDIDATE_API_CLIENT_HEADERS.find(has) : undefined;
+  const routeCounts = at >= 0 && !cred;
+  const signature = anyName(isSignatureHeaderName);
+  const ce = isCloudEvent(has, req.get);
+  const host = req.get !== undefined && isWebhookHost(req.get('host'));
+  if (!routeCounts && !signature && !ce && !host)
+    return cred
+      ? { ignored: `weak route word with API credentials (${cred} header)` }
+      : NOT_A_CANDIDATE;
+  for (const h of CANDIDATE_CLIENT_HEADERS)
+    if (has(h)) return { ignored: `browser or front-end request (${h} header)` };
+  const signals: CandidateSignal[] = [];
+  if (routeCounts) signals.push(weak ? 'weak route word' : 'route word');
+  if (signature) signals.push('signature header');
+  if (ce) signals.push('cloudevents');
+  if (host) signals.push('webhook host');
+
+  const reason: WebhookCandidate['reason'] = routeCounts
+    ? 'route'
+    : signature
+      ? 'signature'
+      : ce
+        ? 'cloudevents'
+        : 'host';
+  const c: WebhookCandidate = { reason, signals };
+
+  // the sender's name: CloudEvents source, then the route word's neighbour, then the
+  // segment after a version segment
+  const fromSource = ce ? nameFromCloudEventsSource(req.get?.('ce-source')) : undefined;
+  if (fromSource) return { candidate: { ...c, name: fromSource, nameFrom: 'ce-source' } };
+  const ss = segs();
+  const last = ss.length - 1;
+  if (routeCounts) {
+    const lastSeg = ss[last]!.toLowerCase();
+    if (at < last && isSenderName(lastSeg))
+      return { candidate: { ...c, nameIndex: last, name: lastSeg, nameFrom: 'route' } };
+    const before = at > 0 ? ss[at - 1]!.toLowerCase() : undefined;
+    if (at === last && isSenderName(before))
+      return { candidate: { ...c, nameIndex: at - 1, name: before, nameFrom: 'route' } };
+  }
+  if (last >= 1) {
+    const lastSeg = ss[last]!.toLowerCase();
+    const version = ss.findIndex((x, i) => i < last && isVersionSegment(x));
+    if (version >= 0 && isSenderName(lastSeg))
+      return { candidate: { ...c, nameIndex: last, name: lastSeg, nameFrom: 'path' } };
+  }
+  return { candidate: c };
+}
+
+/**
+ * Is this incoming request a webhook candidate? (`classifyWebhookCandidate`
+ * without the reason when it isn't.) `get` reads only `CANDIDATE_VALUE_HEADERS`.
  */
 export function detectWebhookCandidate(
   method: string,
-  segs: readonly string[],
+  path: string | readonly string[],
   has: (name: string) => boolean,
   anyName: (test: (name: string) => boolean) => boolean,
+  get?: (name: string) => unknown,
 ): WebhookCandidate | undefined {
-  if (method !== 'POST' && method !== 'PUT') return undefined;
-  const last = segs.length - 1;
-  // route words first: no allocation for ordinary paths (words are 4 to 13 characters)
-  let at = -1;
-  let weak = false;
-  for (let i = 0; i <= last; i++) {
-    const raw = segs[i]!;
-    if (raw.length < 4 || raw.length > 13) continue;
-    const s = raw.toLowerCase();
-    if (CANDIDATE_ROUTE_WORDS.includes(s)) {
-      at = i;
-      weak = false;
-      break;
-    }
-    if (
-      at < 0 &&
-      CANDIDATE_WEAK_ROUTE_WORDS.includes(s) &&
-      (i === last || (i === last - 1 && isSenderName(segs[last]!.toLowerCase())))
-    ) {
-      at = i;
-      weak = true;
-    }
-  }
-  if (at < 0 && !anyName(isGenericSignatureHeader)) return undefined;
-  for (const h of CANDIDATE_CLIENT_HEADERS) if (has(h)) return undefined;
-  if (at >= 0 && weak && CANDIDATE_API_CLIENT_HEADERS.some(has)) {
-    // an API call to an `events`-style resource; only a signature header still makes it one
-    return anyName(isGenericSignatureHeader) ? { reason: 'signature' } : undefined;
-  }
-  if (at < 0) return { reason: 'signature' };
-  // the sender's name: the path's last segment after the word, or the one before a final word
-  const lastSeg = segs[last]!.toLowerCase();
-  if (at < last && isSenderName(lastSeg))
-    return { reason: 'route', nameIndex: last, name: lastSeg };
-  const before = at > 0 ? segs[at - 1]!.toLowerCase() : undefined;
-  if (at === last && isSenderName(before))
-    return { reason: 'route', nameIndex: at - 1, name: before };
-  return { reason: 'route' };
+  return classifyWebhookCandidate({ method, path, has, anyName, ...(get ? { get } : {}) })
+    .candidate;
 }

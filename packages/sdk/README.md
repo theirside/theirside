@@ -156,7 +156,24 @@ init({
 });
 ```
 
-**Senders the SDK doesn't know:** a POST/PUT to a route like `/webhooks/orbitpay`, `/hooks/…` or `/callbacks/…` (also a final `/events`, `/notify` or `/notifications` when there's no `Authorization` header), or one with a generic signature header (`x-signature`, `x-webhook-signature`, `x-*-signature`), is reported as a **candidate**: once a minute per route, with a delivery count and a name suggested from the path (`orbitpay`). It shows in the dashboard under Settings → Providers → Discovered webhook routes. Nothing alerts on it until an admin confirms it with a name; from then on the SDK records it like a declared route. Ignored routes are no longer reported. Browser requests (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off.
+**Senders the SDK doesn't know:** a POST/PUT that looks like a delivery is reported as a **candidate**: once a minute per route, with a delivery count and a suggested name. It looks like one when it has any of:
+
+- a route word: `/webhooks/…`, `/hooks/…`, `/callbacks/…` (also a final `/events`, `/notify` or `/notifications` when there's no `Authorization` or `X-Api-Key` header);
+- a header whose name contains `signature` or `hmac` (`x-signature-256`, `x-hmac-signature-sha-256`, `x-foo-hmac`);
+- CloudEvents: `ce-specversion` with `ce-source` or `ce-type`, or `content-type: application/cloudevents+json`;
+- a `Host` whose first label contains `webhook`, `hook` or `callback` (`webhook.example.com`).
+
+The suggested name comes from `ce-source` (`com.example` or `https://api.example.com/…` → `example`), else the segment next to the route word (`/webhooks/orbitpay` → `orbitpay`), else the segment after a version (`/v1/example` → `example`), else `unknown`. It shows in the dashboard under Settings → Providers → Discovered webhook routes. Nothing alerts on it until an admin confirms it with a name; from then on the SDK records it like a declared route. Ignored routes are no longer reported. Browser requests (cookies, `Origin`) are never candidates. `webhookDiscovery: false` turns this off. A delivery from a confirmed or declared route that carries CloudEvents headers gets its send time from `ce-time` (delivery lag). The rules are the same on a Node server and on AWS Lambda (`wrap()`; API Gateway REST and HTTP APIs, ALB, function URLs).
+
+**Why was (or wasn't) a request picked up?** Start the app with `THEIRSIDE_DEBUG=inbound`: the SDK logs one line per incoming request, on every entry path including `wrap()`, for example
+
+```
+[theirside] inbound POST /v1/orbitpay: candidate /v1/:id, suggested name orbitpay (signature header, cloudevents, webhook host; name from ce-source)
+[theirside] inbound POST /v1/orders: ignored, no webhook signal
+[theirside] inbound POST /v1/cart: ignored, browser or front-end request (cookie header)
+```
+
+Lines name rules and header names only, with IDs in the path as `:id`; never a header value or a body.
 
 **Not covered yet:** other serverless runtimes (Google Cloud Functions, Azure Functions, Vercel, Netlify) and the fetch-only build (Cloudflare Workers, Deno, Bun) don't record incoming requests. Outgoing calls are recorded there as usual.
 
@@ -183,7 +200,7 @@ init({
 | `handleProcessExit` | `true` (`false` in serverless mode)                          | Flush on `beforeExit` and `SIGTERM` (the default `SIGTERM` exit is preserved).                                                                                                                                           |
 | `serverless`        | detected                                                    | Short-lived or frozen processes: no exit hooks, no heartbeat, no keep-alive sockets; send with `flush()`/`wrap()`. Detected from AWS Lambda, Google Cloud Functions, Azure Functions, Vercel, Netlify, Deno Deploy and Cloudflare Workers environment variables. |
 | `webhooks`          | `true`                                                      | Inbound webhook monitoring (Node servers, AWS Lambda through `wrap()`). `true`: known senders detected by their signature headers. A list of `{ path, provider }` declares routes (senders that sign in the body, like Adyen, or to name Svix customers); declared routes win. `false`: off, no subscription. |
-| `webhookDiscovery`  | `true`                                                      | Report POST/PUT requests that look like webhooks from senders the SDK can't identify (routes like `/webhooks/orbitpay`, a generic `x-*-signature` header) as candidates to confirm or ignore in the dashboard. Never alerted on until confirmed. `false`: off. |
+| `webhookDiscovery`  | `true`                                                      | Report POST/PUT requests that look like webhooks from senders the SDK can't identify (routes like `/webhooks/orbitpay`, a signature or HMAC header, CloudEvents, a webhook host) as candidates to confirm or ignore in the dashboard. Never alerted on until confirmed. `false`: off. |
 | `inbound`           | `false`                                                     | Record webhook deliveries without waiting for the collector's remote config to confirm it stores them. Set it on AWS Lambda. A collector older than 0.4.0 rejects them (404) and the SDK stops recording deliveries. |
 | `debug`             | `false`                                                     | Log SDK problems (bad config, flush failures, template overflow) with `console.warn`.                                                                                                                                    |
 | `enabled`           | `true`                                                      | `false` makes `init` a no-op.                                                                                                                                                                                            |

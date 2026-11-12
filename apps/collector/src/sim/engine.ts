@@ -8,10 +8,13 @@
  * engine.
  */
 import type pg from 'pg';
+import { classifyWebhookCandidate, type CandidateDecision } from '@theirside/shared';
+import { MAX_PENDING_CANDIDATES } from '../modules/ingest/route.js';
 import type { AlertPayload } from '../modules/alerts/channels.js';
 import type { Scheduler } from '../modules/scheduler/scheduler.js';
 import type {
   AnyIncident,
+  CandidateDelta,
   InboundRollupRow,
   RollupDelta,
   Storage,
@@ -31,10 +34,26 @@ import {
   parseTime,
   sourcesOf,
   validateScenario,
+  type InboundSource,
   type ResolvedFault,
   type Scenario,
   type Source,
 } from './scenario.js';
+
+type WebhookCandidateDecision = CandidateDecision;
+
+/** The SDK's discovery decision for a source's request shape (the same shared rules). */
+function discoveryDecision(src: InboundSource): CandidateDecision {
+  const d = src.discovery!;
+  const headers = new Map(Object.entries(d.headers).map(([k, v]) => [k.toLowerCase(), v]));
+  return classifyWebhookCandidate({
+    method: d.method,
+    path: src.endpoint,
+    has: (n) => headers.has(n),
+    anyName: (test) => [...headers.keys()].some(test),
+    get: (n) => headers.get(n),
+  });
+}
 
 /** Ticks run this long after each simulated minute, as the real scheduler aligns them. */
 const TICK_OFFSET_MS = 5000;
@@ -44,7 +63,7 @@ export const SIM_SERVICE = 'sim-app';
 export interface TimelineEvent {
   /** Simulated time, epoch ms. */
   at: number;
-  type: 'fault_start' | 'fault_end' | 'opened' | 'resolved' | 'kind' | 'alert';
+  type: 'fault_start' | 'fault_end' | 'opened' | 'resolved' | 'kind' | 'alert' | 'discovery';
   text: string;
   incidentId?: string;
   kind?: string;
@@ -91,6 +110,8 @@ interface Gen {
   outbound?: OutboundGenerator;
   inbound?: InboundGenerator;
   faults: ResolvedFault[];
+  /** Webhook discovery: the SDK's decision for this source, and whether it is confirmed yet. */
+  discovery?: { candidate: WebhookCandidateDecision; seen: boolean; confirmed: boolean };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -223,6 +244,9 @@ export class SimEngine {
         ? { outbound: new OutboundGenerator(source, s) }
         : { inbound: new InboundGenerator(source, s) }),
       faults: this.faults.filter((f) => f.source.id === source.id),
+      ...(source.kind === 'inbound' && source.discovery
+        ? { discovery: { candidate: discoveryDecision(source), seen: false, confirmed: false } }
+        : {}),
     };
   }
 
@@ -257,7 +281,37 @@ export class SimEngine {
     const env = this.scenario!.environment;
     const out: RollupDelta[] = [];
     const inb: InboundRollupRow[] = [];
+    const cand: CandidateDelta[] = [];
     for (const g of this.gens) {
+      // a source the SDK doesn't know yet: no history, a candidate until confirmed
+      if (g.discovery && (history || !g.discovery.confirmed)) {
+        if (history) continue;
+        const n = g.arrivals.count(m);
+        g.inbound!.row(m, n, activeFaults(g.faults, m)); // keeps the generator's sequence
+        const c = g.discovery.candidate.candidate;
+        if (n > 0 && c) {
+          cand.push({
+            endpoint: g.source.endpoint,
+            method: (g.source as InboundSource).discovery!.method,
+            suggestedName: c.name ?? null,
+            day: new Date(m).toISOString().slice(0, 10),
+            deliveries: n,
+            lastAt: new Date(m + 30_000),
+            service: SIM_SERVICE,
+          });
+          if (!g.discovery.seen) {
+            g.discovery.seen = true;
+            this.push({
+              at: m,
+              type: 'discovery',
+              text: `webhook candidate ${g.source.endpoint} discovered, suggested name ${c.name ?? 'unknown'} (${c.signals.join(', ')})`,
+              provider: g.source.provider,
+              direction: 'inbound',
+            });
+          }
+        }
+        continue;
+      }
       const n = history ? g.history.count(m) : g.arrivals.count(m);
       const faults = history ? [] : activeFaults(g.faults, m);
       if (g.outbound) {
@@ -268,12 +322,52 @@ export class SimEngine {
         if (r) inb.push({ ...r, environment: env });
       }
     }
-    return { out, inb };
+    return { out, inb, cand };
   }
 
-  private async write(rows: { out: RollupDelta[]; inb: InboundRollupRow[] }, at: Date) {
+  /** Webhook discovery: confirm due candidate routes, as an admin does in the dashboard. */
+  private async confirmDue(m: number): Promise<void> {
+    for (const g of this.gens) {
+      const d = g.discovery;
+      const at = (g.source as InboundSource).discovery?.confirm;
+      if (!d || d.confirmed || at === undefined || m < parseTime(at, this.start)) continue;
+      d.confirmed = true;
+      const ok = await this.deps.storage.inbound.decideCandidate(this.tenant!, g.source.endpoint, {
+        status: 'confirmed',
+        provider: g.source.provider,
+        by: null,
+        at: new Date(m),
+      });
+      if (ok)
+        await this.deps.storage.config.ensureProviders(
+          this.tenant!,
+          [g.source.provider],
+          new Map(),
+          new Date(m),
+        );
+      else d.confirmed = false;
+      this.push({
+        at: m,
+        type: 'discovery',
+        text: ok
+          ? `webhook route ${g.source.endpoint} confirmed as ${g.source.provider}: monitored from now on`
+          : `could not confirm ${g.source.endpoint}: it was never discovered`,
+        provider: g.source.provider,
+        direction: 'inbound',
+      });
+      // a route that was never discovered stays unmonitored (no retry)
+      if (!ok) g.discovery = { ...d, confirmed: false, candidate: { ignored: 'never discovered' } };
+    }
+  }
+
+  private async write(
+    rows: { out: RollupDelta[]; inb: InboundRollupRow[]; cand?: CandidateDelta[] },
+    at: Date,
+  ) {
     const tenant = this.tenant!;
     const storage = this.deps.storage;
+    if (rows.cand?.length)
+      await storage.inbound.recordCandidates(tenant, rows.cand, MAX_PENDING_CANDIDATES);
     if (rows.out.length === 0 && rows.inb.length === 0) return;
     await storage.transaction(async (tx) => {
       if (rows.out.length) {
@@ -366,6 +460,7 @@ export class SimEngine {
       }
     }
     const t0 = performance.now();
+    await this.confirmDue(m);
     await this.write(this.rowsFor(m, false), new Date(m));
     const tickAt = m + MIN + TICK_OFFSET_MS;
     this.deps.clock.set(tickAt);
@@ -688,6 +783,29 @@ export class SimEngine {
             : now >= to
               ? { label, status: 'pass', detail: 'none' }
               : { label, status: 'pending', detail: now < from ? 'not started' : 'none so far' },
+        );
+      } else if ('discovered' in e) {
+        const x = e.discovered;
+        const by = parseTime(x.by, this.start);
+        const src = findSource(s, x.target)!;
+        const label = `${src.id} discovered as a webhook candidate${x.name ? ` named ${x.name}` : ''} by ${formatTime(by, this.start)}`;
+        const c = (
+          await this.deps.storage.inbound.listCandidates(this.tenant!, new Date(now))
+        ).find((r) => r.endpoint === src.endpoint);
+        const inTime = c && c.firstSeenAt.getTime() <= by + MIN;
+        const named = !x.name || c?.suggestedName === x.name;
+        out.push(
+          c && inTime && named
+            ? {
+                label,
+                status: 'pass',
+                detail: `first seen ${formatTime(c.firstSeenAt.getTime(), this.start)}, suggested name ${c.suggestedName ?? 'unknown'}, ${c.status}`,
+              }
+            : c && !named
+              ? { label, status: 'fail', detail: `suggested name ${c.suggestedName ?? 'unknown'}` }
+              : now >= by + MIN
+                ? { label, status: 'fail', detail: c ? 'discovered too late' : 'not discovered' }
+                : { label, status: 'pending', detail: 'waiting' },
         );
       } else {
         const by = parseTime(e.irregular.by, this.start);

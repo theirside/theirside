@@ -47,6 +47,8 @@ describe('which requests are candidates', () => {
     ['POST', '/receive', { 'x-hub-signature-256': 'v' }, null],
     ['POST', '/receive', { 'x-acme-signature': 'v' }, null],
     ['POST', '/receive', { 'webhook-signature': 'v' }, null],
+    // any header name with "signature" or "hmac" in it
+    ['POST', '/ingest', { 'x-signature-version': 'v' }, null],
     // basic auth on a strong route is common for webhooks
     ['POST', '/webhooks/acme', { authorization: 'Basic x' }, 'acme'],
   ] as const)('%s %s %j: candidate, name %s', (method, path, headers, name) => {
@@ -79,7 +81,6 @@ describe('which requests are candidates', () => {
     ['POST', '/hooks/save', { 'sec-fetch-mode': 'cors' }],
     ['POST', '/ingest', { 'x-signature': 'v', cookie: 'a=b' }],
     // headers that only look alike
-    ['POST', '/ingest', { 'x-signature-version': 'v' }],
     ['POST', '/ingest', { 'x-amz-content-sha256': 'v' }],
   ] as const)('%s %s %j: not a candidate', (method, path, headers) => {
     expect(detect(method, path, headers)).toBeUndefined();

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   WEBHOOK_HEADER_ALLOWLIST,
+  CANDIDATE_VALUE_HEADERS,
+  classifyWebhookCandidate,
+  isCloudEvent,
+  isSignatureHeaderName,
+  isWebhookHost,
+  nameFromCloudEventsSource,
   WEBHOOK_RULES,
   detectWebhook,
   parseWebhookTimestamp,
@@ -122,5 +128,101 @@ describe('parseWebhookTimestamp', () => {
   it('never reads past 512 characters of a header', () => {
     const long = 'v1=' + 'a'.repeat(600) + `,t=${T}`;
     expect(parseWebhookTimestamp(stripe, long, NOW)).toBeUndefined();
+  });
+});
+
+describe('webhook discovery signals (generic, names made up)', () => {
+  it.each([
+    ['com.orbitpay', 'orbitpay'],
+    ['com.orbitpay.payments', 'orbitpay'],
+    ['io.lumenmeter.readings/v1', 'lumenmeter'],
+    ['uk.co.parcelcat', 'parcelcat'],
+    ['https://api.lumenmeter.test/sources/42', 'lumenmeter'],
+    ['https://events.parcelcat.co.uk', 'parcelcat'],
+    ['//orbitpay.test/a/b?x=1', 'orbitpay'],
+    ['https://user@hooks.orbitpay.test:8443/x', 'orbitpay'],
+    ['/sensors/tn-1234', undefined],
+    ['urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66', undefined],
+    ['https://10.0.0.7/x', undefined],
+    ['com.a1b2c3d4e5', undefined],
+    ['', undefined],
+  ])('ce-source %j → %s', (source, name) => {
+    expect(nameFromCloudEventsSource(source)).toBe(name);
+  });
+
+  it.each([
+    ['x-hmac-signature-sha-256', true],
+    ['x-signature-256', true],
+    ['x-foo-hmac', true],
+    ['webhook-signature', true],
+    ['x-signature-version', true],
+    ['authorization', false],
+    ['x-api-key', false],
+    ['content-type', false],
+  ])('signature header name %s → %s', (name, yes) => {
+    expect(isSignatureHeaderName(name)).toBe(yes);
+  });
+
+  it.each([
+    ['webhook.shop.test', true],
+    ['webhooks.shop.test', true],
+    ['hooks-eu.shop.test:8443', true],
+    ['callback.shop.test', true],
+    ['api.shop.test', false],
+    ['shop.test', false],
+    ['api.webhooks.shop.test', false],
+    ['localhost:3000', false],
+  ])('host %s → webhook host %s', (host, yes) => {
+    expect(isWebhookHost(host)).toBe(yes);
+  });
+
+  it('CloudEvents: binary mode needs specversion plus source or type; structured mode by content type', () => {
+    const has = (names: string[]) => (n: string) => names.includes(n);
+    expect(isCloudEvent(has(['ce-specversion', 'ce-source']))).toBe(true);
+    expect(isCloudEvent(has(['ce-specversion', 'ce-type']))).toBe(true);
+    expect(isCloudEvent(has(['ce-specversion']))).toBe(false);
+    expect(isCloudEvent(has(['ce-source', 'ce-type']))).toBe(false);
+    const ct = (v: string) => (n: string) => (n === 'content-type' ? v : undefined);
+    expect(isCloudEvent(has([]), ct('application/cloudevents+json; charset=utf-8'))).toBe(true);
+    expect(isCloudEvent(has([]), ct('application/cloudevents-batch+json'))).toBe(true);
+    expect(isCloudEvent(has([]), ct('application/json'))).toBe(false);
+  });
+
+  it('only the documented header values are ever asked for', () => {
+    const asked = new Set<string>();
+    classifyWebhookCandidate({
+      method: 'POST',
+      path: '/v1/orbitpay',
+      has: () => true,
+      anyName: () => true,
+      get: (n) => {
+        asked.add(n);
+        return n === 'ce-source' ? 'com.orbitpay' : 'x';
+      },
+    });
+    for (const n of asked) expect(CANDIDATE_VALUE_HEADERS).toContain(n);
+  });
+
+  it('the name comes from ce-source first, then a route word, then the segment after a version', () => {
+    const req = (path: string, headers: Record<string, string>) =>
+      classifyWebhookCandidate({
+        method: 'POST',
+        path,
+        has: (n) => n in headers,
+        anyName: (t) => Object.keys(headers).some(t),
+        get: (n) => headers[n],
+      }).candidate;
+    const ce = { 'ce-specversion': '1.0', 'ce-source': 'com.orbitpay' };
+    expect(req('/webhooks/zephyr', ce)).toMatchObject({ name: 'orbitpay', nameFrom: 'ce-source' });
+    expect(req('/webhooks/zephyr', { 'x-signature': 'v' })).toMatchObject({
+      name: 'zephyr',
+      nameFrom: 'route',
+    });
+    expect(req('/api/v1/zephyr', { 'x-signature': 'v' })).toMatchObject({
+      name: 'zephyr',
+      nameFrom: 'path',
+    });
+    expect(req('/api/zephyr', { 'x-signature': 'v' })?.name).toBeUndefined();
+    expect(req('/v1/9f3b2c1a77d0', { 'x-signature': 'v' })?.name).toBeUndefined();
   });
 });

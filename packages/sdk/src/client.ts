@@ -176,10 +176,14 @@ export class Client {
    * that is a webhook delivery. Returns what lambdaEnd needs, or undefined.
    */
   lambdaBegin(event: unknown): { p: InboundPending; kind: LambdaHttpKind } | undefined {
-    if (this.shutdownPromise || !this.recorder.inbound.active) return undefined;
+    const inbound = this.recorder.inbound;
+    if (this.shutdownPromise || (!inbound.active && !inbound.trace)) return undefined;
     return safely(this.log, 'lambda webhook', () => {
       const req = lambdaHttpRequest(event);
-      if (!req) return undefined;
+      if (!req) {
+        inbound.trace?.('inbound: ignored, the Lambda event is not an HTTP request');
+        return undefined;
+      }
       const p = this.recorder.inbound.begin(req.path, req.method, req.has, req.get, req.anyName);
       return p ? { p, kind: req.kind } : undefined;
     });

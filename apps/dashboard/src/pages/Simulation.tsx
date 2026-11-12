@@ -97,7 +97,7 @@ interface Scenario {
 }
 interface TimelineEvent {
   at: number;
-  type: 'fault_start' | 'fault_end' | 'opened' | 'resolved' | 'kind' | 'alert';
+  type: 'fault_start' | 'fault_end' | 'opened' | 'resolved' | 'kind' | 'alert' | 'discovery';
   text: string;
   incidentId?: string;
   provider?: string;
@@ -1759,6 +1759,7 @@ const TONE: Record<TimelineEvent['type'], 'warning' | 'danger' | 'healthy' | 'in
   resolved: 'healthy',
   kind: 'danger',
   alert: 'info',
+  discovery: 'info',
 };
 const LABEL: Record<TimelineEvent['type'], string> = {
   fault_start: 'fault',
@@ -1767,6 +1768,7 @@ const LABEL: Record<TimelineEvent['type'], string> = {
   resolved: 'resolved',
   kind: 'incident',
   alert: 'alert',
+  discovery: 'discovery',
 };
 
 function LiveCard({ state, start }: { state: SimState; start: number }) {
