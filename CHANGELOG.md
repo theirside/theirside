@@ -1,6 +1,15 @@
 # Changelog
 
-Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-040).
+Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
+
+## SDK 0.4.1
+
+Works with collector 0.5.0 (no collector release).
+
+- **Fix: webhook deliveries on AWS Lambda never reached the collector** when the handler flushed in its own `finally` and `wrap()` had `flushTimeoutMs: 0`. A delivery is recorded when the handler returns (its status is the handler's result), so the handler's flush ran before it existed and `wrap()` didn't flush; Lambda then froze the process. `wrap()` now sends a delivery after the handler even with `flushTimeoutMs: 0` (capped at 300 ms and the deadline).
+- **Discovered routes keep the sender's word in the path with a `ce-source` name**: `/v1/example` stays `/v1/example` instead of `/v1/:id`. Only a plain lower-case name as sent, at most 16 words per process, as for `/webhooks/<name>`.
+- **Diagnostics**: `debug: 'inbound'` in `init()` (same as `THEIRSIDE_DEBUG=inbound`), one `inbound flush:` line per flush (what was sent, to which route, the collector's status, or why not: held, timeout), and `getStats().inbound` (`support`, `held`, `sent`, `dropped`, `candidates: { seen, sent }`).
+- A batch of held deliveries that failed while the remote config said the collector stores them now joins the ordinary queue (it was lost).
 
 ## Collector 0.5.0, SDK 0.4.0
 
