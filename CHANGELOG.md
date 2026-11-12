@@ -2,6 +2,16 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
+## Unreleased
+
+**Discovered webhook routes on the Webhooks page**
+
+- A "Discovered, not monitored yet" section at the top of the Webhooks page lists the routes the SDK reported (route, service, suggested name, deliveries per day, first and last seen), with Confirm and Ignore. A confirmed route moves into the monitored list at once ("waiting for the first delivery"). Settings → Providers keeps its table.
+- Confirming links the route to an existing provider (searchable list) or creates a new one. The best match is preselected with the reason: a provider with the same domain as the suggested name ("same domain as example.com"), a catalog provider or known sender, or the same name. Creating a provider whose name already exists is refused with an offer to link. One provider then shows its outgoing endpoints, webhook routes, one alerts switch, its support contact and incidents from both directions.
+- The Providers page announces new routes ("New webhook route discovered: POST /v1/example (suggested: example)"), and alert channels get one message per new route with the hourly digest (Settings → Providers can switch it off).
+- An empty Webhooks page explains how deliveries are found and suggests `THEIRSIDE_DEBUG=inbound` / `debug: 'inbound'`.
+- Migration 023 (no table rewrite).
+
 ## SDK 0.4.1
 
 Works with collector 0.5.0 (no collector release).
