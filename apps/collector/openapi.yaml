@@ -129,6 +129,20 @@ components:
         normalP95Ms: { type: [number, 'null'] }
         learning: { type: boolean }
         inIncident: { type: boolean }
+        recovering:
+          type: boolean
+          description: 'In an open incident, but the current window is healthy (collector 0.5.0+)'
+        lastBadMinuteAt:
+          type: [string, 'null']
+          format: date-time
+          description: While recovering, the latest minute whose window was bad
+        expectedStatuses:
+          type: array
+          items: { type: integer }
+          description: 'Statuses marked expected for this endpoint from the dashboard, counted as successful (collector 0.5.0+)'
+        expectedRate:
+          type: number
+          description: 'Share of calls in the window your app marked expected in code (SDK markExpected); counted as successful'
         outcomes: { type: object, additionalProperties: { type: integer } }
         lastCallAt:
           {
@@ -204,6 +218,9 @@ components:
         deployHint:
           type: [string, 'null']
           description: A restart or deploy of the calling services just before the start, or that there was none
+        resolutionNote:
+          type: [string, 'null']
+          description: 'Why it was resolved when not by recovery, e.g. a status marked as an expected answer for the endpoint (collector 0.5.0+)'
         status: { type: string, enum: [open, resolved] }
         openedAt: { type: string, format: date-time }
         resolvedAt: { type: [string, 'null'], format: date-time }

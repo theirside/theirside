@@ -3,6 +3,12 @@ import type { Storage, Tenant } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
 import { FAILURE_GROUPS, windowStats, type FailureGroup } from '../scoring/evaluate.js';
 import { errorThreshold } from '../scoring/evaluate.js';
+import {
+  EXPECTABLE_STATUSES,
+  applyExpected,
+  expectedLookup,
+  statusKey,
+} from '../scoring/expected.js';
 import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 
 const MIN = 60_000;
@@ -23,6 +29,10 @@ export interface SeriesPoint {
   outcomeRates: Partial<Record<Outcome, number>>;
   /** Share of calls per failure group (outage, auth, not_found…), non-zero ones only. */
   statusMix: Partial<Record<FailureGroup, number>>;
+  /** Share of calls the app marked expected in code, per reason label (non-zero only). */
+  expected: Record<string, number>;
+  /** Share of calls with a status marked expected from the dashboard (`"400"`; non-zero only). */
+  marked: Record<string, number>;
   p50Ms: number | null;
   p95Ms: number | null;
 }
@@ -69,18 +79,41 @@ export async function computeSeries(
     ...(q.method ? { method: q.method } : {}),
     ...(q.environment ? { environment: q.environment } : {}),
   };
-  const rows = await storage.rollups.series(tenant, {
-    from,
-    to: new Date(end),
-    bucketMinutes: bucket,
-    ...filter,
-  });
+  const [rows, reasons, providers] = await Promise.all([
+    storage.rollups.series(tenant, { from, to: new Date(end), bucketMinutes: bucket, ...filter }),
+    storage.rollups.expectedSeries(tenant, {
+      from,
+      to: new Date(end),
+      bucketMinutes: bucket,
+      ...filter,
+    }),
+    storage.config.listProviders(tenant),
+  ]);
+  // statuses marked expected from the dashboard count as successful, as in scoring (one endpoint)
+  const marked =
+    q.endpoint && q.method
+      ? expectedLookup(providers)({
+          environment: q.environment ?? '',
+          provider: q.provider,
+          endpoint: q.endpoint,
+          method: q.method,
+        })
+      : [];
   const byT = new Map(rows.map((r) => [new Date(r.minute).getTime(), r]));
+  const reasonsAt = new Map<number, Record<string, number>>();
+  for (const x of reasons) {
+    const k = Date.parse(x.minute);
+    const m = reasonsAt.get(k) ?? {};
+    m[x.reason] = (m[x.reason] ?? 0) + x.calls;
+    reasonsAt.set(k, m);
+  }
   const points: SeriesPoint[] = [];
   for (let ts = from.getTime(); ts < end; ts += bucketMs) {
-    const r = byT.get(ts);
+    const raw = byT.get(ts);
+    const r = raw ? applyExpected(raw, marked) : undefined;
     const minutesCovered = Math.min(bucket, (end - ts) / MIN);
     const s = windowStats(r ? [r] : []);
+    const share = (n: number) => (s.calls > 0 ? n / s.calls : 0);
     const outcomeRates: Partial<Record<Outcome, number>> = {};
     if (s.calls > 0) {
       for (const o of OUTCOMES)
@@ -99,6 +132,17 @@ export async function computeSeries(
               FAILURE_GROUPS.filter((g) => s.groups[g] > 0).map((g) => [g, s.groups[g] / s.calls]),
             )
           : {},
+      expected: Object.fromEntries(
+        Object.entries(reasonsAt.get(ts) ?? {})
+          .filter(([, n]) => n > 0 && s.calls > 0)
+          .map(([reason, n]) => [reason, share(n)]),
+      ),
+      marked: Object.fromEntries(
+        EXPECTABLE_STATUSES.filter((st) => s.marked[statusKey(st)] > 0).map((st) => [
+          String(st),
+          share(s.marked[statusKey(st)]),
+        ]),
+      ),
       p50Ms: histogramQuantile(s.histogram, 0.5),
       p95Ms: histogramQuantile(s.histogram, 0.95),
     });

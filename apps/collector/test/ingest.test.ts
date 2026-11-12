@@ -257,3 +257,97 @@ describe('prepareBatch', () => {
     ]);
   });
 });
+
+describe('expected outcomes at ingest (SDK markExpected)', () => {
+  const recv = new Date('2026-11-03T10:00:30.000Z');
+  const consent = (extra: Record<string, unknown> = {}) =>
+    event({
+      ts: recv.getTime(),
+      provider: 'ConsentCo',
+      host: 'api.consentco.test',
+      method: 'GET',
+      endpoint: '/v1/consent',
+      status: 400,
+      outcome: 'http_4xx',
+      ...extra,
+    });
+
+  it('counts a tagged 4xx as successful, apart per reason; untagged 400s stay 4xx', () => {
+    const p = prepareBatch(
+      batch([
+        consent({ expected: 'consent_required' }),
+        consent({ expected: 'consent_required' }),
+        consent({ expected: 'consent_withdrawn', status: 404 }),
+        consent(), // a 400 nobody marked: a failure
+        consent({ status: 200, outcome: 'ok' }),
+      ]) as never,
+      recv,
+    );
+    const [d] = p.deltas;
+    expect(d).toMatchObject({ total: 5, ok: 4, expected: 3 });
+    expect(d!.outcomes).toMatchObject({ ok: 4, http_4xx: 1 });
+    expect(d!.statusCounts).toMatchObject({ s400: 1, s404: 0 });
+    expect(d!.expectedReasons).toEqual({ consent_required: 2, consent_withdrawn: 1 });
+    expect(p.events.map((e) => e.expected ?? null)).toEqual([
+      'consent_required',
+      'consent_required',
+      'consent_withdrawn',
+      null,
+      null,
+    ]);
+  });
+
+  it('ignores the tag on anything but a 4xx, and folds reasons past 10 into other', () => {
+    const p = prepareBatch(
+      batch([
+        consent({ expected: 'nope', status: 503, outcome: 'http_5xx' }),
+        consent({ expected: 'nope', status: null, outcome: 'timeout' }),
+        ...Array.from({ length: 12 }, (_, i) => consent({ expected: `r${i}` })),
+      ]) as never,
+      recv,
+    );
+    const [d] = p.deltas;
+    expect(d!.outcomes).toMatchObject({ http_5xx: 1, timeout: 1, ok: 12 });
+    expect(d!.expected).toBe(12);
+    expect(Object.keys(d!.expectedReasons!)).toHaveLength(11);
+    expect(d!.expectedReasons!.other).toBe(2);
+  });
+
+  it('stores the counts, the reason series and the raw reason; a bad label rejects the batch', async () => {
+    const now = t.clock.now().getTime();
+    const minute = now - (now % 60_000);
+    const res = await t.app.inject(
+      ingestRequest(
+        batch([
+          consent({ ts: minute + 1000, expected: 'consent_required' }),
+          consent({ ts: minute + 2000, expected: 'consent_required' }),
+          consent({ ts: minute + 3000 }),
+        ]),
+      ),
+    );
+    expect(res.statusCode).toBe(202);
+    const { rows } = await t.db.pool.query(
+      `SELECT total, ok, http_4xx, status_400, expected FROM rollups_1m WHERE provider = 'ConsentCo'`,
+    );
+    expect(rows).toEqual([{ total: 3, ok: 2, http_4xx: 1, status_400: 1, expected: 2 }]);
+    const series = await t.db.storage.rollups.expectedSeries(
+      { orgId: t.orgId, projectId: t.projectId },
+      {
+        from: new Date(minute - 60_000),
+        to: new Date(minute + 60_000),
+        provider: 'ConsentCo',
+        bucketMinutes: 1,
+      },
+    );
+    expect(series).toEqual([
+      { minute: new Date(minute).toISOString(), reason: 'consent_required', calls: 2 },
+    ]);
+    expect(
+      await count(`SELECT count(*) AS n FROM events WHERE expected = 'consent_required'`),
+    ).toBe(2);
+    const bad = await t.app.inject(
+      ingestRequest(batch([consent({ ts: minute, expected: 'the user said no!' })])),
+    );
+    expect(bad.statusCode).toBe(400);
+  });
+});

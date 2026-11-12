@@ -34,6 +34,8 @@ export const COUNTER_COLUMNS: readonly string[] = [
   ...OUTCOME_COLUMNS,
   'status_429',
   ...STATUS_COLUMNS.map(([, c]) => c),
+  // of ok: calls the app marked expected in code (migration 022)
+  'expected',
 ];
 
 /**
@@ -121,6 +123,7 @@ export function rowToRollup(r: Row): RollupRow {
     statusCounts: Object.fromEntries(
       STATUS_COLUMNS.map(([k, c]) => [k, num(r[c])]),
     ) as unknown as StatusCounts,
+    expected: num(r.expected),
     latencyHistogram: hist,
     latencySumMs: num(r.latency_sum_ms),
   };

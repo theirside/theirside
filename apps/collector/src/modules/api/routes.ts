@@ -23,6 +23,7 @@ import {
   WEBHOOK_THRESHOLD_LIMITS,
   type WebhookThresholdKey,
 } from '../scoring/thresholds.js';
+import { ExpectedStatusError, markExpected } from '../incidents/expected.js';
 import { registerWebhookRoutes } from './webhooks.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
 
@@ -66,6 +67,7 @@ export function incidentView(i: AnyIncident, now: Date) {
     alertsMuted: i.alertsMuted,
     windowMinutes: i.windowMinutes,
     deployHint: i.deployHint ?? null,
+    resolutionNote: i.resolutionNote ?? null,
     endpoints: i.endpoints.map((e) => ({
       method: e.method,
       endpoint: e.endpoint,
@@ -362,6 +364,51 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     // hosts, hidden/internal, aliases: ingest must see the change at once (the SDK within a minute)
     ctx.directory.invalidate(tenant);
     return updated ?? reply.code(404).send({ error: 'not found' });
+  });
+
+  // expected outcomes from the dashboard: members and admins (docs/scoring.md "Expected outcomes")
+  app.put('/v1/admin/providers/:id/expected', members, async (req, reply) => {
+    const tenant = await tenantOf(req, reply);
+    if (!tenant) return;
+    const parsed = z
+      .object({
+        method: z.string().min(1).max(16),
+        endpoint: z.string().min(1).max(512),
+        status: z.number().int().min(100).max(599),
+        expected: z.boolean(),
+      })
+      .strict()
+      .safeParse(req.body);
+    if (!parsed.success)
+      return reply
+        .code(400)
+        .send({ error: 'invalid request', detail: parsed.error.issues[0]?.message });
+    const id = (req.params as { id: string }).id;
+    const provider = (await ctx.storage.config.listProviders(tenant)).find(
+      (p) => p.id === id || p.name === id,
+    );
+    if (!provider) return reply.code(404).send({ error: 'not found' });
+    const user = await ctx.storage.auth.getUser(req.principal!.userId);
+    try {
+      return await markExpected(
+        ctx.storage,
+        ctx.alerts,
+        tenant,
+        ctx.clock.now(),
+        ctx.config.publicUrl,
+        {
+          provider,
+          method: parsed.data.method.toUpperCase(),
+          endpoint: parsed.data.endpoint,
+          status: parsed.data.status,
+          expected: parsed.data.expected,
+          by: user?.email ?? user?.name ?? null,
+        },
+      );
+    } catch (err) {
+      if (err instanceof ExpectedStatusError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
   });
 
   await registerWebhookRoutes(app, ctx, { auth, members, tenantOf });

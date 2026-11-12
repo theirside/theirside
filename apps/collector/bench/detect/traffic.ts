@@ -276,6 +276,7 @@ export class OutboundTraffic {
       outcomes,
       status429: s429,
       statusCounts,
+      expected: 0,
       latencyHistogram: h,
       latencySumMs: sum,
     };

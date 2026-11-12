@@ -3,6 +3,7 @@ import {
   mergeHistograms,
   emptyHistogram,
   type Outcome,
+  type RollupRow,
 } from '@theirside/shared';
 import type { Incident, ProviderRecord, RollupKey, Storage, Tenant } from '../../storage/types.js';
 import { isOutbound } from '../../storage/types.js';
@@ -16,6 +17,7 @@ import {
   type HealthStatus,
   type IncidentKind,
 } from '../scoring/evaluate.js';
+import { applyExpected, expectedLookup } from '../scoring/expected.js';
 import { resolveThresholds, thresholdsFor } from '../scoring/thresholds.js';
 import { evaluateKeys } from '../incidents/job.js';
 import { RANGES, type RangeKey } from './series.js';
@@ -42,6 +44,17 @@ export interface EndpointHealth {
   inIncident: boolean;
   /** The open incident's kind (errors, auth, not_found…), null when none. */
   incidentKind: IncidentKind | null;
+  /**
+   * In an open incident, but the current window is healthy: it resolves after
+   * `resolveAfterMinutes` healthy minutes in a row.
+   */
+  recovering: boolean;
+  /** While recovering: the latest minute whose window was bad (null: none in that span). */
+  lastBadMinuteAt: string | null;
+  /** Statuses marked expected for this endpoint from the dashboard (counted as successful). */
+  expectedStatuses: number[];
+  /** Share of calls in the window the app marked expected in code (SDK markExpected). */
+  expectedRate: number;
   /** Start of the latest minute with calls (within the range). */
   lastCallAt: string;
   /** Totals over the whole range, for idle rows. */
@@ -86,6 +99,21 @@ export interface HealthReport {
 
 export const DEFAULT_HEALTH_RANGE: RangeKey = '24h';
 
+/** Calls the app marked expected in code (SDK markExpected) in the window's rows of one key. */
+function windowExpected(rows: readonly RollupRow[], k: RollupKey, from: Date): number {
+  let n = 0;
+  for (const r of rows)
+    if (
+      r.environment === k.environment &&
+      r.provider === k.provider &&
+      r.endpoint === k.endpoint &&
+      r.method === k.method &&
+      Date.parse(r.minute) >= from.getTime()
+    )
+      n += r.expected ?? 0;
+  return n;
+}
+
 const ORDER: Record<HealthStatus, number> = { red: 0, amber: 1, green: 2, idle: 3, unknown: 4 };
 const latest = (a: string | null, b: string | null) => (a && b ? (a > b ? a : b) : (a ?? b));
 
@@ -110,6 +138,8 @@ export async function computeHealth(
   const t = resolveThresholds(await storage.config.getThresholds(tenant));
   const T = new Date(floorMinute(now.getTime()) - MIN);
   const from = new Date(T.getTime() - (t.windowMinutes - 1) * MIN);
+  // endpoints in an incident: enough minutes to find the latest bad one while recovering
+  const recoverFrom = new Date(from.getTime() - (t.resolveAfterMinutes - 1) * MIN);
   const filter = {
     ...(opts.environment ? { environment: opts.environment } : {}),
     ...(opts.provider ? { provider: opts.provider } : {}),
@@ -119,10 +149,17 @@ export async function computeHealth(
   const rangeFrom = new Date(
     Math.min(rangeTo.getTime() - RANGES[range].minutes * MIN, from.getTime()),
   );
-  const [rows, inRange] = await Promise.all([
-    storage.rollups.query(tenant, { from, to: new Date(T.getTime() + MIN), ...filter }),
+  const [allRows, inRange, providerRows] = await Promise.all([
+    storage.rollups.query(tenant, {
+      from: recoverFrom,
+      to: new Date(T.getTime() + MIN),
+      ...filter,
+    }),
     storage.rollups.aggregateByKey(tenant, { from: rangeFrom, to: rangeTo, ...filter }),
+    storage.config.listProviders(tenant),
   ]);
+  const expectedFor = expectedLookup(providerRows);
+  const rows = allRows.filter((r) => Date.parse(r.minute) >= from.getTime());
   const keys = new Map<string, RollupKey>();
   for (const r of rows)
     keys.set(baselineKeyId(r), {
@@ -135,7 +172,10 @@ export async function computeHealth(
     (await storage.incidents.getBaselines(tenant)).map((b) => [baselineKeyId(b), b]),
   );
   const evaluated = new Map(
-    evaluateKeys([...keys.values()], rows, baselines, T, 1, t).map((e) => [baselineKeyId(e), e]),
+    evaluateKeys([...keys.values()], rows, baselines, T, 1, t, expectedFor).map((e) => [
+      baselineKeyId(e),
+      e,
+    ]),
   );
   // webhook incidents have their own section; they don't colour a provider's outgoing health
   const open = (await storage.incidents.list(tenant, { status: 'open', direction: 'outbound' }))
@@ -156,16 +196,33 @@ export async function computeHealth(
         ),
     );
   const inIncident = (e: RollupKey) => incidentOf(e) !== undefined;
-
-  const configured = (await storage.config.listProviders(tenant)).filter(
-    (p) => !opts.provider || p.name === opts.provider,
+  // recovering: the latest bad minute of each endpoint in an incident whose window is healthy now
+  const recovering = new Map(
+    evaluateKeys(
+      [...keys.values()].filter(
+        (k) => inIncident(k) && evaluated.get(baselineKeyId(k))?.evals[0]?.bad === false,
+      ),
+      allRows,
+      baselines,
+      T,
+      t.resolveAfterMinutes,
+      t,
+      expectedFor,
+    ).map((e) => {
+      const k = e.evals.findIndex((x) => x.bad);
+      return [baselineKeyId(e), k < 0 ? null : new Date(T.getTime() - k * MIN).toISOString()];
+    }),
   );
+
+  const configured = providerRows.filter((p) => !opts.provider || p.name === opts.provider);
   const tOf = (provider: string) =>
     thresholdsFor(t, configured.find((p) => p.name === provider)?.thresholds);
   const byProvider = new Map<string, EndpointHealth[]>();
   for (const r of inRange) {
     const id = baselineKeyId(r);
-    const total = windowStats([r]);
+    const marked = expectedFor(r);
+    const total = windowStats([applyExpected(r, marked)]);
+    const expectedStatuses = [...marked];
     const rangeTotals = { calls: total.calls, errorRate: total.errorRate, p95Ms: total.p95 };
     const e = evaluated.get(id);
     const s = e?.evals[0]!.stats;
@@ -191,6 +248,10 @@ export async function computeHealth(
         outcomes: s.outcomes,
         inIncident: incident,
         incidentKind: incidentOf(e)?.kind ?? null,
+        recovering: recovering.has(id),
+        lastBadMinuteAt: recovering.get(id) ?? null,
+        expectedStatuses,
+        expectedRate: s.calls > 0 ? windowExpected(rows, e, from) / s.calls : 0,
         lastCallAt: r.lastMinute,
         rangeTotals,
       };
@@ -215,6 +276,10 @@ export async function computeHealth(
         outcomes: windowStats([]).outcomes,
         inIncident: inIncident(r),
         incidentKind: incidentOf(r)?.kind ?? null,
+        recovering: false,
+        lastBadMinuteAt: null,
+        expectedStatuses,
+        expectedRate: 0,
         lastCallAt: r.lastMinute,
         rangeTotals,
       };

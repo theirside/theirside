@@ -320,7 +320,7 @@ class Series<R, K> {
   }
 }
 
-const OUT_SCALARS = 3 + OUTCOMES.length + STATUS_COUNT_KEYS.length + 1;
+const OUT_SCALARS = 3 + OUTCOMES.length + STATUS_COUNT_KEYS.length + 1 + 1;
 
 const outCodec = (tenant: Tenant): Codec<RollupRow, RollupKey> => ({
   scalars: OUT_SCALARS,
@@ -331,6 +331,7 @@ const outCodec = (tenant: Tenant): Codec<RollupRow, RollupKey> => ({
     r.status429,
     ...OUTCOMES.map((o) => r.outcomes[o]),
     ...STATUS_COUNT_KEYS.map((k) => r.statusCounts?.[k] ?? 0),
+    r.expected ?? 0,
     r.latencySumMs,
   ],
   histsOf: (r) => [r.latencyHistogram],
@@ -343,6 +344,7 @@ const outCodec = (tenant: Tenant): Codec<RollupRow, RollupKey> => ({
     for (const o of OUTCOMES) outcomes[o] = v[i++]!;
     const statusCounts = emptyStatusCounts();
     for (const k of STATUS_COUNT_KEYS) statusCounts[k] = v[i++]!;
+    const expected = v[i++]!;
     return {
       ...tenant,
       ...key,
@@ -352,6 +354,7 @@ const outCodec = (tenant: Tenant): Codec<RollupRow, RollupKey> => ({
       outcomes,
       status429,
       statusCounts,
+      expected,
       latencyHistogram: latencyHistogram!,
       latencySumMs: v[i]!,
     };

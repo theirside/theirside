@@ -248,6 +248,7 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
     });
   }
   if (p.url && p.url.length <= SLACK_LIMITS.buttonUrl) {
+    const mark = p.markExpectedUrl && p.markExpectedUrl.length <= SLACK_LIMITS.buttonUrl;
     blocks.push({
       type: 'actions',
       elements: [
@@ -257,8 +258,27 @@ export function renderSlack(p: AlertPayload): { text: string; blocks: unknown[] 
           url: p.url,
           ...(p.event === 'resolve' || p.event === 'test' ? {} : { style: 'danger' }),
         },
+        ...(mark
+          ? [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Mark as expected' },
+                url: p.markExpectedUrl,
+              },
+            ]
+          : []),
       ],
     });
+    if (mark)
+      blocks.push({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: 'Is this status a normal answer for this endpoint? Mark it as expected. Marking it in your code (`markExpected`) is more precise: only the calls you tag count as fine.',
+          },
+        ],
+      });
   }
   blocks.push({
     type: 'context',
@@ -327,6 +347,12 @@ export function renderEmail(p: AlertPayload): { subject: string; text: string; h
     'Summary for the provider (paste as is):',
     p.summary,
     ...(p.url ? ['', `Open in dashboard: ${p.url}`] : []),
+    ...(p.markExpectedUrl
+      ? [
+          `Is this status a normal answer for this endpoint? Mark it as expected: ${p.markExpectedUrl}`,
+          '(Marking it in your code with markExpected is more precise.)',
+        ]
+      : []),
     '',
     `-- ${PRODUCT_NAME}`,
   ].join('\n');

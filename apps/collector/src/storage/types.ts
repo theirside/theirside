@@ -35,6 +35,8 @@ export interface StoredEvent {
   direction?: 'outbound' | 'inbound';
   /** Inbound: the provider's signed send time. */
   sentAt?: Date | null;
+  /** Outbound 4xx the app marked expected: its reason label (SDK `markExpected`). */
+  expected?: string | null;
 }
 
 export interface EventSample {
@@ -75,7 +77,17 @@ export interface EventStore {
 // ------------------------------------------------------------------ rollups
 
 /** Additive delta for one rollup key, built in memory per ingest batch. */
-export type RollupDelta = Omit<RollupRow, 'orgId' | 'projectId'>;
+export type RollupDelta = Omit<RollupRow, 'orgId' | 'projectId'> & {
+  /** Calls marked expected in code, per reason label (they sum to `expected`). */
+  expectedReasons?: Record<string, number>;
+};
+
+/** Calls marked expected in code for one reason in one minute or bucket (`rollups_expected_1m`). */
+export interface ExpectedReasonRow {
+  minute: string;
+  reason: string;
+  calls: number;
+}
 
 export interface RollupKey {
   environment: string;
@@ -120,6 +132,11 @@ export interface RollupStore {
     from: Date,
     to: Date,
   ): Promise<(RollupRow & { hour: Date })[]>;
+  /** Calls marked expected in code, per reason and bucket of `bucketMinutes` (charts). */
+  expectedSeries(
+    tenant: Tenant,
+    q: RollupQuery & { bucketMinutes: number },
+  ): Promise<ExpectedReasonRow[]>;
   /** Every (tenant, key) with traffic in the range: what the scheduler scores. */
   activeKeys(from: Date): Promise<(Tenant & RollupKey)[]>;
   /** Re-key every row of provider `from` to `to`, adding into rows that already exist. */
@@ -384,6 +401,8 @@ export interface Incident extends Tenant {
   windowMinutes: number;
   /** A restart/deploy of the calling services around the start, or its absence (null: unknown). */
   deployHint?: string | null;
+  /** Why it was resolved when not by recovery (a status marked expected), else null. */
+  resolutionNote?: string | null;
   peakErrorRate: number;
   peakP95Ms: number | null;
   baseline: Record<string, unknown>;
@@ -443,7 +462,7 @@ export interface IncidentStore {
   list(tenant: Tenant, q: IncidentListQuery): Promise<AnyIncident[]>;
   get(tenant: Tenant, id: string): Promise<AnyIncident | null>;
   listOpenAll(): Promise<AnyIncident[]>;
-  /** Latest resolved_at per endpoint, for cooldown checks. */
+  /** Latest resolved_at per endpoint, for cooldown checks (not resolutions by marking a status expected). */
   lastResolvedAt(
     tenant: Tenant,
     environment: string,
@@ -517,6 +536,11 @@ export interface ProviderRecord extends Tenant {
   thresholds: Record<string, number>;
   /** Overrides for this provider's inbound webhooks (`WEBHOOK_THRESHOLD_KEYS`). */
   webhookThresholds: Record<string, number>;
+  /**
+   * Statuses marked expected from the dashboard, per endpoint (`METHOD /template` →
+   * [400, …]; only `EXPECTABLE_STATUSES`): counted as successful when scoring.
+   */
+  expectedStatuses: Record<string, number[]>;
   /** Show this provider's webhooks on the public status page (off by default). */
   webhooksPublic: boolean;
 }
@@ -536,7 +560,8 @@ type ProviderDiscoveryFields =
   | 'endpointAliases'
   | 'thresholds'
   | 'webhookThresholds'
-  | 'webhooksPublic';
+  | 'webhooksPublic'
+  | 'expectedStatuses';
 
 export type ProviderInput = Omit<
   ProviderRecord,

@@ -39,6 +39,12 @@ export interface AlertPayload {
   summary: string;
   /** Dashboard link; null when THEIRSIDE_PUBLIC_URL is not set. */
   url: string | null;
+  /**
+   * Status-class incidents (401/403, 404, 400/409/422) while open: the dashboard page to
+   * mark that status as expected for the endpoint (the coarse level; marking in code is
+   * more precise). Null otherwise or without THEIRSIDE_PUBLIC_URL.
+   */
+  markExpectedUrl?: string | null;
   openedAt: string | null;
   resolvedAt: string | null;
   /** Minutes since opened (or until resolved). */

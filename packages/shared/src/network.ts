@@ -20,6 +20,11 @@ export interface RollupRow {
   status429: number;
   /** 3xx and the common 4xx one by one (collector 0.3.0+; missing: all 0). */
   statusCounts?: StatusCounts;
+  /**
+   * Of `ok`: 4xx answers the app marked expected in code (SDK `markExpected`), counted
+   * as successful and not in `http_4xx` or `statusCounts` (collector 0.5.0+; missing: 0).
+   */
+  expected?: number;
   latencyHistogram: number[];
   latencySumMs: number;
 }

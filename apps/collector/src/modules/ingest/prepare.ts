@@ -17,6 +17,9 @@ import type {
 } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
 
+/** Reason labels kept per rollup key in one batch (expected outcomes); more count as `other`. */
+export const MAX_EXPECTED_REASONS = 10;
+
 /** Event timestamps further than this from receive time are clamped to receive time. */
 export const MAX_FUTURE_SKEW_MS = 5 * 60_000;
 export const MAX_PAST_SKEW_MS = 24 * 3600_000;
@@ -223,6 +226,8 @@ export function prepareBatch(
     // SDKs before 0.1.1 keep the empty segment of `//` (base URL ending in `/`)
     let endpoint = collapseSlashes(e.endpoint);
     if (rewriteEndpoint) endpoint = rewriteEndpoint(provider, method, endpoint);
+    // expected outcomes: only a 4xx can be a business answer (never 5xx, timeouts, network)
+    const expected = e.expected !== undefined && e.outcome === 'http_4xx' ? e.expected : null;
     events.push({
       ts: new Date(ts),
       service: e.service ?? batch.service,
@@ -238,6 +243,7 @@ export function prepareBatch(
       errorCode: e.errorCode ?? null,
       correlationId: e.correlationId ?? null,
       providerRequestId: e.providerRequestId ?? null,
+      ...(expected ? { expected } : {}),
     });
     if (!providers.has(provider)) providers.set(provider, e.host);
     if (ts > (lastCalls.get(provider)?.getTime() ?? 0)) lastCalls.set(provider, new Date(ts));
@@ -257,6 +263,7 @@ export function prepareBatch(
         outcomes: emptyOutcomes(),
         status429: 0,
         statusCounts: emptyStatusCounts(),
+        expected: 0,
         latencyHistogram: emptyHistogram(),
         latencySumMs: 0,
       };
@@ -264,10 +271,23 @@ export function prepareBatch(
     }
     const w = e.outcome === 'ok' ? okWeight : 1;
     d.total += w;
-    d.outcomes[e.outcome] += w;
-    if (e.outcome === 'ok') d.ok += w;
-    if (e.status === 429) d.status429 += w;
-    addStatus(d.statusCounts!, e.status, w);
+    if (expected) {
+      // a business answer: successful for every rule and score, kept apart per reason
+      d.outcomes.ok += w;
+      d.ok += w;
+      d.expected = (d.expected ?? 0) + w;
+      const reasons = (d.expectedReasons ??= {});
+      const r =
+        reasons[expected] !== undefined || Object.keys(reasons).length < MAX_EXPECTED_REASONS
+          ? expected
+          : 'other';
+      reasons[r] = (reasons[r] ?? 0) + w;
+    } else {
+      d.outcomes[e.outcome] += w;
+      if (e.outcome === 'ok') d.ok += w;
+      if (e.status === 429) d.status429 += w;
+      addStatus(d.statusCounts!, e.status, w);
+    }
     d.latencyHistogram[bucketIndex(e.durationMs)]! += w;
     d.latencySumMs += e.durationMs * w;
     calls += w;

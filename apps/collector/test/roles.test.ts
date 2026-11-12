@@ -61,6 +61,7 @@ const MEMBER_WRITES = [
   'POST /v1/account/sign-out-everywhere',
   'POST /v1/admin/providers/:id/merge',
   'POST /v1/admin/providers/:id/split',
+  'PUT /v1/admin/providers/:id/expected',
   'PUT /v1/admin/webhooks/candidates/ignore',
   'PUT /v1/admin/webhooks/sources',
 ];
