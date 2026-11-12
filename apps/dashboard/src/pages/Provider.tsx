@@ -1,10 +1,40 @@
 import { useMemo, useState } from 'react';
 import { api, type EndpointHealth, type Overview, type Range, type Series } from '../api';
 import { Chart, type ChartSeries } from '../components/Chart';
-import { Badge, Card, ErrorBox, Segmented, StatusDot, Table, usePoll } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  ErrorBox,
+  Segmented,
+  StatusDot,
+  Table,
+  usePoll,
+} from '../components/ui';
 import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
+import { EXPECTABLE_STATUSES, ExpectedMarks, MarkExpected, STATUSES_OF_KIND } from './Expected';
 import { WebhooksSection } from './Webhooks';
+
+/** The endpoint table column an open incident of this kind is about (highlighted). */
+export type CauseColumn = 'errors' | '4xx' | '429' | 'p95';
+export function causeColumn(kind: string | null): CauseColumn | null {
+  switch (kind) {
+    case 'errors':
+      return 'errors';
+    case 'auth':
+    case 'not_found':
+    case 'validation':
+    case 'behaviour':
+      return '4xx';
+    case 'rate_limited':
+      return '429';
+    case 'latency':
+      return 'p95';
+    default:
+      return null;
+  }
+}
 
 // series colours are tokens (packages/design): chart-1 blue, -2 pink, -3 purple, -4 teal,
 // -5 amber, -6 red, -7 green, -8 grey
@@ -107,6 +137,22 @@ function EndpointCharts({
           ]
         : [line];
     });
+    // answers that are normal business answers: tagged in code (per reason), marked here (per status)
+    const reasons = [...new Set(series.points.flatMap((p) => Object.keys(p.expected ?? {})))];
+    const markedStatuses = [...new Set(series.points.flatMap((p) => Object.keys(p.marked ?? {})))];
+    const expected: ChartSeries[] = [
+      ...reasons.map((r, i) => ({
+        label: r,
+        values: series.points.map((p) => (p.calls > 0 ? (p.expected?.[r] ?? 0) : null)),
+        color: PALETTE[i % PALETTE.length]!,
+      })),
+      ...markedStatuses.map((st, i) => ({
+        label: `${st} (marked expected)`,
+        values: series.points.map((p) => (p.calls > 0 ? (p.marked?.[st] ?? 0) : null)),
+        color: ['var(--chart-4)', 'var(--chart-5)', 'var(--chart-8)'][i % 3]!,
+        dash: true,
+      })),
+    ];
     const latency: ChartSeries[] = [
       { label: 'p50', values: series.points.map((p) => p.p50Ms), color: 'var(--chart-1)' },
       {
@@ -134,6 +180,7 @@ function EndpointCharts({
       ],
       errors: errorSeries,
       mix,
+      expected,
       latency,
     };
   }, [series]);
@@ -164,7 +211,45 @@ function EndpointCharts({
               <div className="empty">Every call succeeded in this range.</div>
             )}
           </div>
+          {charts.expected.length > 0 && (
+            <div data-testid="expected-chart">
+              <h3>
+                Expected answers (share of calls, counted as successful; solid: marked in code,
+                dashed: marked here)
+              </h3>
+              <Chart times={charts.times} series={charts.expected} format={(v) => pct(v)} />
+            </div>
+          )}
         </>
+      )}
+      <ExpectedControls provider={provider} ep={ep} />
+    </div>
+  );
+}
+
+/** Mark a status as expected for this endpoint (folded away until asked for). */
+function ExpectedControls({ provider, ep }: { provider: string; ep: EndpointHealth }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="expected-controls">
+      {open ? (
+        <MarkExpected
+          provider={provider}
+          ep={ep}
+          // an open status-class incident's statuses first
+          statuses={[
+            ...new Set([
+              ...((ep.incidentKind && STATUSES_OF_KIND[ep.incidentKind]) || []),
+              ...EXPECTABLE_STATUSES,
+            ]),
+          ]}
+          marked={ep.expectedStatuses ?? []}
+          autoFocus
+        />
+      ) : (
+        <Button type="button" size="small" onClick={() => setOpen(true)}>
+          A status here is a normal answer…
+        </Button>
       )}
     </div>
   );
@@ -265,6 +350,7 @@ export function Provider({ name, environment }: { name: string; environment: str
               {p.endpoints.map((e) => (
                 <FragmentRow
                   key={key(e)}
+                  provider={name}
                   e={e}
                   range={range}
                   open={open === key(e)}
@@ -290,12 +376,14 @@ export function Provider({ name, environment }: { name: string; environment: str
 }
 
 function FragmentRow({
+  provider,
   e,
   range,
   open,
   onToggle,
   children,
 }: {
+  provider: string;
   e: EndpointHealth;
   range: Range;
   open: boolean;
@@ -303,22 +391,47 @@ function FragmentRow({
   children: React.ReactNode;
 }) {
   const idle = e.status === 'idle';
+  // an open incident whose current window is healthy: say so instead of a plain red badge
+  const recovering = !idle && e.inIncident && !!e.recovering;
+  const status = recovering ? 'amber' : e.status;
+  // the column the open incident is about; the others stay uncoloured
+  const cause = e.inIncident && !recovering ? causeColumn(e.incidentKind) : null;
+  const bad = (c: CauseColumn) => (cause === c ? 'bad' : '');
+  const [marks, setMarks] = useState<number[] | null>(null);
+  const expected = marks ?? e.expectedStatuses ?? [];
   return (
     <>
       <tr
-        className={`clickable ${e.status}`}
+        className={`clickable ${status}`}
         onClick={onToggle}
         title={
           idle ? `No calls in the scoring window; numbers are totals over ${range}` : undefined
         }
       >
         <td>
-          <StatusDot status={e.status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
+          <StatusDot status={status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
           {idle && <Badge>idle</Badge>}
           {e.learning && !idle && <Badge>learning</Badge>}
-          {e.incidentKind && (
-            <Badge tone="danger" data-testid="incident-kind">
-              {KIND_LABEL[e.incidentKind] ?? e.incidentKind}
+          {recovering ? (
+            <Badge
+              tone="warning"
+              data-testid="recovering"
+              title="The incident resolves after 10 healthy minutes in a row"
+            >
+              recovering
+              {e.lastBadMinuteAt ? ` · last bad minute ${ago(e.lastBadMinuteAt)}` : ''}
+            </Badge>
+          ) : (
+            e.incidentKind && (
+              <Badge tone="danger" data-testid="incident-kind">
+                {KIND_LABEL[e.incidentKind] ?? e.incidentKind}
+              </Badge>
+            )
+          )}
+          <ExpectedMarks provider={provider} ep={e} statuses={expected} onChange={setMarks} />
+          {(e.expectedRate ?? 0) > 0 && !idle && (
+            <Badge title="Answers your code marked expected (markExpected): counted as successful">
+              {pct(e.expectedRate!)} expected
             </Badge>
           )}
           {e.inIncident && idle && <Badge tone="danger">open incident</Badge>}
@@ -342,11 +455,19 @@ function FragmentRow({
           <>
             <td className="num">{e.score ?? '–'}</td>
             <td className="num">{num(e.callsPerMin)}</td>
-            <td className={`num ${e.inIncident ? 'bad' : ''}`}>{pct(e.errorRate)}</td>
+            <td className={`num ${bad('errors')}`} data-col="errors">
+              {pct(e.errorRate)}
+            </td>
             <td className="num muted">{pct(e.normalErrorRate)}</td>
-            <td className="num">{pct(e.rate4xx)}</td>
-            <td className="num">{pct(e.rate429)}</td>
-            <td className="num">{ms(e.p95Ms)}</td>
+            <td className={`num ${bad('4xx')}`} data-col="4xx">
+              {pct(e.rate4xx)}
+            </td>
+            <td className={`num ${bad('429')}`} data-col="429">
+              {pct(e.rate429)}
+            </td>
+            <td className={`num ${bad('p95')}`} data-col="p95">
+              {ms(e.p95Ms)}
+            </td>
             <td className="num muted">{ms(e.normalP95Ms)}</td>
           </>
         )}

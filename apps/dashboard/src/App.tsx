@@ -116,7 +116,8 @@ export function App() {
 
   let page;
   if (section === 'providers' && arg) page = <Provider name={arg} environment={environment} />;
-  else if (section === 'incidents' && arg) page = <Incident id={arg} />;
+  else if (section === 'incidents' && arg)
+    page = <Incident id={arg} markExpected={route[2] === 'expected'} />;
   else if (section === 'incidents') page = <Incidents />;
   else if (section === 'webhooks') page = <Webhooks environment={environment} />;
   else if (section === 'settings')
