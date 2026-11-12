@@ -1,8 +1,8 @@
-import type { ClientInternals, Runtime } from './client.js';
+import { isExpectedReason } from '@theirside/shared/core';
+import type { ClientInternals, Runtime, SdkStats } from './client.js';
 import { Client, createClient } from './client.js';
 import type { InitOptions } from './config.js';
 import type { ManualCall } from './recorder.js';
-import type { TransportStats } from './transport.js';
 import { SDK_VERSION } from './version.js';
 
 /** Default cap for the flush `wrap()` does after each invocation. */
@@ -117,8 +117,44 @@ export function createApi(runtime: Runtime) {
     }
   }
 
+  /**
+   * Expected outcomes: the latest outgoing call that ended in this context (an
+   * incoming request, an `expecting()` scope) answered with a 4xx that is a normal
+   * business answer, e.g. a consent check answering 400 because the user hasn't
+   * consented. Call it after reading the answer, within 5 s of the call ending.
+   * Tagged calls count as successful; untagged ones with the same status stay
+   * failures, so a contract change still alerts. Only `reason`, a short label
+   * (letters, digits, `_ . : -`, up to 64), is sent. Does nothing (and counts
+   * `getStats().expected.missed`) when there's no such call. Never throws.
+   */
+  function markExpected(reason: string): void {
+    try {
+      client?.markExpected(reason);
+    } catch {
+      // never throw into user code
+    }
+  }
+
+  /**
+   * Expected outcomes, when the app knows up front: runs `fn`, and 4xx answers to
+   * the calls it makes (also from async work it starts, on Node) are tagged as
+   * expected with `reason`. Returns what `fn` returns (a promise stays a promise)
+   * and rethrows its errors. On fetch runtimes only calls started synchronously
+   * inside `fn` are covered. With a bad reason, just runs `fn`.
+   */
+  function expecting<T>(reason: string, fn: () => T): T {
+    let frame;
+    try {
+      if (isExpectedReason(reason)) frame = { reason, parent: runtime.frames.current() };
+      else if (client) client.recorder.expected.missed++;
+    } catch {
+      frame = undefined;
+    }
+    return frame ? runtime.frames.run(frame, fn) : fn();
+  }
+
   /** Local SDK health: queued, dropped and sent events, last flush error. */
-  function getStats(): TransportStats | undefined {
+  function getStats(): SdkStats | undefined {
     try {
       return client?.stats();
     } catch {
@@ -218,5 +254,5 @@ export function createApi(runtime: Runtime) {
     };
   }
 
-  return { init, track, flush, shutdown, getStats, wrap, wrapFetch };
+  return { init, track, flush, shutdown, getStats, wrap, wrapFetch, markExpected, expecting };
 }

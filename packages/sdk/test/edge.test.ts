@@ -1,5 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { flush, getStats, init, shutdown, untracked, wrapFetch } from '../src/edge.js';
+import {
+  expecting,
+  flush,
+  getStats,
+  init,
+  markExpected,
+  shutdown,
+  untracked,
+  wrapFetch,
+} from '../src/edge.js';
 import {
   freePort,
   sleep,
@@ -158,5 +167,19 @@ describe('Cloudflare Workers mode', () => {
     // at most once per interval
     await flush(1000);
     expect(collector.configRequests).toHaveLength(1);
+  });
+});
+
+describe('expected outcomes on fetch runtimes', () => {
+  it('expecting() tags calls started synchronously inside; markExpected() counts a miss', async () => {
+    start({ remoteConfig: false });
+    await expecting('consent_required', () => fetch(`${provider.url}/status/400`)).then((r) =>
+      r.text(),
+    );
+    await fetch(`${provider.url}/status/400`).then((r) => r.text());
+    markExpected('consent_required'); // no AsyncLocalStorage: nothing to match it to
+    await flush();
+    expect(collector.events().map((e) => e.expected ?? null)).toEqual(['consent_required', null]);
+    expect(getStats()?.expected).toEqual({ tagged: 1, missed: 1 });
   });
 });

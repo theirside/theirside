@@ -39,6 +39,22 @@ export class RingBuffer<T> {
     return out;
   }
 
+  /**
+   * Remove and return up to n of the oldest items for which `ready` is true; the
+   * others stay queued in their order (expected outcomes: 4xx answers held a few
+   * seconds for a `markExpected`).
+   */
+  takeWhere(n: number, ready: (item: T) => boolean): T[] {
+    const all = this.take(this.size);
+    this.head = 0;
+    const out: T[] = [];
+    for (const x of all) {
+      if (out.length < n && ready(x)) out.push(x);
+      else this.push(x);
+    }
+    return out;
+  }
+
   /** Remove every item matching pred (keeps order). Returns how many were removed. */
   discard(pred: (item: T) => boolean): number {
     const all = this.take(this.size);

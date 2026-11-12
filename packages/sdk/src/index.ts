@@ -1,7 +1,8 @@
 import { createApi } from './api.js';
 import type { Runtime } from './client.js';
+import { nodeFrames } from './expected-node.js';
 import { HttpInstrumentation, defaultHttpMode } from './instrument/http.js';
-import { ServerInstrumentation } from './instrument/server.js';
+import { RequestFrames, ServerInstrumentation } from './instrument/server.js';
 import { UndiciInstrumentation } from './instrument/undici.js';
 import { NodeSender } from './node-sender.js';
 import { SDK_VERSION } from './version.js';
@@ -9,7 +10,8 @@ import { isUntracked } from './untracked.js';
 
 export type { InitOptions, ProviderConfig, WebhookRouteConfig } from './config.js';
 export type { ManualCall } from './recorder.js';
-export type { TransportStats as SdkStats } from './transport.js';
+export type { SdkStats } from './client.js';
+export type { ExpectedStats } from './expected.js';
 export type { WrapFetchOptions, WrapOptions } from './api.js';
 export type { CallEvent, Outcome } from '@theirside/shared/core';
 export { SDK_VERSION };
@@ -27,10 +29,13 @@ export const nodeRuntime: Runtime = {
       (sender as NodeSender).agent,
     ),
     new UndiciInstrumentation(recorder, log),
+    // expected outcomes: one frame per incoming request, for markExpected
+    new RequestFrames(),
     // inbound webhooks; `webhooks: false` subscribes nothing
     ...(recorder.inbound.enabled ? [new ServerInstrumentation(recorder.inbound, log)] : []),
   ],
   isUntracked,
+  frames: nodeFrames,
   timers: () => true,
   processHooks: true,
   version: () => process.versions?.node,
@@ -62,3 +67,11 @@ export const getStats = api.getStats;
 export const wrap = api.wrap;
 /** Fetch handlers with `waitUntil`: respond first, send afterwards. See docs. */
 export const wrapFetch = api.wrapFetch;
+/**
+ * The latest outgoing call in this context answered with a 4xx that is a normal
+ * business answer (e.g. `consent_required`): count it as successful. Call it after
+ * reading the answer. Only the reason label is sent. See docs.
+ */
+export const markExpected = api.markExpected;
+/** Run `fn`; 4xx answers to the calls it makes are expected, with this reason. See docs. */
+export const expecting = api.expecting;

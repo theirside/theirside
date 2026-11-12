@@ -1,5 +1,6 @@
 import type { CallEvent } from '@theirside/shared/core';
 import { resolveConfig, type InitOptions, type ResolvedConfig } from './config.js';
+import type { ExpectedStats, FrameScope } from './expected.js';
 import { createLogger, safely, warn, type Logger } from './log.js';
 import { RingBuffer } from './queue.js';
 import { INBOUND_HOLD_MS, type InboundPending } from './inbound.js';
@@ -19,6 +20,8 @@ export interface ClientInternals {
   minPathSightings?: number;
   /** Test hook: idle time before a heartbeat (default 5 min). */
   heartbeatMs?: number;
+  /** Test hook: how long after a call `markExpected` may tag it (default 5 s). */
+  expectedWindowMs?: number;
 }
 
 /** An idle process says it's alive this often (not in serverless mode). */
@@ -51,12 +54,19 @@ export interface Runtime {
     internals: ClientInternals,
   ): Instrumentation[];
   isUntracked(): boolean;
+  /** Expected outcomes: how calls and marks find their frame (expected.ts). */
+  frames: FrameScope;
   /** Background timers may be used (not on Cloudflare Workers outside a request). */
   timers(): boolean;
   /** Process exit hooks exist (`process.on('beforeExit')`). */
   processHooks: boolean;
   /** Runtime version for the batch header (`node 24.13.0`, `bun 1.4.4`…). */
   version(): string | undefined;
+}
+
+/** `getStats()`: the transport's counters and the expected-outcome ones. */
+export interface SdkStats extends TransportStats {
+  expected: ExpectedStats;
 }
 
 export class Client {
@@ -102,7 +112,10 @@ export class Client {
       () => this.transport.notify(),
       internals.minPathSightings,
       () => runtime.isUntracked(),
+      runtime.frames,
+      internals.expectedWindowMs,
     );
+    this.transport.hold = this.recorder.hold;
     this.capture = runtime.instrumentations(this.recorder, this.log, sender, internals);
     // a collector that doesn't store inbound deliveries would keep them as calls
     this.recorder.inbound.onRejected = () =>
@@ -217,8 +230,14 @@ export class Client {
     return Promise.all([send, bounded.catch(() => {})]).then(() => {});
   }
 
-  stats(): TransportStats {
-    return this.transport.stats();
+  stats(): SdkStats {
+    return { ...this.transport.stats(), expected: { ...this.recorder.expected } };
+  }
+
+  /** `markExpected(reason)`; see Recorder.markExpected. */
+  markExpected(reason: unknown): void {
+    if (this.shutdownPromise) return;
+    safely(this.log, 'markExpected', () => this.recorder.markExpected(reason));
   }
 
   /** Stop capturing, flush what is queued within the timeout. Never rejects. */

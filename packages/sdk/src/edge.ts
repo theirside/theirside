@@ -1,5 +1,6 @@
 import { createApi } from './api.js';
 import type { Runtime } from './client.js';
+import type { ExpectedFrame, FrameScope } from './expected.js';
 import { FetchSender } from './fetch-sender.js';
 import { FetchInstrumentation, originalFetch } from './instrument/fetch.js';
 import { isCloudflareWorkers } from './platform.js';
@@ -14,7 +15,8 @@ import { SDK_VERSION } from './version.js';
  */
 export type { InitOptions, ProviderConfig, WebhookRouteConfig } from './config.js';
 export type { ManualCall } from './recorder.js';
-export type { TransportStats as SdkStats } from './transport.js';
+export type { SdkStats } from './client.js';
+export type { ExpectedStats } from './expected.js';
 export type { WrapFetchOptions, WrapOptions } from './api.js';
 export type { CallEvent, Outcome } from '@theirside/shared/core';
 export { SDK_VERSION };
@@ -35,11 +37,30 @@ export function untracked<T>(fn: () => T): T {
   }
 }
 
+/**
+ * Expected outcomes without AsyncLocalStorage: `expecting()` covers the calls started
+ * synchronously inside it, and `markExpected()` finds no frame (it counts a miss).
+ */
+const frameStack: ExpectedFrame[] = [];
+const edgeFrames: FrameScope = {
+  async: false,
+  current: () => frameStack[frameStack.length - 1],
+  run(frame, fn) {
+    frameStack.push(frame);
+    try {
+      return fn();
+    } finally {
+      frameStack.pop();
+    }
+  },
+};
+
 export const edgeRuntime: Runtime = {
   name: 'fetch',
   sender: (cfg) => new FetchSender(cfg, originalFetch()),
   instrumentations: (recorder, log) => [new FetchInstrumentation(recorder, log)],
   isUntracked: () => untrackedDepth > 0,
+  frames: edgeFrames,
   // Workers: no timers outside a request; events go out on flush()
   timers: () => !isCloudflareWorkers() && typeof setInterval === 'function',
   processHooks: false,
@@ -63,3 +84,5 @@ export const shutdown = api.shutdown;
 export const getStats = api.getStats;
 export const wrap = api.wrap;
 export const wrapFetch = api.wrapFetch;
+export const markExpected = api.markExpected;
+export const expecting = api.expecting;

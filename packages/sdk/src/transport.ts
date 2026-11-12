@@ -23,6 +23,20 @@ export interface InboundProbe {
   probeResult(outcome: 'accepted' | 'rejected' | 'retry' | 'dropped', events: CallEvent[]): void;
 }
 
+/**
+ * Expected outcomes: 4xx answers the app may still mark (`markExpected`) are held
+ * from the periodic flush for a few seconds after they ended; a forced flush
+ * (`flush()`, `wrap()`, shutdown) sends them at once.
+ */
+export interface EventHold {
+  /** Holding is on (the app has called `markExpected`). */
+  active(): boolean;
+  /** The event may be sent now. */
+  ready(e: CallEvent, now: number): boolean;
+  /** These events left the queue: too late to mark them. */
+  taken(events: readonly CallEvent[]): void;
+}
+
 const MAX_BACKOFF_MS = 60_000;
 const BASE_BACKOFF_MS = 1000;
 
@@ -62,6 +76,8 @@ export class Transport {
   header: Partial<IngestBatch> = {};
   /** Held inbound deliveries to offer the collector; set by the client. */
   probe: InboundProbe | undefined;
+  /** Expected outcomes: 4xx answers held for a `markExpected`; set by the client. */
+  hold: EventHold | undefined;
 
   constructor(
     private readonly cfg: ResolvedConfig,
@@ -140,19 +156,38 @@ export class Transport {
         });
       return this.inFlight;
     }
-    const batch = this.retryBatch ?? this.queue.take(this.cfg.maxBatch);
+    const batch = this.retryBatch ?? this.takeBatch(force);
     this.retryBatch = undefined;
     if (batch.length === 0) return Promise.resolve();
     this.inFlight = this.sendBatch(batch)
       .catch(() => {})
       .finally(() => {
         this.inFlight = undefined;
-        // keep draining while a backlog exists and the collector is healthy
-        if (!this.stopped && this.failures === 0 && this.queue.length >= this.cfg.maxBatch) {
+        // keep draining while a backlog exists and the collector is healthy (a short
+        // batch means the rest is held for a markExpected: no busy loop over it)
+        if (
+          !this.stopped &&
+          this.failures === 0 &&
+          batch.length >= this.cfg.maxBatch &&
+          this.queue.length >= this.cfg.maxBatch
+        ) {
           this.notify();
         }
       });
     return this.inFlight;
+  }
+
+  /** The next batch: everything due, or (periodic flush) without the events held for a mark. */
+  private takeBatch(force: boolean): CallEvent[] {
+    const hold = this.hold;
+    if (!hold) return this.queue.take(this.cfg.maxBatch);
+    const now = Date.now();
+    const batch =
+      !force && hold.active()
+        ? this.queue.takeWhere(this.cfg.maxBatch, (e) => hold.ready(e, now))
+        : this.queue.take(this.cfg.maxBatch);
+    hold.taken(batch);
+    return batch;
   }
 
   /** Flush everything within the deadline, keeping the process alive for it. */
