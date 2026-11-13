@@ -9,6 +9,8 @@ export default tseslint.config(
       '**/coverage/**',
       '**/node_modules/**',
       'apps/collector/public/**',
+      // docs/site code blocks written out for type-checking (tools/docs-site)
+      'tools/docs-site/.blocks/**',
       '**/*.d.ts',
     ],
   },

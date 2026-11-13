@@ -2,6 +2,7 @@ dist
 coverage
 pnpm-lock.yaml
 apps/collector/public
+tools/docs-site/.blocks
 *.md
 .idea
 *.iml
