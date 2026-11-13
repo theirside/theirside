@@ -226,7 +226,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.5.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.6.0`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -266,7 +266,7 @@ From 0.3.x to 0.4.0 (deploy it before your services move to SDK 0.3.0; older SDK
 
 - **Webhooks you receive are monitored** ([5a](#5a-webhooks-you-receive), [scoring](scoring.md#webhooks-inbound)): with SDK 0.3.0, deliveries from known senders (by signature headers) or declared routes get their own **Webhooks** page, a section on each provider page and four incident kinds: `webhook_silence` (the sender stopped), `webhook_rejections` (our app answers non-2xx), `webhook_slow` (our handler is slow) and `webhook_lag` (deliveries arrive long after they were signed). They alert in your existing channels; a provider can show a webhook row on the status page (off by default).
 - **Silence alerts start after 21 days** of a source's history, and only for regular senders: a sender whose normal gaps are too irregular to judge is marked so on the Webhooks page with silence off (switch it on per route). When two or more sources go quiet together and nothing else delivers, silence alerts are held ("all sources quiet: possible holiday or receiver issue"). Rejections, slow handling and lag are judged like outgoing calls, against each source's own normal.
-- **Discovered webhook routes**: POST/PUT routes that look like webhooks from senders the SDK can't identify are listed on the Webhooks page and under Settings → Providers. Nothing is monitored until an admin confirms one (linked to an existing provider or as a new one); members can ignore them.
+- **Discovered webhook routes**: POST/PUT routes that look like webhooks from senders the SDK can't identify are listed under Settings → Providers. Nothing is monitored until an admin confirms one with a name; members can ignore them.
 - **Outgoing detection is stricter about evidence** ([scoring](scoring.md)): every rate rule now also needs at least 5 failures above what is normal and a count test whose noise level is learned per endpoint, and latency counts slow calls against their normal share instead of comparing p95 alone. In the detection bench this cut false alarms (medium-volume endpoints from about 2 to 0.7 per 6 months) while every fault scenario still alerts within its target ([benchmarks](benchmarks.md#detection-alert-quality)). Expect fewer low-volume and latency alerts.
 - **Latency is measured finer**: 130 histogram buckets instead of 18, so p95 values on charts and in alerts are closer to the real ones. Rows written before the upgrade keep their coarse buckets and are read spread over the fine ones, so the first week mixes both.
 - **Webhook payloads**: `direction` (`outbound` or `inbound`) and the four `webhook_*` kinds. Treat a `kind` you don't know like `errors`.
@@ -283,12 +283,21 @@ From 0.4.x to 0.5.0 (deploy it before your services move to SDK 0.4.0; older SDK
 - **Self-host compose file**: it pulled the `0.4` tag, which stays on 0.4.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.5`.
 - Migration 022 runs on the first start: a column with a constant default on `rollups_1m` and nullable columns on `events`, `providers` and `incidents` (no table rewrite), and a new table `rollups_expected_1m`.
 
+From 0.5.x to 0.6.0 (no SDK change needed; works with every SDK version):
+
+- **Discovered webhook routes on the Webhooks page**: a "Discovered, not monitored yet" section at the top lists the routes the SDK reported, with Confirm and Ignore (Settings → Providers keeps its table). A confirmed route moves into the monitored list at once ("waiting for the first delivery"). The Providers page announces routes discovered in the last 24 h.
+- **Confirming links or creates**: link the route to an existing provider (suggested when its domain or name matches the SDK's suggested name, with the reason) or create a new one; creating one whose name exists is refused with an offer to link. So outgoing calls and webhooks of one company stay one provider: its page shows both, with one alerts switch, its support contact and incidents from both directions. Already have a webhook-only duplicate? Merge it into the outgoing provider in Settings → Providers.
+- **Alert channels** get one message per newly discovered webhook route with the hourly digest (switch: Settings → Providers). Routes discovered before the upgrade are not announced.
+- **API**: candidates carry `match`; confirm takes `mode` (`link` / `new`); `/v1/admin/webhooks` lists confirmed routes without a delivery as `waiting`; `/v1/admin/settings/discovery` adds `webhookRoutes`. Older dashboards' confirm (no `mode`) behaves as before.
+- **Self-host compose file**: it pulled the `0.5` tag, which stays on 0.5.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.6`.
+- Migration 023 runs on the first start: a nullable column on `webhook_candidates` (existing routes marked as announced) and a column with a constant default on `settings` (no table rewrite).
+
 ### Mirroring the image into a private registry
 
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.5.0
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.6.0
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -305,8 +314,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.5.0 .
-docker push <registry>/theirside-collector:0.5.0
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.6.0 .
+docker push <registry>/theirside-collector:0.6.0
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -347,7 +356,7 @@ Minimal task definition (placeholders in `<>`):
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.5.0",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.6.0",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [

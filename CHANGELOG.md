@@ -2,7 +2,9 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
-## Unreleased
+## Collector 0.6.0
+
+No SDK change: works with every SDK version (SDK 0.4.1 is current).
 
 **Discovered webhook routes on the Webhooks page**
 
@@ -11,6 +13,8 @@ Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. U
 - The Providers page announces new routes ("New webhook route discovered: POST /v1/example (suggested: example)"), and alert channels get one message per new route with the hourly digest (Settings → Providers can switch it off).
 - An empty Webhooks page explains how deliveries are found and suggests `THEIRSIDE_DEBUG=inbound` / `debug: 'inbound'`.
 - Migration 023 (no table rewrite).
+
+**Also**: the full 26-week detection sweep runs weekly in CI and no longer holds up a release (pushes and pull requests still run the key cells); the SDK memory soak now also receives webhook deliveries, discovery candidates and API requests that mark answers expected.
 
 ## SDK 0.4.1
 
