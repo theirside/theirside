@@ -28,91 +28,158 @@ export interface WebhookRouteConfig {
   provider: string;
 }
 
+/**
+ * Options for `init()`. Every option is documented here, and docs/site/configuration.md
+ * is generated from these comments (`pnpm docs:generate`): keep a description and a
+ * `@default` on each.
+ */
 export interface InitOptions {
+  /**
+   * Project API key (`tsd_live_…`) with the `ingest` scope. Without it the SDK stays off,
+   * so it is safe to ship before the collector is set up.
+   * @default required
+   */
   apiKey?: string | undefined;
-  /** Collector base URL, e.g. `http://collector:4318`. */
+  /**
+   * Collector base URL, e.g. `http://collector:4318`. Without it the SDK stays off.
+   * @default required
+   */
   endpoint?: string | undefined;
   /**
-   * Name of the host app. Default: the function name on AWS Lambda, Google
-   * Cloud Functions and Azure Functions, else `unknown-service`.
+   * Name of this app in the dashboard and alerts.
+   * @default the function name on AWS Lambda, Google Cloud Functions and Azure Functions, else `unknown-service`
    */
   service?: string | undefined;
+  /**
+   * Environment name, e.g. `production`, `staging`. Each environment learns its own normal.
+   * @default `production`
+   */
   environment?: string | undefined;
-  /** Optional: names, hosts and routes for providers you want to set explicitly. */
+  /**
+   * Providers you want to name yourself: `{ name, hosts, routes? }`. Host patterns:
+   * `api.x.com`, `*.x.io` (any subdomain, not the apex), `localhost:4010`. Optional:
+   * every third-party host is recorded anyway (`autoDiscover`).
+   * @default `[]`
+   */
   providers?: ProviderConfig[];
   /**
-   * Record calls to every third-party host, not only `providers` (default true).
-   * Loopback, private networks, cloud metadata, internal names, telemetry
-   * hosts, the collector itself and `internalHosts` are never recorded.
+   * Record calls to every third-party host, not only `providers`. Loopback, private
+   * networks, cloud metadata, internal names, telemetry hosts, the collector itself and
+   * `internalHosts` are never recorded.
+   * @default `true`
    */
   autoDiscover?: boolean;
   /** @deprecated Use `autoDiscover`. Kept as an alias. */
   trackUnknownHosts?: boolean;
-  /** Your own services (host patterns): never recorded. */
+  /**
+   * Your own services (host patterns): never recorded.
+   * @default `[]`
+   */
   internalHosts?: string[];
-  /** Poll the collector for dashboard settings (hidden hosts, routes). Default true. */
+  /**
+   * Poll the collector every 60 s for dashboard settings (hidden hosts, routes, path
+   * privacy). Failures keep the last good settings.
+   * @default `true`
+   */
   remoteConfig?: boolean;
   /**
-   * How plain words in paths are treated (docs/privacy.md). `strict` (default):
-   * only known API words (the built-in vocabulary, or a provider's allowed
-   * words) are sent as-is, everything else becomes `:id`. `balanced`: any word
-   * seen 5 times at a position with at most 16 distinct values; only for paths
-   * that never carry personal data. The dashboard can set it per provider.
+   * How plain words in paths are treated (docs/privacy.md). `strict`: only known API
+   * words (the built-in vocabulary, or a provider's allowed words) are sent as-is,
+   * everything else becomes `:id`. `balanced`: any word seen 5 times at a position with
+   * at most 16 distinct values; only for paths that never carry personal data. The
+   * dashboard can set it per provider.
+   * @default `'strict'`
    */
   pathPrivacy?: PathPrivacy;
-  /** Read a correlation id from the host app's request context. */
+  /**
+   * Returns your request or correlation ID (e.g. from AsyncLocalStorage), sent with each
+   * call so you can find it in your logs. Max 128 characters.
+   * @default none
+   */
   getCorrelationId?: () => string | number | null | undefined;
-  /** Response headers whose value is kept as providerRequestId. `[]` disables. */
+  /**
+   * Response headers whose value is kept as the provider's request ID (for support
+   * tickets). `[]` disables.
+   * @default `['x-request-id', 'request-id', 'x-amzn-requestid', 'cf-ray']`
+   */
   requestIdHeaders?: string[];
-  /** Fraction of successful calls kept (0..1]. Errors are always kept. */
+  /**
+   * Fraction of successful calls kept (0..1]. Errors are always kept; the collector
+   * re-weights the counts.
+   * @default `1`
+   */
   sampleRate?: number;
+  /**
+   * How often queued events are sent. A full batch is sent at once.
+   * @default `5000` (ms)
+   */
   flushIntervalMs?: number;
+  /**
+   * Events per request to the collector (max 5000).
+   * @default `500`
+   */
   maxBatch?: number;
+  /**
+   * Events kept in memory; when full, the oldest are dropped and counted
+   * (`getStats().dropped`). The SDK never blocks your app.
+   * @default `10000`
+   */
   maxQueue?: number;
   /**
-   * Inbound webhook monitoring (Node only). Default: on, detecting known senders
-   * by their signature headers. A list declares routes by hand (they win over
-   * detection); `false` turns inbound capture off. Requests that aren't
-   * webhooks are never recorded.
+   * Inbound webhook monitoring (Node servers, AWS Lambda through `wrap()`). `true`:
+   * known senders detected by their signature headers. A list of `{ path, provider }`
+   * declares routes by hand (they win over detection). `false` turns inbound capture
+   * off. Requests that aren't webhooks are never recorded.
+   * @default `true`
    */
   webhooks?: boolean | WebhookRouteConfig[];
   /**
-   * Record webhook deliveries from the first one, without waiting for the
-   * collector's remote config to say it stores them (default false). For AWS
-   * Lambda, where each cold start would otherwise lose the deliveries before
-   * that answer. They go out with the usual flush; a collector older than 0.4.0
-   * rejects them and the SDK stops recording deliveries. Without it, a
-   * long-running server holds the first 500 deliveries (at most 60 s) until the
-   * remote config answers, and discards them if it says no or doesn't answer.
+   * Record webhook deliveries from the first one, without waiting for the collector's
+   * remote config to say it stores them. Set it on AWS Lambda, where each cold start
+   * would otherwise lose the deliveries before that answer. A collector older than 0.4.0
+   * rejects them and the SDK stops recording deliveries. Without it, a long-running
+   * server holds the first 500 deliveries (at most 60 s) until the remote config
+   * answers, and discards them if it says no or doesn't answer.
+   * @default `false`
    */
   inbound?: boolean;
   /**
-   * Webhook discovery (default true): also report POST/PUT requests whose
-   * route (`/webhooks/…`, `/hooks/…`, `/callbacks/…`, a final `/events`…) or a
-   * generic signature header (`x-signature`, `x-*-signature`…) suggests a
-   * delivery from a sender the SDK can't identify. They appear in the dashboard
-   * as discovered routes to confirm or ignore, and are never alerted on until
-   * confirmed. `false` turns it off; known senders and declared routes are
-   * still recorded.
+   * Webhook discovery: also report POST/PUT requests that look like deliveries from a
+   * sender the SDK can't identify (a route like `/webhooks/…`, a signature or HMAC
+   * header name, CloudEvents headers, a webhook host). They appear in the dashboard to
+   * confirm or ignore, and never alert until confirmed. `false` turns it off; known
+   * senders and declared routes are still recorded.
+   * @default `true`
    */
   webhookDiscovery?: boolean;
   /**
-   * `true`: log SDK problems to console.warn. `'inbound'`: log what became of each
-   * incoming request and of each flush's webhook deliveries (the same as
-   * `THEIRSIDE_DEBUG=inbound`, for apps whose settings don't reach `process.env`).
+   * `true`: log SDK problems (bad config, flush failures, template overflow) to
+   * `console.warn`. `'inbound'`: log what became of each incoming request and of each
+   * flush's webhook deliveries (the same as `THEIRSIDE_DEBUG=inbound`, for apps whose
+   * settings don't reach `process.env`).
+   * @default `false`
    */
   debug?: boolean | 'inbound';
+  /**
+   * `false` makes `init()` do nothing (e.g. in tests).
+   * @default `true`
+   */
   enabled?: boolean;
-  /** Cap for the flush done by shutdown() and on process exit. Default 2000 ms. */
+  /**
+   * Cap for the flush done by `shutdown()` and on process exit.
+   * @default `2000` (ms)
+   */
   shutdownTimeoutMs?: number;
-  /** Flush on beforeExit / SIGTERM. Default true (false in serverless mode: no exit to hook). */
+  /**
+   * Flush on `beforeExit` and `SIGTERM` (the default `SIGTERM` exit is kept).
+   * @default `true` (`false` in serverless mode: no exit to hook)
+   */
   handleProcessExit?: boolean;
   /**
-   * Short-lived or frozen processes (functions, edge, cron, CLI): no exit
-   * hooks, no heartbeat, no keep-alive sockets; send with `flush()` or `wrap()`
-   * at the end of each invocation. Default: detected from the platform's
-   * environment variables (AWS Lambda, Google Cloud Functions, Azure
-   * Functions, Vercel, Netlify, Deno Deploy, Cloudflare Workers).
+   * Short-lived or frozen processes (functions, edge, cron, CLI): no exit hooks, no
+   * heartbeat, no keep-alive sockets; send with `flush()` or `wrap()` at the end of each
+   * invocation.
+   * @default detected from AWS Lambda, Google Cloud Functions, Azure Functions, Vercel, Netlify, Deno Deploy and Cloudflare Workers environment variables
    */
   serverless?: boolean;
 }

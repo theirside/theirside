@@ -1,0 +1,25 @@
+{
+  "name": "@theirside/docs-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Checks and generators for the user docs theirside.dev publishes (docs/site): every code block compiles against the published SDK types, the configuration tables come from the source.",
+  "type": "module",
+  "scripts": {
+    "generate": "tsx src/generate.ts",
+    "check": "tsx src/check.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.2.8",
+    "@nestjs/core": "^11.2.8",
+    "@theirside/sdk": "workspace:*",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "fastify": "^5.12.8",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "yaml": "^2.8.1"
+  }
+}

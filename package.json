@@ -24,7 +24,9 @@
     "sim:list": "node scripts/sim.mjs list",
     "sim:stop": "node scripts/sim.mjs stop",
     "sim:reset": "node scripts/sim.mjs reset",
-    "sim:help": "pnpm --silent --filter @theirside/collector sim:help"
+    "sim:help": "pnpm --silent --filter @theirside/collector sim:help",
+    "docs:generate": "pnpm --filter @theirside/docs-site generate",
+    "docs:check": "pnpm --filter @theirside/docs-site check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -165,7 +165,7 @@ import { init, wrap } from '@theirside/sdk';
 
 init({
   apiKey: process.env.THEIRSIDE_API_KEY,
-  endpoint: process.env.THEIRSIDE_ENDPOINT,
+  endpoint: process.env.THEIRSIDE_COLLECTOR_URL,
   inbound: true,
 });
 
@@ -268,7 +268,7 @@ A function's process may be frozen right after it returns and killed later witho
 ```ts
 import { init, wrap } from '@theirside/sdk';
 
-init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: process.env.THEIRSIDE_ENDPOINT });
+init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: process.env.THEIRSIDE_COLLECTOR_URL });
 
 export const handler = wrap(async (event, context) => {
   // … your code, calling providers as usual
