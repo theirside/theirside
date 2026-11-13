@@ -2,6 +2,10 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
+## Unreleased
+
+- **User documentation** for theirside.dev in `docs/site/`: getting started, Node servers, serverless, webhooks, expected outcomes, self-hosting, configuration (generated from the code), privacy, troubleshooting, and a prompt for AI coding agents. Every code sample is type-checked against the SDK's published types in CI.
+
 ## Collector 0.6.0
 
 No SDK change: works with every SDK version (SDK 0.4.1 is current).
