@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Theirside collector API
-  version: 0.6.0
+  version: 0.6.1
   description: |
     Public API of the Theirside collector: SDK ingest, the health API
     and incidents. Authenticate with a project API key (`Authorization: Bearer tsd_live_…`);

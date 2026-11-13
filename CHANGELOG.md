@@ -2,9 +2,13 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
-## Unreleased
+## Collector 0.6.1
 
-- **User documentation** for theirside.dev in `docs/site/`: getting started, Node servers, serverless, webhooks, expected outcomes, self-hosting, configuration (generated from the code), privacy, troubleshooting, and a prompt for AI coding agents. Every code sample is type-checked against the SDK's published types in CI.
+**Docs for theirside.dev.** No behaviour change in the collector, and no SDK release: it works like 0.6.0, and the self-host compose file stays on the `0.6` line, so a `pull` picks it up.
+
+- User documentation in `docs/site/`, which theirside.dev renders from the latest release: getting started, Node servers, serverless, webhooks, expected outcomes, self-hosting (Compose, ECS Fargate, Kubernetes, upgrades, backups, load balancer, public status page), configuration, privacy, troubleshooting, and a prompt for AI coding agents.
+- The configuration tables are generated from the code: every `init()` option from the SDK's type comments (which now describe each option and its default in editors too) and every collector environment variable from one list a test keeps complete.
+- CI type-checks every code sample against the SDK's published types (`pnpm docs:check`). The Kubernetes manifest was applied on a throwaway cluster, and the Express, Fastify and NestJS samples were run against a collector with SDK 0.4.1.
 
 ## Collector 0.6.0
 
