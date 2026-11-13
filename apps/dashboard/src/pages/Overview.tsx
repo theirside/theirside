@@ -59,6 +59,23 @@ export function Overview({ environment }: { environment: string }) {
           . Review them in <a href={href('settings', 'providers')}>Settings → Providers</a>.
         </Callout>
       )}
+      {(data?.discovery.webhookRoutes ?? []).length > 0 && (
+        <Callout data-testid="discovered-webhook-routes">
+          {data!.discovery.webhookRoutes!.map((r, i) => (
+            <span key={r.endpoint}>
+              {i > 0 && <br />}
+              <b>New webhook route discovered:</b>{' '}
+              <a href={href('webhooks')}>
+                <code>
+                  {r.method} {r.endpoint}
+                </code>
+              </a>
+              {r.suggestedName && <> (suggested: {r.suggestedName})</>}
+            </span>
+          ))}
+          . Confirm or ignore it on the <a href={href('webhooks')}>Webhooks</a> page.
+        </Callout>
+      )}
       {data?.discovery.overflow && (
         <Callout tone="danger">
           This project reached the provider limit; new hosts are collected under <b>Other</b>. Hide

@@ -594,3 +594,103 @@ test('expected outcomes: mark a status as expected from an incident, then unmark
     .providers as { name: string; expectedStatuses?: Record<string, number[]> }[];
   expect(providers.find((p) => p.name === MARK_PROVIDER)?.expectedStatuses ?? {}).toEqual({});
 });
+
+test('discovered webhook route: banner, confirm on the Webhooks page by linking to the provider, monitored', async ({
+  page,
+  request,
+}) => {
+  // a route from a sender the SDK can't identify, named after the demo's acmecards.test domain
+  const ingestKey = process.env.THEIRSIDE_BOOTSTRAP_API_KEY ?? 'tsd_live_localdemo0000000000000000';
+  const letters = Array.from({ length: 6 }, () =>
+    String.fromCharCode(97 + Math.floor(Math.random() * 26)),
+  ).join('');
+  const endpoint = `/v1/inbox-${letters}`;
+  const res = await request.post('/v1/ingest', {
+    headers: { authorization: `Bearer ${ingestKey}` },
+    data: {
+      protocol: 1,
+      sdk: { name: '@theirside/sdk', version: 'smoke' },
+      service: 'smoke-hooks',
+      environment: 'production',
+      dropped: 0,
+      events: [
+        {
+          ts: Date.now(),
+          provider: 'acmecards',
+          host: 'inbound',
+          method: 'POST',
+          endpoint,
+          status: 200,
+          durationMs: 12,
+          outcome: 'ok',
+          direction: 'inbound',
+          candidate: true,
+          count: 4,
+        },
+      ],
+    },
+  });
+  expect(res.status()).toBe(202);
+  try {
+    await signIn(page, request);
+    // the Providers page announces it
+    await expect(page.getByTestId('discovered-webhook-routes')).toContainText(
+      `New webhook route discovered: POST ${endpoint} (suggested: acmecards)`,
+    );
+    await page
+      .getByTestId('discovered-webhook-routes')
+      .getByRole('link', { name: `POST ${endpoint}` })
+      .click();
+
+    // the Webhooks page: discovered, not monitored yet
+    const section = page.getByTestId('discovered-routes');
+    await expect(section).toBeVisible();
+    const row = section.locator(`[data-testid="candidate"][data-endpoint="${endpoint}"]`);
+    await expect(row).toContainText('smoke-hooks');
+    await expect(row).toContainText('Acmecards');
+    await row.getByRole('button', { name: 'Confirm…' }).click();
+
+    // the dialog suggests the outgoing provider with the same domain, and says why
+    const dialog = page.getByTestId('confirm-route');
+    await expect(dialog.getByLabel('Link to an existing provider')).toBeChecked();
+    const suggested = dialog
+      .getByRole('listitem')
+      .filter({ hasText: 'suggested: same domain as acmecards.test' });
+    await expect(suggested.getByRole('radio')).toBeChecked();
+    // the search narrows the list; the suggestion stays picked
+    await dialog.getByLabel('Search providers').fill('acme');
+    await expect(suggested.getByRole('radio')).toBeChecked();
+    await dialog.getByRole('button', { name: 'Confirm route' }).click();
+
+    // it leaves the discovered list and is monitored under that provider
+    await expect(section.locator(`[data-endpoint="${endpoint}"]`)).toHaveCount(0);
+    const waiting = page.getByTestId('waiting-route').filter({ hasText: endpoint });
+    await expect(waiting).toContainText('waiting for the first delivery');
+    const card = page.getByTestId('webhooks').filter({ has: waiting });
+    await expect(card.getByRole('link', { name: /webhooks/ })).toHaveAttribute(
+      'href',
+      '#/providers/acmecards.test',
+    );
+
+    // one provider: its page shows outgoing endpoints, the new webhook route, one alerts switch
+    await page.goto('/#/providers/acmecards.test');
+    await expect(page.getByTestId('endpoints')).toBeVisible();
+    await expect(page.getByTestId('waiting-route').filter({ hasText: endpoint })).toBeVisible();
+    await expect(
+      page.getByTestId('provider-shared').getByLabel('Alerts on, for outgoing calls and webhooks'),
+    ).toBeVisible();
+    const providers = (await (await request.get('/v1/admin/providers', { headers: auth })).json())
+      .providers as { name: string }[];
+    expect(providers.filter((p) => p.name.toLowerCase().includes('acmecards'))).toHaveLength(1);
+  } finally {
+    // leave the demo as it was: back to pending, then ignored
+    await request.put('/v1/admin/webhooks/candidates/restore', {
+      headers: auth,
+      data: { endpoint },
+    });
+    await request.put('/v1/admin/webhooks/candidates/ignore', {
+      headers: auth,
+      data: { endpoint },
+    });
+  }
+});

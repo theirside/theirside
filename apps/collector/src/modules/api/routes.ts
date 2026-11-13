@@ -216,15 +216,23 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
     if (!tenant) return;
     const q = healthQuery.extend({ provider: z.string().min(1).optional() }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid query' });
-    const [health, open, envs] = await Promise.all([
-      computeHealth(ctx.storage, tenant, ctx.clock.now(), {
+    const now = ctx.clock.now();
+    const [health, open, envs, candidates] = await Promise.all([
+      computeHealth(ctx.storage, tenant, now, {
         ...healthOpts(q.data),
         ...(q.data.provider ? { provider: q.data.provider } : {}),
       }),
       ctx.storage.incidents.list(tenant, { status: 'open' }),
       ctx.storage.config.listSdkInstances(tenant),
+      // the provider page doesn't show the banner
+      q.data.provider
+        ? Promise.resolve([])
+        : ctx.storage.inbound.listCandidates(
+            tenant,
+            new Date(Math.floor(now.getTime() / 86_400_000) * 86_400_000),
+          ),
     ]);
-    const day = ctx.clock.now().getTime() - 24 * 3600_000;
+    const day = now.getTime() - 24 * 3600_000;
     return {
       ...health,
       openIncidents: open.map((i) => incidentView(i, ctx.clock.now())),
@@ -243,6 +251,16 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
           })),
         // over the provider cap new hosts land in "Other"
         overflow: health.providers.some((p) => p.name === OTHER_PROVIDER),
+        // "New webhook route discovered": routes first seen in the last 24 h, still undecided
+        webhookRoutes: candidates
+          .filter((c) => c.status === 'pending' && c.firstSeenAt.getTime() >= day)
+          .slice(0, 10)
+          .map((c) => ({
+            method: c.method,
+            endpoint: c.endpoint,
+            suggestedName: c.suggestedName,
+            firstSeenAt: c.firstSeenAt.toISOString(),
+          })),
       },
     };
   });

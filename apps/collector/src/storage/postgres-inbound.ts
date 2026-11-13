@@ -511,6 +511,20 @@ export class PgInboundStore implements InboundStore {
     };
   }
 
+  async takeUnnotifiedCandidates(tenant: Tenant): Promise<WebhookCandidate[]> {
+    // the database's date, like notified_at: the message only needs the routes themselves
+    const { rows } = await this.db.query(
+      `UPDATE webhook_candidates SET notified_at = now()
+        WHERE org_id = $1 AND project_id = $2 AND status = 'pending' AND notified_at IS NULL
+        RETURNING endpoint, current_date::text AS today`,
+      [tenant.orgId, tenant.projectId],
+    );
+    if (rows.length === 0) return [];
+    const taken = new Set(rows.map((r: Row) => r.endpoint as string));
+    const today = new Date(`${rows[0].today as string}T00:00:00Z`);
+    return (await this.listCandidates(tenant, today)).filter((c) => taken.has(c.endpoint));
+  }
+
   async pruneCandidates(before: Date) {
     await this.db.query(`DELETE FROM webhook_candidate_days WHERE day < $1::date`, [
       before.toISOString().slice(0, 10),

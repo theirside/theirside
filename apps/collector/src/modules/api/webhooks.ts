@@ -5,6 +5,7 @@ import type { AppContext } from '../../context.js';
 import type { InboundKey, Tenant, WebhookCandidate } from '../../storage/types.js';
 import { inboundKeyId, isInbound } from '../../storage/types.js';
 import { floorMinute } from '../../util/clock.js';
+import { nameKey, suggestProvider } from '../discovery/candidate-match.js';
 import { MAX_PENDING_CANDIDATES } from '../ingest/route.js';
 import { inboundStats } from '../scoring/inbound.js';
 import {
@@ -50,6 +51,12 @@ const candidateConfirm = candidateRoute.extend({
     .min(1)
     .max(128)
     .refine((v) => v.toLowerCase() !== 'unknown', 'give the sender a name'),
+  /**
+   * `link`: `provider` is an existing provider's name (its outgoing endpoints and these
+   * webhooks then share one provider); `new`: create it (409 when one with that name
+   * exists). Missing: link when it exists, else create (older dashboards).
+   */
+  mode: z.enum(['link', 'new']).optional(),
 });
 
 const DAY_MS = 86_400_000;
@@ -75,8 +82,9 @@ export function candidateView(c: WebhookCandidate, today: Date) {
   };
 }
 
+/** `waiting`: a confirmed route that hasn't delivered since (no source yet). */
 export type WebhookSourceStatus =
-  'incident' | 'quiet' | 'learning' | 'irregular' | 'all_quiet' | 'ok';
+  'incident' | 'quiet' | 'learning' | 'irregular' | 'all_quiet' | 'ok' | 'waiting';
 
 /**
  * Dashboard API for inbound webhooks (architecture §3.3): every source with its
@@ -107,15 +115,17 @@ export async function registerWebhookRoutes(
       ...(q.data.environment ? { environment: q.data.environment } : {}),
       ...(q.data.provider ? { provider: q.data.provider } : {}),
     };
-    const [sources, ranged, lastHour, baselines, open, providers, thresholds] = await Promise.all([
-      ctx.storage.inbound.listSources(tenant),
-      ctx.storage.inbound.aggregateByKey(tenant, { from, to, ...filter }),
-      ctx.storage.inbound.aggregateByKey(tenant, { from: hourAgo, to, ...filter }),
-      ctx.storage.inbound.getBaselines(tenant),
-      ctx.storage.incidents.list(tenant, { status: 'open', direction: 'inbound' }),
-      ctx.storage.config.listProviders(tenant),
-      ctx.storage.config.getThresholds(tenant),
-    ]);
+    const [sources, ranged, lastHour, baselines, open, providers, thresholds, routes] =
+      await Promise.all([
+        ctx.storage.inbound.listSources(tenant),
+        ctx.storage.inbound.aggregateByKey(tenant, { from, to, ...filter }),
+        ctx.storage.inbound.aggregateByKey(tenant, { from: hourAgo, to, ...filter }),
+        ctx.storage.inbound.getBaselines(tenant),
+        ctx.storage.incidents.list(tenant, { status: 'open', direction: 'inbound' }),
+        ctx.storage.config.listProviders(tenant),
+        ctx.storage.config.getThresholds(tenant),
+        ctx.storage.inbound.candidateRoutes(tenant),
+      ]);
     const projectT = resolveThresholds(thresholds);
     const rangeBy = new Map(ranged.map((a) => [inboundKeyId(a), a]));
     const hourBy = new Map(lastHour.map((a) => [inboundKeyId(a), a]));
@@ -207,6 +217,38 @@ export async function registerWebhookRoutes(
         incident: inc ? { id: inc.id, kind: inc.kind, openedAt: inc.openedAt.toISOString() } : null,
       });
       out.set(s.provider, list);
+    }
+    // confirmed routes listed before their first delivery under that provider (the SDK
+    // picks the confirmation up within a minute; the route then records like any other)
+    for (const c of routes.confirmed) {
+      if (q.data.provider && c.provider !== q.data.provider) continue;
+      if (sources.some((s) => s.provider === c.provider && s.endpoint === c.path)) continue;
+      const list = out.get(c.provider) ?? [];
+      list.push({
+        environment: '',
+        endpoint: c.path,
+        firstSeenAt: null,
+        lastDeliveryAt: null,
+        lastService: null,
+        expectedQuiet: false,
+        status: 'waiting' satisfies WebhookSourceStatus,
+        silenceLearning: true,
+        silenceIrregular: false,
+        silenceForced: false,
+        longestNormalGapMinutes: null,
+        deliveries: 0,
+        deliveriesPerHour: 0,
+        normalPerHour: null,
+        rejectionRate: null,
+        authRate: null,
+        normalRejectionRate: null,
+        p95Ms: null,
+        normalP95Ms: null,
+        lagP95S: null,
+        normalLagP95S: null,
+        incident: null,
+      });
+      out.set(c.provider, list);
     }
     return {
       range: q.data.range,
@@ -301,9 +343,19 @@ export async function registerWebhookRoutes(
     const tenant = await r.tenantOf(req, reply);
     if (!tenant) return;
     const today = startOfUtcDay(ctx.clock.now());
-    const list = await ctx.storage.inbound.listCandidates(tenant, today);
+    const [list, providers] = await Promise.all([
+      ctx.storage.inbound.listCandidates(tenant, today),
+      ctx.storage.config.listProviders(tenant),
+    ]);
     return {
-      candidates: list.map((c) => candidateView(c, today)),
+      candidates: list.map((c) => ({
+        ...candidateView(c, today),
+        // the provider to link it to (or create) when confirming, and why
+        match:
+          c.status === 'pending'
+            ? suggestProvider(c.suggestedName, providers, ctx.directory.catalog)
+            : null,
+      })),
       pending: list.filter((c) => c.status === 'pending').length,
       maxPending: MAX_PENDING_CANDIDATES,
     };
@@ -316,6 +368,22 @@ export async function registerWebhookRoutes(
     const p = candidateConfirm.safeParse(req.body);
     if (!p.success)
       return reply.code(400).send({ error: 'invalid route', detail: p.error.issues[0]?.message });
+    const providers = await ctx.storage.config.listProviders(tenant);
+    const exact = providers.find((x) => x.name === p.data.provider);
+    if (p.data.mode === 'link' && !exact)
+      return reply.code(404).send({ error: 'provider not found', provider: p.data.provider });
+    if (p.data.mode === 'new') {
+      // a second provider for the same company is what linking avoids
+      const key = nameKey(p.data.provider);
+      const same = providers.find(
+        (x) => nameKey(x.name) === key || (x.displayName && nameKey(x.displayName) === key),
+      );
+      if (same)
+        return reply.code(409).send({
+          error: `a provider named ${same.displayName || same.name} exists: link the route to it`,
+          provider: same.name,
+        });
+    }
     const ok = await ctx.storage.inbound.decideCandidate(tenant, p.data.endpoint, {
       status: 'confirmed',
       provider: p.data.provider,
@@ -323,9 +391,33 @@ export async function registerWebhookRoutes(
       at: ctx.clock.now(),
     });
     if (!ok) return reply.code(404).send({ error: 'not found' });
-    // settings, alerts switch and thresholds live on the provider row
-    await ctx.storage.config.ensureProviders(tenant, [p.data.provider], new Map(), ctx.clock.now());
-    return { endpoint: p.data.endpoint, status: 'confirmed', provider: p.data.provider };
+    if (!exact) {
+      // settings, alerts switch and thresholds live on the provider row
+      await ctx.storage.config.ensureProviders(
+        tenant,
+        [p.data.provider],
+        new Map(),
+        ctx.clock.now(),
+      );
+      // a catalog provider starts with the catalog's category and support contact
+      const entry = ctx.directory.catalog.entries.find((e) => e.name === p.data.provider);
+      const created = entry
+        ? (await ctx.storage.config.listProviders(tenant)).find((x) => x.name === p.data.provider)
+        : undefined;
+      if (entry && created)
+        await ctx.storage.config.updateProvider(tenant, created.id, {
+          category: entry.category,
+          supportEmail: created.supportEmail ?? entry.supportEmail,
+          supportUrl: created.supportUrl ?? entry.supportUrl,
+        });
+      ctx.directory.invalidate(tenant);
+    }
+    return {
+      endpoint: p.data.endpoint,
+      status: 'confirmed',
+      provider: p.data.provider,
+      linked: !!exact,
+    };
   });
 
   /** Ignore a discovered route (members): the SDKs stop reporting it. */

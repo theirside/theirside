@@ -82,27 +82,38 @@ export function Settings({ tab, sub, me }: { tab: string; sub?: string; me: Me }
 function DiscoverySettings() {
   const isAdmin = useIsAdmin();
   const [data, , reload] = usePoll(
-    () => api<{ digest: boolean }>('/v1/admin/settings/discovery'),
+    () => api<{ digest: boolean; webhookRoutes?: boolean }>('/v1/admin/settings/discovery'),
     [],
     60_000,
   );
   if (!data) return null;
+  const save = (body: { digest?: boolean; webhookRoutes?: boolean }) =>
+    void api('/v1/admin/settings/discovery', { method: 'PUT', body }).then(reload);
   return (
-    <Field check className="discovery-setting">
-      <input
-        type="checkbox"
-        checked={data.digest}
-        disabled={!isAdmin}
-        onChange={(e) =>
-          void api('/v1/admin/settings/discovery', {
-            method: 'PUT',
-            body: { digest: e.target.checked },
-          }).then(reload)
-        }
-      />{' '}
-      Send a message to alert channels when new providers are discovered (at most hourly)
-      {!isAdmin && <small className="muted"> (admins only)</small>}
-    </Field>
+    <>
+      <Field check className="discovery-setting">
+        <input
+          type="checkbox"
+          checked={data.digest}
+          disabled={!isAdmin}
+          onChange={(e) => save({ digest: e.target.checked })}
+        />{' '}
+        Send a message to alert channels when new providers are discovered (at most hourly)
+        {!isAdmin && <small className="muted"> (admins only)</small>}
+      </Field>
+      {data.webhookRoutes !== undefined && (
+        <Field check className="discovery-setting">
+          <input
+            type="checkbox"
+            checked={data.webhookRoutes}
+            disabled={!isAdmin}
+            onChange={(e) => save({ webhookRoutes: e.target.checked })}
+          />{' '}
+          Send a message to alert channels when a new webhook route is discovered (once per route)
+          {!isAdmin && <small className="muted"> (admins only)</small>}
+        </Field>
+      )}
+    </>
   );
 }
 

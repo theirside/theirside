@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react';
-import { api, type EndpointHealth, type Overview, type Range, type Series } from '../api';
+import {
+  api,
+  type EndpointHealth,
+  type Incident,
+  type Overview,
+  type Provider as ProviderConfig,
+  type Range,
+  type Series,
+} from '../api';
 import { Chart, type ChartSeries } from '../components/Chart';
 import {
   Badge,
@@ -14,6 +22,7 @@ import {
 import { GROUP_LABEL, KIND_LABEL, ago, ms, num, pct } from '../format';
 import { href } from '../router';
 import { EXPECTABLE_STATUSES, ExpectedMarks, MarkExpected, STATUSES_OF_KIND } from './Expected';
+import { IncidentTable } from './Incidents';
 import { WebhooksSection } from './Webhooks';
 
 /** The endpoint table column an open incident of this kind is about (highlighted). */
@@ -371,7 +380,82 @@ export function Provider({ name, environment }: { name: string; environment: str
       )}
       {data?.range === range && !p && <div className="empty">No outgoing calls to {name}.</div>}
       <WebhooksSection provider={name} environment={environment} range={range} />
+      <ProviderShared name={name} />
     </>
+  );
+}
+
+/**
+ * What outgoing calls and webhooks of one provider share: one alerts switch, one support
+ * contact, and its incidents from both directions.
+ */
+function ProviderShared({ name }: { name: string }) {
+  const [providers, , reload] = usePoll(
+    () => api<{ providers: ProviderConfig[] }>('/v1/admin/providers'),
+    [],
+    60_000,
+  );
+  const [incidents, error] = usePoll(
+    () =>
+      api<{ incidents: Incident[] }>(
+        `/v1/admin/incidents?provider=${encodeURIComponent(name)}&limit=10`,
+      ),
+    [name],
+  );
+  const [saving, setSaving] = useState(false);
+  const cfg = providers?.providers.find((x) => x.name === name);
+  const setAlerts = async (alertsEnabled: boolean) => {
+    if (!cfg) return;
+    setSaving(true);
+    try {
+      await api(`/v1/admin/providers/${encodeURIComponent(cfg.id)}`, {
+        method: 'PATCH',
+        body: { alertsEnabled },
+      });
+      reload();
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Card title="Alerts, support and incidents" data-testid="provider-shared">
+      <ErrorBox error={error} />
+      {cfg && (
+        <div className="provider-shared">
+          <label className="field check">
+            <input
+              type="checkbox"
+              checked={cfg.alertsEnabled}
+              disabled={saving}
+              onChange={(e) => void setAlerts(e.target.checked)}
+            />{' '}
+            Alerts on, for outgoing calls and webhooks
+          </label>
+          <div>
+            <span className="muted">Support: </span>
+            {cfg.supportEmail || cfg.supportUrl ? (
+              <>
+                {cfg.supportEmail && <a href={`mailto:${cfg.supportEmail}`}>{cfg.supportEmail}</a>}
+                {cfg.supportEmail && cfg.supportUrl && ' · '}
+                {cfg.supportUrl && (
+                  <a href={cfg.supportUrl} target="_blank" rel="noreferrer">
+                    {cfg.supportUrl}
+                  </a>
+                )}
+              </>
+            ) : (
+              <a href={href('settings', 'providers', name)}>add a support contact</a>
+            )}
+            <span className="muted"> (in alerts and incident summaries)</span>
+          </div>
+        </div>
+      )}
+      {incidents && incidents.incidents.length > 0 ? (
+        <IncidentTable incidents={incidents.incidents} testId="provider-incidents" />
+      ) : (
+        incidents && <div className="empty">No incidents for {cfg?.displayName ?? name}.</div>
+      )}
+    </Card>
   );
 }
 

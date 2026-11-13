@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import {
   api,
   type Range,
@@ -24,6 +24,7 @@ import {
 import { KIND_LABEL, ago, lag, ms, num, pct } from '../format';
 import { href } from '../router';
 import { useIsAdmin } from '../role';
+import { ConfirmRoute, titleCase } from './ConfirmRoute';
 
 const NORMAL = 'var(--color-healthy)';
 
@@ -38,11 +39,17 @@ export function WebhooksSection({
   environment,
   range,
   showProvider,
+  empty,
+  reloadKey,
 }: {
   provider?: string;
   environment: string;
   range: Range;
   showProvider?: boolean;
+  /** Shown when nothing is monitored (the Webhooks page); default: a one-line hint. */
+  empty?: ReactNode;
+  /** Changes when a route was confirmed elsewhere on the page: load again at once. */
+  reloadKey?: number;
 }) {
   const qs = new URLSearchParams({
     range,
@@ -51,11 +58,11 @@ export function WebhooksSection({
   });
   const [data, error, reload] = usePoll(
     () => api<WebhooksResponse>(`/v1/admin/webhooks?${qs}`),
-    [qs.toString()],
+    [qs.toString(), reloadKey ?? 0],
   );
   if (error) return <ErrorBox error={error} />;
   if (!data || data.range !== range) return null;
-  if (data.providers.length === 0) return provider ? null : <Empty>{NO_WEBHOOKS}</Empty>;
+  if (data.providers.length === 0) return provider ? null : (empty ?? <Empty>{NO_WEBHOOKS}</Empty>);
   return (
     <>
       {data.allQuiet && (
@@ -129,28 +136,32 @@ function ProviderWebhooks({
           </tr>
         </thead>
         <tbody>
-          {p.sources.map((s) => (
-            <Fragment key={key(s)}>
-              <SourceRow
-                provider={p.provider}
-                s={s}
-                onToggle={() => setOpen(open === key(s) ? null : key(s))}
-                onChanged={onChanged}
-              />
-              {open === key(s) && (
-                <tr className="detail">
-                  <td colSpan={9}>
-                    <SourceCharts
-                      provider={p.provider}
-                      s={s}
-                      range={range}
-                      environment={environment || s.environment}
-                    />
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-          ))}
+          {p.sources.map((s) =>
+            s.status === 'waiting' ? (
+              <WaitingRow key={`waiting ${s.endpoint}`} s={s} />
+            ) : (
+              <Fragment key={key(s)}>
+                <SourceRow
+                  provider={p.provider}
+                  s={s}
+                  onToggle={() => setOpen(open === key(s) ? null : key(s))}
+                  onChanged={onChanged}
+                />
+                {open === key(s) && (
+                  <tr className="detail">
+                    <td colSpan={9}>
+                      <SourceCharts
+                        provider={p.provider}
+                        s={s}
+                        range={range}
+                        environment={environment || s.environment}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ),
+          )}
         </tbody>
       </Table>
     </Card>
@@ -159,6 +170,7 @@ function ProviderWebhooks({
 
 const STATUS_BADGE: Record<WebhookSource['status'], { text: string; tone?: 'danger' } | null> = {
   incident: null,
+  waiting: { text: 'waiting for the first delivery' },
   quiet: { text: 'expected quiet' },
   learning: { text: 'learning' },
   irregular: { text: 'irregular: silence alerts off' },
@@ -176,6 +188,21 @@ const gap = (m: number) =>
     : m < 1440
       ? `${Math.floor(m / 60)} h${m % 60 ? ` ${Math.round(m % 60)} min` : ''}`
       : `${Math.floor(m / 1440)} d${Math.floor((m % 1440) / 60) ? ` ${Math.floor((m % 1440) / 60)} h` : ''}`;
+
+/** A route confirmed a moment ago: monitored from its first delivery, no numbers yet. */
+function WaitingRow({ s }: { s: WebhookSource }) {
+  return (
+    <tr data-testid="waiting-route">
+      <td>
+        <code>POST</code> <code>{s.endpoint}</code> <Badge>waiting for the first delivery</Badge>
+      </td>
+      <td colSpan={8} className="muted">
+        Confirmed. The SDK records it from its next settings refresh (within a minute), then it is
+        judged like every route here.
+      </td>
+    </tr>
+  );
+}
 
 function SourceRow({
   provider,
@@ -363,95 +390,225 @@ function SourceCharts({
   );
 }
 
-/** #/webhooks: every provider's webhooks. */
+/** Where the SDK README explains how deliveries are found (the repo is public). */
+const INBOUND_DOCS =
+  'https://github.com/theirside/theirside/blob/main/packages/sdk/README.md#inbound-webhooks';
+
+/** Nothing monitored and nothing discovered: how deliveries are found, and what to try. */
+function WebhooksEmpty() {
+  return (
+    <Card title="No webhooks yet" data-testid="webhooks-empty">
+      <p>
+        Deliveries from known senders (Stripe, GitHub, Shopify, Slack, Svix and others) are recorded
+        automatically. Others show up here as discovered routes for you to confirm, or declare them
+        in{' '}
+        <code>
+          init({'{'} webhooks: [{'{'} path, provider {'}'}] {'}'})
+        </code>
+        .{' '}
+        <a href={INBOUND_DOCS} target="_blank" rel="noreferrer">
+          How webhooks are found
+        </a>
+      </p>
+      <p className="muted">
+        Expected webhooks don&apos;t show? Start the receiving service with{' '}
+        <code>THEIRSIDE_DEBUG=inbound</code> (or <code>debug: &apos;inbound&apos;</code> in{' '}
+        <code>init()</code>): it logs why each incoming request was or wasn&apos;t picked up, and
+        what each flush sent.
+      </p>
+    </Card>
+  );
+}
+
+/**
+ * The top of the Webhooks page: routes the SDK saw that look like deliveries from a
+ * sender it can't identify, with Confirm (link to a provider or create one) and Ignore.
+ * A confirmed route moves into the monitored list below.
+ */
+function DiscoveredSection({
+  data,
+  onChanged,
+}: {
+  data: WebhookCandidatesResponse;
+  onChanged: () => void;
+}) {
+  const isAdmin = useIsAdmin();
+  const [actionError, setActionError] = useState<string | undefined>();
+  const pending = data.candidates.filter((c) => c.status === 'pending');
+  if (pending.length === 0) return null;
+  const done = (e?: string) => {
+    setActionError(e);
+    onChanged();
+  };
+  return (
+    <Card
+      title="Discovered, not monitored yet"
+      data-testid="discovered-routes"
+      actions={<span className="muted">never alerted on until confirmed</span>}
+    >
+      <p className="muted">
+        Incoming requests that look like webhook deliveries from a sender the SDK can&apos;t
+        identify. {isAdmin ? 'Confirm' : 'An admin confirms'} a route with its sender to monitor it;
+        ignore routes that aren&apos;t webhooks, and the SDK stops reporting them.
+      </p>
+      <ErrorBox error={actionError} />
+      <Table>
+        <thead>
+          <tr>
+            <th>Route</th>
+            <th>Service</th>
+            <th>Suggested name</th>
+            <th className="num">Deliveries/day</th>
+            <th>First seen</th>
+            <th>Last seen</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map((c) => (
+            <CandidateRow key={c.endpoint} c={c} isAdmin={isAdmin} onDone={done} serviceColumn />
+          ))}
+        </tbody>
+      </Table>
+      {data.pending >= data.maxPending && (
+        <p className="muted">
+          Showing the first {data.maxPending} routes; new ones are recorded once some are confirmed
+          or ignored.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/** #/webhooks: discovered routes first, then every provider's monitored webhooks. */
 export function Webhooks({ environment }: { environment: string }) {
   const [range, setRange] = useState<Range>('24h');
+  const [confirmed, setConfirmed] = useState(0);
+  const [candidates, candidatesError, reloadCandidates] = usePoll(
+    () => api<WebhookCandidatesResponse>('/v1/admin/webhooks/candidates'),
+    [],
+    60_000,
+  );
+  const pending = candidates?.candidates.some((c) => c.status === 'pending') ?? false;
   return (
     <>
       <div className="page-h">
         <h1>Webhooks</h1>
         <Segmented value={range} options={['1h', '24h', '7d']} onChange={setRange} />
       </div>
-      <WebhooksSection environment={environment} range={range} showProvider />
+      <ErrorBox error={candidatesError} />
+      {candidates && (
+        <DiscoveredSection
+          data={candidates}
+          onChanged={() => {
+            reloadCandidates();
+            setConfirmed((n) => n + 1);
+          }}
+        />
+      )}
+      {candidates && (
+        <WebhooksSection
+          environment={environment}
+          range={range}
+          showProvider
+          reloadKey={confirmed}
+          empty={
+            pending ? (
+              <Empty>Nothing monitored yet: confirm a discovered route above.</Empty>
+            ) : (
+              <WebhooksEmpty />
+            )
+          }
+        />
+      )}
     </>
   );
 }
-
-/** "OrbitPay" from "orbitpay", "Lemon Squeezy" from "lemon-squeezy": a starting point for the name. */
-const titleCase = (s: string) =>
-  s
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
 
 function CandidateRow({
   c,
   isAdmin,
   onDone,
+  serviceColumn = false,
 }: {
   c: WebhookCandidate;
   isAdmin: boolean;
   onDone: (error?: string) => void;
+  /** The service in a column of its own (Webhooks page) instead of under the route. */
+  serviceColumn?: boolean;
 }) {
-  const [name, setName] = useState(c.suggestedName ? titleCase(c.suggestedName) : '');
-  const act = (action: 'confirm' | 'ignore' | 'restore', body: Record<string, string>) =>
+  const [confirming, setConfirming] = useState(false);
+  const act = (action: 'ignore' | 'restore', body: Record<string, string>) =>
     api(`/v1/admin/webhooks/candidates/${action}`, { method: 'PUT', body }).then(
       () => onDone(),
       (e: unknown) => onDone(String((e as Error).message)),
     );
+  const columns = serviceColumn ? 7 : 6;
   return (
-    <tr>
-      <td>
-        <code>
-          {c.method} {c.endpoint}
-        </code>
-        {c.lastService && <div className="muted">{c.lastService}</div>}
-      </td>
-      <td>{c.status === 'confirmed' ? c.provider : (c.suggestedName ?? '–')}</td>
-      <td className="num">{num(c.deliveriesPerDay)}</td>
-      <td>{ago(c.firstSeenAt)}</td>
-      <td>{ago(c.lastSeenAt)}</td>
-      <td>
-        {c.status === 'pending' && (
-          <div className="row">
-            {isAdmin && (
-              <>
-                <input
-                  aria-label={`Sender name for ${c.endpoint}`}
-                  placeholder="Sender name"
-                  value={name}
-                  maxLength={128}
-                  onChange={(e) => setName(e.target.value)}
-                />
+    <>
+      <tr data-testid="candidate" data-endpoint={c.endpoint}>
+        <td>
+          <code>
+            {c.method} {c.endpoint}
+          </code>
+          {!serviceColumn && c.lastService && <div className="muted">{c.lastService}</div>}
+        </td>
+        {serviceColumn && <td>{c.lastService ?? '–'}</td>}
+        <td>
+          {c.status === 'confirmed'
+            ? c.provider
+            : c.suggestedName
+              ? titleCase(c.suggestedName)
+              : '–'}
+        </td>
+        <td className="num">{num(c.deliveriesPerDay)}</td>
+        <td>{ago(c.firstSeenAt)}</td>
+        <td>{ago(c.lastSeenAt)}</td>
+        <td>
+          {c.status === 'pending' && (
+            <div className="row">
+              {isAdmin && (
                 <Button
                   size="small"
                   variant="primary"
-                  disabled={!name.trim()}
-                  onClick={() =>
-                    void act('confirm', { endpoint: c.endpoint, provider: name.trim() })
-                  }
+                  aria-expanded={confirming}
+                  onClick={() => setConfirming(!confirming)}
                 >
-                  Confirm
+                  Confirm…
                 </Button>
-              </>
-            )}
-            <Button size="small" onClick={() => void act('ignore', { endpoint: c.endpoint })}>
-              Ignore
-            </Button>
-          </div>
-        )}
-        {c.status !== 'pending' && (
-          <div className="row">
-            <Badge tone={c.status === 'confirmed' ? 'healthy' : 'neutral'}>{c.status}</Badge>
-            {isAdmin && (
-              <Button size="small" onClick={() => void act('restore', { endpoint: c.endpoint })}>
-                {c.status === 'confirmed' ? 'Stop monitoring' : 'Restore'}
+              )}
+              <Button size="small" onClick={() => void act('ignore', { endpoint: c.endpoint })}>
+                Ignore
               </Button>
-            )}
-          </div>
-        )}
-      </td>
-    </tr>
+            </div>
+          )}
+          {c.status !== 'pending' && (
+            <div className="row">
+              <Badge tone={c.status === 'confirmed' ? 'healthy' : 'neutral'}>{c.status}</Badge>
+              {isAdmin && (
+                <Button size="small" onClick={() => void act('restore', { endpoint: c.endpoint })}>
+                  {c.status === 'confirmed' ? 'Stop monitoring' : 'Restore'}
+                </Button>
+              )}
+            </div>
+          )}
+        </td>
+      </tr>
+      {confirming && c.status === 'pending' && (
+        <tr className="detail">
+          <td colSpan={columns}>
+            <ConfirmRoute
+              c={c}
+              onCancel={() => setConfirming(false)}
+              onDone={() => {
+                setConfirming(false);
+                onDone();
+              }}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

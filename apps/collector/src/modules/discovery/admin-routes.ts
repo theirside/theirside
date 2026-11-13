@@ -7,7 +7,9 @@ import { ProviderActionError, mergeProviders, splitHostOut } from './merge.js';
 
 const mergeInput = z.object({ into: z.string().min(1) });
 const splitInput = z.object({ host: z.string().min(1).max(300) });
-const discoverySettings = z.object({ digest: z.boolean() });
+const discoverySettings = z
+  .object({ digest: z.boolean().optional(), webhookRoutes: z.boolean().optional() })
+  .refine((b) => b.digest !== undefined || b.webhookRoutes !== undefined);
 
 /** Provider merge/split and discovery settings (Settings → Providers). */
 export async function registerDiscoveryAdminRoutes(
@@ -64,7 +66,11 @@ export async function registerDiscoveryAdminRoutes(
   app.get('/v1/admin/settings/discovery', auth, async (req, reply) => {
     const tenant = await adminTenant(ctx, req, reply);
     if (!tenant) return;
-    return { digest: await ctx.storage.config.getDiscoveryDigest(tenant) };
+    return {
+      digest: await ctx.storage.config.getDiscoveryDigest(tenant),
+      // one message per newly discovered webhook route (Webhooks page)
+      webhookRoutes: await ctx.storage.config.getWebhookRouteNotices(tenant),
+    };
   });
 
   app.put('/v1/admin/settings/discovery', auth, async (req, reply) => {
@@ -72,7 +78,13 @@ export async function registerDiscoveryAdminRoutes(
     if (!tenant) return;
     const parsed = discoverySettings.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid settings' });
-    await ctx.storage.config.setDiscoveryDigest(tenant, parsed.data.digest);
-    return parsed.data;
+    if (parsed.data.digest !== undefined)
+      await ctx.storage.config.setDiscoveryDigest(tenant, parsed.data.digest);
+    if (parsed.data.webhookRoutes !== undefined)
+      await ctx.storage.config.setWebhookRouteNotices(tenant, parsed.data.webhookRoutes);
+    return {
+      digest: await ctx.storage.config.getDiscoveryDigest(tenant),
+      webhookRoutes: await ctx.storage.config.getWebhookRouteNotices(tenant),
+    };
   });
 }

@@ -269,7 +269,10 @@ describe('discovery digest', () => {
       },
       enabled: true,
     });
-    expect((await admin('GET', '/v1/admin/settings/discovery')).json()).toEqual({ digest: true });
+    expect((await admin('GET', '/v1/admin/settings/discovery')).json()).toEqual({
+      digest: true,
+      webhookRoutes: true,
+    });
     expect(
       await runDigest(t.db.storage, t.ctx.alerts, tenant, 'https://theirside.internal'),
     ).toBeGreaterThanOrEqual(3);

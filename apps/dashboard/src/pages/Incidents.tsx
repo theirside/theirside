@@ -33,50 +33,59 @@ export function Incidents() {
       </div>
       <ErrorBox error={error} />
       {data && data.incidents.length === 0 && <Empty>No incidents yet.</Empty>}
-      {data && data.incidents.length > 0 && (
-        <Table data-testid="incidents">
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Provider</th>
-              <th>Endpoints</th>
-              <th>Opened</th>
-              <th className="num">Duration</th>
-              <th className="num">Peak</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.incidents.map((i) => (
-              <tr
-                key={i.id}
-                className="clickable"
-                onClick={() => (window.location.hash = href('incidents', i.id))}
-              >
-                <td>
-                  <Badge tone={i.status === 'open' ? 'danger' : undefined}>{i.status}</Badge>
-                  {i.alertsMuted && (
-                    <Badge title="opened during cooldown; no alerts sent">muted</Badge>
-                  )}
-                </td>
-                <td>
-                  {i.provider} {i.direction === 'inbound' && <Badge>webhooks</Badge>}
-                </td>
-                <td>
-                  {i.endpoints.map((e) => (
-                    <div key={e.method + e.endpoint}>
-                      <code>{e.method}</code> <code>{e.endpoint}</code>
-                    </div>
-                  ))}
-                </td>
-                <td title={when(i.openedAt)}>{ago(i.openedAt)}</td>
-                <td className="num">{i.durationMinutes} min</td>
-                <td className="num">{peak(i)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
+      {data && data.incidents.length > 0 && <IncidentTable incidents={data.incidents} />}
     </>
+  );
+}
+
+/** Incidents, newest first; outgoing and webhook ones together (the provider page uses it too). */
+export function IncidentTable({
+  incidents,
+  testId = 'incidents',
+}: {
+  incidents: IncidentData[];
+  testId?: string;
+}) {
+  return (
+    <Table data-testid={testId}>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Provider</th>
+          <th>Endpoints</th>
+          <th>Opened</th>
+          <th className="num">Duration</th>
+          <th className="num">Peak</th>
+        </tr>
+      </thead>
+      <tbody>
+        {incidents.map((i) => (
+          <tr
+            key={i.id}
+            className="clickable"
+            onClick={() => (window.location.hash = href('incidents', i.id))}
+          >
+            <td>
+              <Badge tone={i.status === 'open' ? 'danger' : undefined}>{i.status}</Badge>
+              {i.alertsMuted && <Badge title="opened during cooldown; no alerts sent">muted</Badge>}
+            </td>
+            <td>
+              {i.provider} {i.direction === 'inbound' && <Badge>webhooks</Badge>}
+            </td>
+            <td>
+              {i.endpoints.map((e) => (
+                <div key={e.method + e.endpoint}>
+                  <code>{e.method}</code> <code>{e.endpoint}</code>
+                </div>
+              ))}
+            </td>
+            <td title={when(i.openedAt)}>{ago(i.openedAt)}</td>
+            <td className="num">{i.durationMinutes} min</td>
+            <td className="num">{peak(i)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 

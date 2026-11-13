@@ -1320,3 +1320,44 @@ details.infra summary {
   border-color: var(--color-accent);
   box-shadow: var(--shadow-md);
 }
+
+/* discovered webhook routes: confirm by linking to a provider or creating one (pages/ConfirmRoute.tsx) */
+.confirm-route {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 640px;
+  padding: var(--space-3) 0;
+}
+.confirm-route h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.confirm-route-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.confirm-route-link {
+  display: grid;
+  gap: var(--space-2);
+}
+.confirm-route-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.confirm-route-why {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* provider page: alerts switch, support contact and incidents shared by both directions */
+.provider-shared {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
