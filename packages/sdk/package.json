@@ -1,6 +1,6 @@
 {
   "name": "@theirside/sdk",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Drop-in SDK (Node, serverless, Cloudflare Workers, Deno, Bun) that records outgoing calls to your third-party providers and tells you when one of their endpoints starts failing.",
   "license": "MIT",
   "type": "module",

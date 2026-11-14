@@ -1,6 +1,13 @@
 # Changelog
 
-Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
+Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-042).
+
+## SDK 0.4.2
+
+Works with collector 0.5.0 and later.
+
+- **Fix: queued events were lost on `SIGTERM` when another handler ended the process first.** NestJS with `enableShutdownHooks()` and no hook of your own does this: after its hooks it re-raises the signal, or calls `process.exit(0)` with `useProcessExit`. The SDK now keeps its `SIGTERM` listener until it has sent, holds a re-raised signal or a `process.exit()` call meanwhile (at most `shutdownTimeoutMs`, 2 s), then ends the process the same way: by the signal, or with the exit code asked for. Tested in child processes (re-raise, `process.exit`, no other listener, a graceful handler, a collector that never answers) and with NestJS 11.
+- A second `SIGTERM` during that flush now waits for it (within 2 s) instead of killing the process at once.
 
 ## Collector 0.6.3
 
@@ -13,7 +20,7 @@ Setup friction found in a fresh-eyes test. No SDK release; the self-host compose
 - **Docs**:
   - `init()` uses the values it gets when it runs: the pattern for config loaded at runtime (SSM, Secrets Manager, Vault, a config service) on servers and at Lambda cold start, and the AI setup Prompt 1 now checks how the project loads config.
   - The first-account flow with a preset `THEIRSIDE_BOOTSTRAP_API_KEY` (a `/#/setup` address and a setup code valid 24 h).
-  - NestJS needs no shutdown hook unless the app calls `enableShutdownHooks()`; with it, a hook is required (tested: without it, queued events are lost on `SIGTERM`).
+  - NestJS needs no shutdown code with SDK 0.4.2 (below), also with `enableShutdownHooks()`.
   - A "Versions" note (SDK 0.4 and later work with collector 0.5 and later).
   - One recommended size everywhere (1 vCPU, 2 GB, one instance), with the short gap during deploys explained.
   - `THEIRSIDE_TRUST_PROXY` explained from its default.
