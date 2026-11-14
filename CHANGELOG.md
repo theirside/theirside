@@ -9,6 +9,7 @@ No SDK release; the self-host compose file stays on the `0.6` line.
 **Verified TLS to the database**
 
 - `THEIRSIDE_DATABASE_CA_FILE`: a PEM file of CA certificates the database's TLS certificate must chain to. With `?sslmode=verify-full` in `DATABASE_URL`, the collector checks the certificate and the host name. A CA file combined with `sslmode=disable` or `no-verify` is refused at start.
+- A startup check: when the database is on another machine (not localhost, a Unix socket or a single-label name like the Compose service `postgres`; private IPs count as remote) and its certificate isn't verified (`sslmode` missing, `disable`, `allow`, `prefer`, `require` or `no-verify`), the collector logs one warning with the exact fix (`verify-full`, plus the RDS bundle for `*.rds.amazonaws.com` or your provider's CA file), and admins see the same notice under Settings → SDK health. It never blocks startup.
 - The image includes AWS's global RDS CA bundle at `/app/certs/rds-global-bundle.pem`, so RDS needs only `?sslmode=verify-full` and that variable. For another provider, mount its CA file.
 - The docs (self-hosting, the infrastructure prompt, the NestJS guide) now use `verify-full`; `sslmode=no-verify` is mentioned only for local testing.
 - A CI check runs the image against a Postgres with a throwaway CA: connects with the CA, refused without it and for a wrong host name.
