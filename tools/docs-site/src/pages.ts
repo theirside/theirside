@@ -18,6 +18,8 @@ export interface Block {
 
 export interface Page {
   file: string;
+  /** The whole Markdown file. */
+  text: string;
   front: Record<string, unknown>;
   frontError?: string;
   blocks: Block[];
@@ -27,7 +29,7 @@ const SKIP = '<!-- docs-check: skip';
 
 export function parsePage(file: string, text: string): Page {
   const lines = text.split('\n');
-  const page: Page = { file, front: {}, blocks: [] };
+  const page: Page = { file, text, front: {}, blocks: [] };
   let i = 0;
   if (lines[0] === '---') {
     const end = lines.indexOf('---', 1);
@@ -62,6 +64,31 @@ export function parsePage(file: string, text: string): Page {
     i = j;
   }
   return page;
+}
+
+/**
+ * Heading anchors as theirside.dev builds them (theirside-website scripts/docs.mjs `slugify`):
+ * lower case, anything but letters, digits, spaces, `_` and `-` dropped, spaces as `-`; a
+ * repeated heading gets `-1`, `-2`…
+ */
+export function anchors(page: Page): Set<string> {
+  const out = new Set<string>();
+  let fenced = false;
+  for (const line of page.text.split('\n')) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const h = !fenced && /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!h) continue;
+    const text = h[1]!.replace(/`([^`]*)`/g, '$1').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+    const base = text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+      .replace(/\s/g, '-');
+    let id = base;
+    for (let i = 1; out.has(id); i++) id = `${base}-${i}`;
+    out.add(id);
+  }
+  return out;
 }
 
 export function readPages(): Page[] {
