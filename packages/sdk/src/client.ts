@@ -97,6 +97,10 @@ export class Client {
   readonly remote: RemoteConfigClient | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private exitHooked = false;
+  /** Flushing after SIGTERM: our listener stays attached until the flush is done. */
+  private signalFlush = false;
+  /** Another listener re-raised SIGTERM while we were flushing. */
+  private signalHeld = false;
   private readonly timers: boolean;
   private heartbeatTimer: unknown;
   private readonly heartbeatMs: number;
@@ -342,15 +346,33 @@ export class Client {
     void this.shutdown();
   };
 
+  /**
+   * SIGTERM: send what is queued (capped at shutdownTimeoutMs), then let the process end
+   * as it would have. Our listener stays attached until the flush is done, so another
+   * listener that ends the process itself during that time (NestJS with
+   * enableShutdownHooks(): it removes its listener and re-raises the signal, or calls
+   * process.exit) is held until the events are sent:
+   * - a re-raised SIGTERM reaches only our listener: held, raised again afterwards;
+   * - process.exit(code) is held (see holdProcessExit) and called with the same code.
+   * With no other listener, Node's default exit (suppressed by ours) is restored the same
+   * way. A listener that shuts down gracefully without exiting is left to do so.
+   */
   private readonly onSigterm = (): void => {
+    if (this.signalFlush) {
+      this.signalHeld = true; // re-raised while we flush: raised again once we're done
+      return;
+    }
     safely(this.log, 'sigterm', () => {
-      // Our listener was registered with once(). If nobody else handles SIGTERM,
-      // Node's default (exit) was suppressed by us, so restore it after flushing.
-      const othersHandle = process.listenerCount('SIGTERM') > 0;
-      void this.shutdown().then(() => {
-        if (!othersHandle && process.listenerCount('SIGTERM') === 0) {
+      this.signalFlush = true;
+      const othersHandle = process.listenerCount('SIGTERM') > 1;
+      const releaseExit = holdProcessExit();
+      void this.shutdown().finally(() => {
+        this.signalFlush = false;
+        process.removeListener('SIGTERM', this.onSigterm);
+        const exit = releaseExit();
+        if (exit) process.exit(exit.code);
+        else if (this.signalHeld || (!othersHandle && process.listenerCount('SIGTERM') === 0))
           process.kill(process.pid, 'SIGTERM');
-        }
       });
     });
   };
@@ -359,15 +381,35 @@ export class Client {
     if (this.exitHooked) return;
     this.exitHooked = true;
     process.on('beforeExit', this.onBeforeExit);
-    process.once('SIGTERM', this.onSigterm);
+    process.on('SIGTERM', this.onSigterm);
   }
 
   private unhookProcessExit(): void {
     if (!this.exitHooked) return;
     this.exitHooked = false;
     process.removeListener('beforeExit', this.onBeforeExit);
-    process.removeListener('SIGTERM', this.onSigterm);
+    // during a SIGTERM flush the listener holds re-raised signals; onSigterm removes it
+    if (!this.signalFlush) process.removeListener('SIGTERM', this.onSigterm);
   }
+}
+
+/**
+ * Holds process.exit() calls until the returned release function runs (the SIGTERM flush,
+ * at most shutdownTimeoutMs). A held call returns instead of exiting; the release puts
+ * process.exit back (unless something else replaced it meanwhile) and returns the first
+ * held call's code, or undefined when there was none.
+ */
+function holdProcessExit(): () => { code: number | string | null | undefined } | undefined {
+  const original = process.exit;
+  let held: { code: number | string | null | undefined } | undefined;
+  const hold = function exit(code?: number | string | null) {
+    held ??= { code };
+  } as typeof process.exit;
+  process.exit = hold;
+  return () => {
+    if (process.exit === hold) process.exit = original;
+    return held;
+  };
 }
 
 export function createClient(
