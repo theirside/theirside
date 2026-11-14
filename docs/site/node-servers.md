@@ -6,13 +6,18 @@ order: 2
 
 # Node servers
 
-The SDK works on Node 18.18 and later, in any HTTP framework. It records outgoing calls made with `fetch`, `http`/`https`, Axios and `@nestjs/axios`, and the webhooks your server receives. One rule matters: call `init()` before the rest of your app is loaded.
+The SDK works on Node 18.18 and later, in any HTTP framework. It records the webhooks your server receives and the outgoing calls made with:
+
+- `fetch` and undici, and libraries built on undici (discord.js, for example);
+- `http`/`https`, and everything built on them: Axios, `@nestjs/axios`, got, node-fetch and most API SDKs.
+
+Calls your cloud provider's SDK makes (AWS, Google Cloud, Azure) are recorded too, grouped as **infrastructure**: monitored, with alerts off by default. Calls are recorded from the moment `init()` runs, including through HTTP clients created before it; calls made before it are not.
 
 ## Where `init()` goes
 
 ### ES modules (`import`)
 
-In ES modules every `import` runs before the code of the file that imports it, so an `init()` call below your imports runs too late. Put it in a file of its own and import that file first:
+In ES modules every `import` runs before the code of the file that imports it, so an `init()` call below your imports misses any call made while those modules load. Put it in a file of its own and import that file first:
 
 ```ts
 // instrumentation.ts
@@ -66,6 +71,33 @@ app.listen(3000);
 
 TypeScript compiled to CommonJS (`"module": "commonjs"`) keeps your import order, so `import { init } …; init(…);` at the top of the entry file works there too. When in doubt, use the separate file: it works in both.
 
+## Config loaded at runtime
+
+`init()` uses the values it gets when it runs: in the examples above, `process.env.THEIRSIDE_API_KEY` is read at that moment. If your app loads its settings later, from SSM, Secrets Manager, Vault or a config service, those variables are still empty then and the SDK stays off. Call `init()` with explicit values right after the config is loaded, before your app creates its HTTP clients and starts making calls:
+
+```ts
+// server.ts
+import { init } from '@theirside/sdk';
+import express from 'express';
+
+const config = await loadConfig(); // your loader: SSM, Secrets Manager, Vault, a config service…
+
+init({
+  apiKey: config.theirsideApiKey,
+  endpoint: config.theirsideCollectorUrl,
+  service: 'orders-api',
+  environment: config.environment,
+});
+
+const app = express(); // created after init(), like any HTTP clients
+app.get('/health', (_req, res) => {
+  res.send('ok');
+});
+app.listen(3000);
+```
+
+Calls made before `init()` (the config loader's own, for example) aren't recorded; everything after is. On AWS Lambda, do the same at cold start: [Serverless](serverless.md#config-loaded-at-cold-start).
+
 ## Express
 
 As above: import `./instrumentation.js` first in the file that creates the app. Nothing else to add. Webhooks your routes receive are picked up automatically ([Webhooks](webhooks.md)).
@@ -93,21 +125,28 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 
 const app = await NestFactory.create(AppModule);
-app.enableShutdownHooks();
 await app.listen(3000);
 ```
 
-Send what is queued when Nest shuts down, from any module or provider:
-
 ```ts
-// app.module.ts
-import { Module, type OnApplicationShutdown } from '@nestjs/common';
-import { shutdown } from '@theirside/sdk';
+// app.module.ts: your module as it is; nothing to add for Theirside
+import { Module } from '@nestjs/common';
 
 @Module({})
-export class AppModule implements OnApplicationShutdown {
+export class AppModule {}
+```
+
+No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself. One exception: if your app calls `app.enableShutdownHooks()` for its own cleanup, Nest ends the process as soon as its hooks finish, before the SDK has sent. Then add this to any module or provider:
+
+```ts
+// shutdown.ts
+import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
+import { shutdown } from '@theirside/sdk';
+
+@Injectable()
+export class TheirsideShutdown implements OnApplicationShutdown {
   async onApplicationShutdown() {
-    await shutdown(); // flushes queued events, at most 2 s
+    await shutdown(); // sends what is queued, at most 2 s
   }
 }
 ```
@@ -122,7 +161,7 @@ A Nest project that compiles to CommonJS (the default `nest new` setup) can call
 
 ## Shutting down
 
-On `SIGTERM` and when the event loop empties, the SDK sends what is queued (at most 2 s) and lets your app exit as before. If your app handles shutdown itself, call `await shutdown()` at the end of it. Nothing else is needed: the SDK never keeps a process alive and never blocks a request.
+On `SIGTERM` and when the event loop empties, the SDK sends what is queued (at most 2 s) and lets your app exit as before. If your app handles shutdown itself and exits on its own (NestJS with `enableShutdownHooks()`, a `process.exit()` in your handler), call `await shutdown()` before it does. Nothing else is needed: the SDK never keeps a process alive and never blocks a request.
 
 ## Check it works
 

@@ -54,7 +54,7 @@ All custom properties, with the rule for each. Values: `tokens.json` (and the ga
 | `--color-on-danger` | Text on a `danger` fill (the incident badge) | |
 | `--color-warning` | Degraded, caveats (`Callout` default) | Errors |
 | `--color-healthy` | Healthy, success, "normal" reference lines | Decoration |
-| `--color-info` | Neutral notices and hints | Status |
+| `--color-info` | Neutral notices and hints; the receiving ring of a status dot | Status |
 | `--color-neutral` | No data, idle rings, empty bars | Text |
 | `--color-qr-background` | Behind QR codes (always white so scanners read them) | Anything else |
 | `--color-highlight` | Marketing only (the website): one warm block per page, such as the final call to action | Anything in the product UI, text, status |
@@ -108,7 +108,7 @@ All in `apps/dashboard/src/components/ui.tsx` unless noted.
 | `Badge` (`tone`, `href`) | A short state next to a name: `danger` for an open incident (links to it), `healthy` for "New", neutral for "alerts off" | Sentences; more than two per row |
 | `Button` (`variant`, `size`) | `primary` for the one main action of a form or card, default for the rest, `danger` for destructive ones (with a confirmation) | Two primary buttons side by side; links styled as buttons for navigation |
 | `Field` (`label`, `hint`, `wide`, `check`) | Every form control, inside a `.form` grid: fields in one row share a bottom edge; `check` puts a checkbox before its label, centred on an input's height | Bare `<label>`s; hints longer than a line |
-| `StatusDot` (`status`, `label`) | Health of a provider or endpoint; `label` shows the word next to the dot, otherwise it's for screen readers | Colour alone where the state matters (add the label or a badge) |
+| `StatusDot` (`status`, `label`) | Health of a provider or endpoint (healthy, degraded, failing, receiving: calls this minute, not scored yet; idle; no data); `label` shows the word next to the dot, otherwise it's for screen readers | Colour alone where the state matters (add the label or a badge) |
 | `LegendCheckbox` (`Chart.tsx` uses it) | Chart legends: a box in the series colour, filled with a dark tick while shown, outlined while hidden; the whole row toggles; the hidden set survives data refreshes and theme changes | Hiding the last series without a way back |
 | `Tabs` (`href` items, or `onChange` with `variant="sub"`) | Sections of a page (links) or panels of a table (buttons) | More than 8 tabs |
 | `Segmented` | Switching a view's parameter, e.g. the time range | Navigation |

@@ -268,6 +268,11 @@ th button.sort {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--color-neutral);
 }
+/* calls in the current minute, not scored yet: an info ring */
+.dot.receiving {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--color-info);
+}
 .provider-link {
   display: inline-flex;
   align-items: center;

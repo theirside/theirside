@@ -15,11 +15,11 @@ You need Docker. No clone, no configuration:
 ```sh
 mkdir theirside && cd theirside
 curl -fsSLO https://theirside.dev/compose.yml
-docker compose -f compose.yml up -d --wait
+docker compose -f compose.yml up -d --pull always --wait
 docker compose -f compose.yml logs collector | grep -m1 "/setup"
 ```
 
-The last command prints a one-time link: `Open http://localhost:4318/setup?token=… to create the first account`.
+The last command prints a one-time link: `Open http://localhost:4318/setup?token=… to create the first account`. `--pull always` fetches the newest release of the `0.6` line each time you run it; the collector listens on `127.0.0.1:4318`, this machine only.
 
 Running it on a server rather than your laptop? Set `THEIRSIDE_PUBLIC_URL` in `compose.yml` to the address people will use, and open the link straight away: until you do, whoever has it can create the first account. See [Self-hosting](self-hosting.md).
 
@@ -48,9 +48,13 @@ init({
 
 Where exactly `init()` goes depends on your setup: [Node servers](node-servers.md) (Express, Fastify, NestJS) or [Serverless](serverless.md) (AWS Lambda, Workers, Deno, Bun). Without `apiKey` or `endpoint` the SDK stays off, so it is safe to deploy before the collector is ready.
 
+`init()` uses the values it gets when it runs: `process.env.THEIRSIDE_API_KEY` is read at that moment. If your app loads its settings later (SSM, Secrets Manager, Vault, a config service), call `init()` with those values right after loading them: [Config loaded at runtime](node-servers.md#config-loaded-at-runtime). The SDK and the collector are versioned separately; any recent pair works together ([Versions](self-hosting.md#versions)).
+
 ## 4. See your first provider
 
-Start your app and make it call an external API. Within a minute the **Providers** page lists it: every third-party host is grouped into a provider (`api.payco.test` and `files.payco.test` become `payco.test`; well-known APIs get their name), with each endpoint's calls per minute, errors and latency. Your own infrastructure (localhost, private networks, internal names) is never recorded.
+Start your app and make it call an external API. Within a minute the **Providers** page lists it: every third-party host is grouped into a provider (`api.payco.test` and `files.payco.test` become `payco.test`; well-known APIs get their name), with each endpoint's calls per minute, errors and latency. A provider whose first calls are still in the current minute shows as **receiving** until that minute is complete. Your own infrastructure (localhost, private networks, internal names) is never recorded.
+
+The SDK records calls made with `fetch` and undici, `http`/`https`, Axios, and libraries built on them (most HTTP clients and API SDKs, discord.js for example). Calls your cloud provider's SDK makes (AWS, Google Cloud, Azure) are grouped as **infrastructure**: monitored, with alerts off by default.
 
 For the first day each endpoint shows **learning**: it is building its normal. Real outages still alert while it learns.
 

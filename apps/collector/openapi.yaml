@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Theirside collector API
-  version: 0.6.2
+  version: 0.6.3
   description: |
     Public API of the Theirside collector: SDK ingest, the health API
     and incidents. Authenticate with a project API key (`Authorization: Bearer tsd_live_…`);
@@ -25,9 +25,11 @@ components:
         [ok, http_4xx, http_5xx, timeout, conn_reset, conn_refused, dns, tls, aborted, other_error]
     HealthStatus:
       type: string
-      enum: [green, amber, red, idle, unknown]
+      enum: [green, amber, red, receiving, idle, unknown]
       description: |
-        green / amber / red: scored over the 5-minute window. idle: called before (an endpoint
+        green / amber / red: scored over the 5-minute window. receiving (collector 0.6.3+):
+        calls arrived in the current, still partial minute and none yet in the window (a first
+        call, or traffic starting again); scored once that minute is complete. idle: called before (an endpoint
         within `range`, a provider at any time) but not in the window; never scored, so neither
         healthy nor failing. unknown: never called (or not in the requested environment).
         Treat values you don't know as unknown: more may be added.

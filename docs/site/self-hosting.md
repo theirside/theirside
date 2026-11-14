@@ -6,18 +6,20 @@ order: 6
 
 # Self-hosting
 
-The collector is one Docker image (`ghcr.io/theirside/collector`, amd64 and arm64) plus Postgres 13 or later. It receives events from your apps, runs detection and alerts, and serves the dashboard and status page on port 4318. Your data never leaves your infrastructure. 1 vCPU and 2 GB is plenty to start.
+The collector is one Docker image (`ghcr.io/theirside/collector`, amd64 and arm64) plus Postgres 13 or later. It receives events from your apps, runs detection and alerts, and serves the dashboard and status page on port 4318. Your data never leaves your infrastructure.
+
+**Recommended size: 1 vCPU and 2 GB of memory**, one instance. That is plenty for most teams; the examples below use it.
 
 ## Docker Compose
 
 ```sh
 mkdir theirside && cd theirside
 curl -fsSLO https://theirside.dev/compose.yml
-docker compose -f compose.yml up -d --wait
+docker compose -f compose.yml up -d --pull always --wait
 docker compose -f compose.yml logs collector | grep -m1 "/setup"
 ```
 
-`compose.yml` runs Postgres and the collector; every setting in it is optional and commented. Put your settings in a `.env` file next to it (Compose reads it), for example:
+`compose.yml` runs Postgres and the collector; every setting in it is optional and commented. `--pull always` fetches the newest release of the minor line in the file (`:0.6`) each time. The collector listens on `127.0.0.1:4318`, so only that machine reaches it: on a server, put a TLS reverse proxy in front, or change the `ports` line to `'4318:4318'` to reach it from your network ([Behind a load balancer](#behind-a-load-balancer)). Put your settings in a `.env` file next to it (Compose reads it), for example:
 
 <!-- docs-check: skip (an env file, not code) -->
 ```sh
@@ -28,7 +30,16 @@ THEIRSIDE_SMTP_URL=smtps://user:password@smtp.example.test:465
 THEIRSIDE_SMTP_FROM=alerts@example.test
 ```
 
-Then `docker compose -f compose.yml up -d --wait` again. Every variable: [Configuration](configuration.md#collector-environment-variables).
+Then `docker compose -f compose.yml up -d --pull always --wait` again. Every variable: [Configuration](configuration.md#collector-environment-variables).
+
+## First account and API key
+
+On its first start, the collector creates your organisation and project, and tells you in its log how to create the first account. Find the line with `grep -m1 "/setup"` in the logs (`docker compose … logs collector`, `kubectl logs`, or the service's log group).
+
+- **Nothing preset** (the default): it generates the project API key and logs a one-time link, `Open https://…/setup?token=… to create the first account`. Open it, create the account, and copy the key from **Connect your app**.
+- **`THEIRSIDE_BOOTSTRAP_API_KEY` set** (your own key, `tsd_live_` + at least 16 characters, e.g. kept in your secrets store), or `THEIRSIDE_ADMIN_TOKEN` set: it logs `No user accounts yet. Open https://…/#/setup and create the first admin with setup code …`. Open that address and enter the code, valid 24 hours, or the admin token. Your apps use the key you set.
+
+Until the first account exists, whoever has the link or code can create it: do it right after the first start.
 
 ## ECS Fargate
 
@@ -39,8 +50,8 @@ Run the image as a service in private subnets with RDS for PostgreSQL, behind an
   "family": "theirside-collector",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
-  "cpu": "512",
-  "memory": "1024",
+  "cpu": "1024",
+  "memory": "2048",
   "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
@@ -69,7 +80,7 @@ Run the image as a service in private subnets with RDS for PostgreSQL, behind an
 ```
 
 - **RDS**: end `DATABASE_URL` with `?sslmode=verify-full` and set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem`, as in the task definition above: the image includes AWS's RDS CA bundle, so the database's certificate is checked with nothing else to install ([Database TLS](#database-tls)).
-- **Load balancer target group**: health check on `/readyz`. Several tasks are fine: migrations are locked and one task runs the jobs.
+- **Load balancer target group**: health check on `/readyz`. One task is enough; more are fine (migrations are locked and one task runs the jobs).
 - Can't pull from ghcr.io? Copy the image into ECR once per version (`docker pull`, `docker tag`, `docker push`).
 
 ## Kubernetes
@@ -111,8 +122,8 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 15
           resources:
-            requests: { cpu: 250m, memory: 512Mi }
-            limits: { memory: 1Gi }
+            requests: { cpu: '1', memory: 2Gi }
+            limits: { memory: 2Gi }
 ---
 apiVersion: v1
 kind: Service
@@ -135,6 +146,18 @@ kubectl logs deploy/theirside-collector | grep -m1 "/setup"
 
 Apps in the cluster then use `THEIRSIDE_COLLECTOR_URL=http://theirside-collector.<namespace>.svc:4318`. `/readyz` answers 503 while the database is unreachable; `/healthz` stays 200, so a database blip doesn't restart the pod.
 
+## Database and user
+
+The collector needs one database it owns, on Postgres 13 or later. On Postgres 16 or RDS, connected as your admin user:
+
+```sql
+CREATE ROLE theirside WITH LOGIN PASSWORD 'change-me';
+GRANT theirside TO CURRENT_USER; -- needed on RDS: the admin user isn't a superuser
+CREATE DATABASE theirside OWNER theirside;
+```
+
+Then `DATABASE_URL=postgres://theirside:change-me@<host>:5432/theirside?sslmode=verify-full`. The collector creates its tables on first start; there's nothing else to run.
+
 ## Database TLS
 
 To encrypt the connection to Postgres and check that it really is your database, end `DATABASE_URL` with `?sslmode=verify-full`. The certificate must then chain to a trusted CA and name the host in the URL.
@@ -150,10 +173,16 @@ The collector checks this at startup and never blocks on it. When the database i
 ## Upgrades
 
 1. Read the version's release notes: they say what changes and when to upgrade the collector before your apps' SDK.
-2. Change the image tag, or keep the minor tag (`:0.6`) and pull: Compose with `docker compose -f compose.yml pull` then `up -d --wait`, Kubernetes and ECS by rolling out the new image.
+2. Change the image tag, or keep the minor tag (`:0.6`) and pull: Compose with `docker compose -f compose.yml up -d --pull always --wait`, Kubernetes and ECS by rolling out the new image.
 3. Database migrations run when the new version starts, before it serves traffic; there's nothing to run by hand.
 
-A minor tag (`0.6`) moves to each patch release; a new minor (`0.7`) needs the tag changed. Older SDKs keep working with newer collectors.
+With one instance, a deploy leaves a short gap while the new one starts. Your apps aren't affected: the SDK keeps events in memory (up to 10,000 per process) and sends them once the collector answers again. Run two instances if you also want the dashboard up during deploys.
+
+A minor tag (`0.6`) moves to each patch release; a new minor (`0.7`) needs the tag changed.
+
+### Versions
+
+The SDK (`@theirside/sdk` on npm) and the collector (the image) are versioned separately. **SDK 0.4 and later work with collector 0.5 and later**, and older SDKs keep working with newer collectors: upgrade the collector first. Each release's notes say if a new SDK feature needs a newer collector.
 
 ## Backups
 
@@ -170,7 +199,7 @@ Also keep `THEIRSIDE_SECRET_KEY` somewhere safe: without it, two-factor codes ca
 - **Keep it private.** The dashboard and every `/v1/*` path (ingest, the APIs, sign-in) belong on a private network: an internal load balancer reachable from your apps and your office or VPN. Only `/status/*`, `/embed.js` and `/fonts/*` may ever be public (the status page, below).
 - **TLS** at the load balancer; point apps' `THEIRSIDE_COLLECTOR_URL` at the HTTPS address, so API keys never cross the network in clear text.
 - **`THEIRSIDE_PUBLIC_URL`**: the address people use, for links in alerts and secure cookies.
-- **`THEIRSIDE_TRUST_PROXY`**: proxies on private addresses are trusted for `X-Forwarded-For` by default; set your load balancers' subnets to be stricter.
+- **`THEIRSIDE_TRUST_PROXY`**: leave it unset unless your load balancer reaches the collector from a public address, or you want to trust only its subnets. By default the collector believes `X-Forwarded-For` from proxies on private and loopback addresses, which fits most setups.
 - **Health check**: `/readyz`.
 - **Company sign-in**: an identity proxy or an AWS ALB with OIDC can sign people in (`THEIRSIDE_AUTH_PROXY`, [Configuration](configuration.md#sign-in-and-security)).
 

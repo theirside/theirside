@@ -46,7 +46,8 @@ export async function api<T>(
 }
 
 /** idle: called before, but not in the scoring window (never healthy or failing). */
-export type HealthStatus = 'green' | 'amber' | 'red' | 'idle' | 'unknown';
+/** receiving: calls in the current, partial minute only (not scored yet). */
+export type HealthStatus = 'green' | 'amber' | 'red' | 'receiving' | 'idle' | 'unknown';
 
 export type Range = '1h' | '24h' | '7d';
 

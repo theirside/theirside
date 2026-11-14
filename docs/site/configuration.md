@@ -89,7 +89,7 @@ None are needed for a first start with the [compose file](self-hosting.md#docker
 |---|---|---|
 | `THEIRSIDE_SECRET_KEY` | – | Encrypts two-factor secrets; required for two-factor sign-in. At least 32 characters (`openssl rand -base64 32`). Back it up. |
 | `THEIRSIDE_SECRET_KEY_PREVIOUS` | – | Old keys (comma-separated) still accepted while you rotate `THEIRSIDE_SECRET_KEY`. |
-| `THEIRSIDE_TRUST_PROXY` | private ranges | Whose `X-Forwarded-*` headers to believe: proxies on private and loopback addresses by default, or your load balancers’ CIDRs, a hop count, `false`, or `true` (any; logged as a warning). |
+| `THEIRSIDE_TRUST_PROXY` | private ranges | Leave unset unless your load balancer reaches the collector from a public address, or you want to trust only its subnets. Default: `X-Forwarded-*` from proxies on private and loopback addresses is believed. Otherwise your load balancers’ CIDRs, a hop count, `false`, or `true` (any; logged as a warning). |
 | `THEIRSIDE_SESSION_MAX_AGE_HOURS` | `168` | Dashboard session lifetime. |
 | `THEIRSIDE_SESSION_IDLE_HOURS` | `24` | Dashboard session idle timeout. |
 | `THEIRSIDE_AUTH_PROXY` | `off` | `header` (oauth2-proxy, Pomerium, Cloudflare Access…) or `alb` (AWS ALB with OIDC): sign people in from the identity proxy in front. |

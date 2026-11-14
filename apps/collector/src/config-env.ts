@@ -97,7 +97,7 @@ export const COLLECTOR_ENV: readonly CollectorEnvVar[] = [
     name: 'THEIRSIDE_TRUST_PROXY',
     default: 'private ranges',
     description:
-      'Whose `X-Forwarded-*` headers to believe: proxies on private and loopback addresses by default, or your load balancers’ CIDRs, a hop count, `false`, or `true` (any; logged as a warning).',
+      'Leave unset unless your load balancer reaches the collector from a public address, or you want to trust only its subnets. Default: `X-Forwarded-*` from proxies on private and loopback addresses is believed. Otherwise your load balancers’ CIDRs, a hop count, `false`, or `true` (any; logged as a warning).',
     group: 'Sign-in and security',
   },
   {

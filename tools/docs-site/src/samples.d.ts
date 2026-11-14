@@ -13,3 +13,9 @@ declare function chargeCard(event: unknown): Promise<{ statusCode: number; body:
 declare function syncInvoices(): Promise<void>;
 declare function handleWebhook(body: string | undefined): Promise<void>;
 declare function verifySignature(event: unknown): boolean;
+/** Your configuration loader (node-servers.md, serverless.md): SSM, Secrets Manager, Vault… */
+declare function loadConfig(): Promise<{
+  theirsideApiKey: string;
+  theirsideCollectorUrl: string;
+  environment: string;
+}>;

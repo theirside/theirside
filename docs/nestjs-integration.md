@@ -86,7 +86,6 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableShutdownHooks();
   await app.listen(3000);
 }
 bootstrap();
@@ -98,7 +97,7 @@ The SDK never throws into your code and never waits on the network in the reques
 
 ## 3. Flush on shutdown
 
-With `app.enableShutdownHooks()`, add one provider (any module):
+Nothing to add by default: the SDK sends what is queued on `SIGTERM` (ECS task stops, deploys) by itself. If the service calls `app.enableShutdownHooks()` for its own cleanup, Nest ends the process as soon as its hooks finish, before the SDK has sent (events are lost); then add one provider (any module):
 
 ```ts
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
@@ -112,7 +111,6 @@ export class MonitorShutdown implements OnApplicationShutdown {
 }
 ```
 
-The SDK also flushes on `SIGTERM`/`beforeExit` by itself; the hook makes it deterministic on ECS task stops and deploys.
 
 ## 4. Environment variables
 
@@ -226,7 +224,7 @@ Without `nestjs-cls`, use your own `AsyncLocalStorage` (`getCorrelationId: () =>
 
 The collector is one Docker image plus a Postgres database (13+; tested on 16). It serves ingest, the dashboard, the health API and the status page on one port (4318). Several replicas may run behind a load balancer; one of them runs the scheduler (Postgres advisory lock).
 
-The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.6.2`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
+The image is published as **`ghcr.io/theirside/collector:<version>`** for linux/amd64 and linux/arm64, e.g. `ghcr.io/theirside/collector:0.6.3`. Tags: the exact version, `<major>.<minor>` (moves to the latest patch) and `latest`; prereleases only get their exact version. Pin the exact version in production. Each image carries a build provenance attestation and an SBOM (`gh attestation verify oci://ghcr.io/theirside/collector:0.3.0 -R theirside/theirside`).
 
 **Upgrading** means running the new image: each start applies its database migrations (several replicas wait for each other). From 0.1.0 to 0.2.0:
 
@@ -291,6 +289,7 @@ From 0.5.x to 0.6.0 (no SDK change needed; works with every SDK version):
 - **API**: candidates carry `match`; confirm takes `mode` (`link` / `new`); `/v1/admin/webhooks` lists confirmed routes without a delivery as `waiting`; `/v1/admin/settings/discovery` adds `webhookRoutes`. Older dashboards' confirm (no `mode`) behaves as before.
 - **Self-host compose file**: it pulled the `0.5` tag, which stays on 0.5.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.6`.
 - Migration 023 runs on the first start: a nullable column on `webhook_candidates` (existing routes marked as announced) and a column with a constant default on `settings` (no table rewrite).
+- **0.6.3**: the self-host `compose.yml` publishes port 4318 on `127.0.0.1` only. If other machines reached the collector through it, change `ports` back to `'4318:4318'` (or put a TLS proxy in front) after downloading the new file. The health API and dashboard show `receiving` for endpoints whose only recent calls are in the current minute; treat it like `idle` if you read the API. `THEIRSIDE_DEPLOYMENT_MODE` is gone from the compose file (it was the default).
 - **0.6.2**: verified TLS to the database. On RDS, switch `DATABASE_URL` from `?sslmode=no-verify` to `?sslmode=verify-full` and set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem` (built into the image); a custom-built image with the bundle is no longer needed.
 
 ### Mirroring the image into a private registry
@@ -298,7 +297,7 @@ From 0.5.x to 0.6.0 (no SDK change needed; works with every SDK version):
 If the cluster can't pull from ghcr.io, or policy requires images from your own registry, copy it once per version. ECR example:
 
 ```sh
-AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.6.2
+AWS_ACCOUNT=<account> AWS_REGION=<region> VERSION=0.6.3
 ECR=$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
 aws ecr create-repository --repository-name theirside-collector --region $AWS_REGION   # first time only
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
@@ -315,8 +314,8 @@ docker push $ECR/theirside-collector:$VERSION
 To build the image yourself (e.g. with local changes), from the repo root:
 
 ```sh
-docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.6.2 .
-docker push <registry>/theirside-collector:0.6.2
+docker build -f docker/Dockerfile.collector -t <registry>/theirside-collector:0.6.3 .
+docker push <registry>/theirside-collector:0.6.3
 ```
 
 With docker compose, set `THEIRSIDE_VERSION=local` and add `--build`. Compose builds only for `local`: a release version must be pulled, and if the pull fails (or `--build` is passed with it) the build stops at once with an error, so a source build never runs under a release tag.
@@ -351,17 +350,16 @@ Minimal task definition (placeholders in `<>`):
   "family": "theirside-collector",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
-  "cpu": "512",
-  "memory": "1024",
+  "cpu": "1024",
+  "memory": "2048",
   "executionRoleArn": "arn:aws:iam::<account>:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "collector",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.6.2",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/theirside-collector:0.6.3",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
       "environment": [
-        { "name": "THEIRSIDE_DEPLOYMENT_MODE", "value": "self_hosted" },
         { "name": "THEIRSIDE_PUBLIC_URL", "value": "https://theirside.<client-domain>" },
         { "name": "THEIRSIDE_DATABASE_CA_FILE", "value": "/app/certs/rds-global-bundle.pem" },
         { "name": "THEIRSIDE_RAW_RETENTION_DAYS", "value": "30" },
