@@ -32,7 +32,7 @@ Then `docker compose -f compose.yml up -d --wait` again. Every variable: [Config
 
 ## ECS Fargate
 
-Run the image as a service in private subnets with RDS for PostgreSQL, behind an **internal** load balancer. Keep `DATABASE_URL` and the other secrets in Secrets Manager:
+Run the image as a service in private subnets with RDS for PostgreSQL, behind an **internal** load balancer. Keep `DATABASE_URL` (`postgres://user:password@<instance>.rds.amazonaws.com:5432/theirside?sslmode=verify-full`) and the other secrets in Secrets Manager:
 
 ```json
 {
@@ -48,7 +48,10 @@ Run the image as a service in private subnets with RDS for PostgreSQL, behind an
       "image": "ghcr.io/theirside/collector:0.6",
       "essential": true,
       "portMappings": [{ "containerPort": 4318, "protocol": "tcp" }],
-      "environment": [{ "name": "THEIRSIDE_PUBLIC_URL", "value": "https://theirside.internal.example.test" }],
+      "environment": [
+        { "name": "THEIRSIDE_PUBLIC_URL", "value": "https://theirside.internal.example.test" },
+        { "name": "THEIRSIDE_DATABASE_CA_FILE", "value": "/app/certs/rds-global-bundle.pem" }
+      ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:eu-west-1:123456789012:secret:theirside/database-url" },
         { "name": "THEIRSIDE_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:eu-west-1:123456789012:secret:theirside/secret-key" }
@@ -65,7 +68,7 @@ Run the image as a service in private subnets with RDS for PostgreSQL, behind an
 }
 ```
 
-- **RDS**: PostgreSQL 15+ requires TLS, so add `?sslmode=no-verify` to `DATABASE_URL` (encrypted, certificate not checked: common inside a VPC). To check the certificate too, build an image `FROM ghcr.io/theirside/collector:0.6` that adds AWS's RDS CA bundle, and use `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem`. Plain `sslmode=require` fails on RDS.
+- **RDS**: end `DATABASE_URL` with `?sslmode=verify-full` and set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem`, as in the task definition above: the image includes AWS's RDS CA bundle, so the database's certificate is checked with nothing else to install ([Database TLS](#database-tls)).
 - **Load balancer target group**: health check on `/readyz`. Several tasks are fine: migrations are locked and one task runs the jobs.
 - Can't pull from ghcr.io? Copy the image into ECR once per version (`docker pull`, `docker tag`, `docker push`).
 
@@ -131,6 +134,16 @@ kubectl logs deploy/theirside-collector | grep -m1 "/setup"
 ```
 
 Apps in the cluster then use `THEIRSIDE_COLLECTOR_URL=http://theirside-collector.<namespace>.svc:4318`. `/readyz` answers 503 while the database is unreachable; `/healthz` stays 200, so a database blip doesn't restart the pod.
+
+## Database TLS
+
+To encrypt the connection to Postgres and check that it really is your database, end `DATABASE_URL` with `?sslmode=verify-full`. The certificate must then chain to a trusted CA and name the host in the URL.
+
+- **AWS RDS**: set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem`. The image includes AWS's global RDS CA bundle at that path.
+- **Another provider, or your own CA** (Cloud SQL, Azure, a Postgres with your company's CA): mount its CA certificate file into the container and point `THEIRSIDE_DATABASE_CA_FILE` at it.
+- **A certificate from a public CA**: `?sslmode=verify-full` alone is enough.
+
+`?sslmode=no-verify` also encrypts the connection but skips the certificate check, so anything on the network path could pose as your database: use it for local testing only. `sslmode=require` checks the certificate against public CAs only, so it fails on RDS without the CA file.
 
 ## Upgrades
 

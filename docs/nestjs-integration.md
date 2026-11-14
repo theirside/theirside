@@ -291,6 +291,7 @@ From 0.5.x to 0.6.0 (no SDK change needed; works with every SDK version):
 - **API**: candidates carry `match`; confirm takes `mode` (`link` / `new`); `/v1/admin/webhooks` lists confirmed routes without a delivery as `waiting`; `/v1/admin/settings/discovery` adds `webhookRoutes`. Older dashboards' confirm (no `mode`) behaves as before.
 - **Self-host compose file**: it pulled the `0.5` tag, which stays on 0.5.x. Download the file again (theirside.dev/compose.yml) or change the image tag to `0.6`.
 - Migration 023 runs on the first start: a nullable column on `webhook_candidates` (existing routes marked as announced) and a column with a constant default on `settings` (no table rewrite).
+- **0.6.2**: verified TLS to the database. On RDS, switch `DATABASE_URL` from `?sslmode=no-verify` to `?sslmode=verify-full` and set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem` (built into the image); a custom-built image with the bundle is no longer needed.
 
 ### Mirroring the image into a private registry
 
@@ -338,7 +339,7 @@ Put TLS in front (the VM's existing reverse proxy or a load balancer) and keep t
 ### Option B: ECS Fargate + RDS
 
 - **RDS for PostgreSQL** 13+ (`db.t4g.small` is enough to start), in private subnets, encrypted, automated backups on. Create a database and user for the collector.
-- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`), so `DATABASE_URL` needs an `sslmode`. Either `?sslmode=no-verify` (encrypted; the server certificate is not checked, which is common inside a private VPC), or, stricter, `?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` with AWS's RDS CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) added to the image (`FROM ghcr.io/theirside/collector:0.5.0` + `COPY global-bundle.pem /app/rds-global-bundle.pem`, pushed to your registry). Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA.
+- **TLS to RDS**: RDS for PostgreSQL 15+ refuses unencrypted connections by default (`rds.force_ssl=1`). End `DATABASE_URL` with `?sslmode=verify-full` and set `THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem` (collector 0.6.2+: AWS's global RDS CA bundle is in the image), so the certificate and host name are checked. Plain `sslmode=require` fails on RDS: it checks the certificate against Node's built-in CAs, which don't include the RDS CA. `?sslmode=no-verify` encrypts without checking the certificate: local testing only.
 - **Secrets Manager**: `DATABASE_URL`, `THEIRSIDE_BOOTSTRAP_API_KEY`, `THEIRSIDE_ADMIN_TOKEN`, `THEIRSIDE_SECRET_KEY` (2FA; back it up, [security.md](security.md)) and `THEIRSIDE_SMTP_PASS` if email is used.
 - **ECS service**: 1–2 tasks of the definition below in private subnets, behind an **internal** ALB (scheme `internal`) on HTTPS with a certificate for a private name (e.g. `theirside.client.internal`), for the services' SDK traffic and the dashboard. See "Network exposure" for the public status page.
 - **Security groups**: internal ALB ← the services' security groups and the office/VPN CIDR on 443; collector tasks ← internal ALB (and the public-paths ALB, if any) on 4318; RDS ← collector tasks on 5432; collector → Slack/SMTP/webhook endpoints on 443/587 for alerts only.
@@ -362,6 +363,7 @@ Minimal task definition (placeholders in `<>`):
       "environment": [
         { "name": "THEIRSIDE_DEPLOYMENT_MODE", "value": "self_hosted" },
         { "name": "THEIRSIDE_PUBLIC_URL", "value": "https://theirside.<client-domain>" },
+        { "name": "THEIRSIDE_DATABASE_CA_FILE", "value": "/app/certs/rds-global-bundle.pem" },
         { "name": "THEIRSIDE_RAW_RETENTION_DAYS", "value": "30" },
         { "name": "THEIRSIDE_ROLLUP_RETENTION_DAYS", "value": "90" },
         { "name": "LOG_LEVEL", "value": "info" }
@@ -417,7 +419,8 @@ SDK traffic: point `THEIRSIDE_COLLECTOR_URL` at the internal ALB over HTTPS so t
 
 | Variable | Default | |
 |---|---|---|
-| `DATABASE_URL` | required | `postgres://user:pass@host:5432/db` |
+| `DATABASE_URL` | required | `postgres://user:pass@host:5432/db`; add `?sslmode=verify-full` to check the server's TLS certificate |
+| `THEIRSIDE_DATABASE_CA_FILE` | – | PEM file of CAs the database certificate must chain to (with `verify-full`; host name checked too). The image includes AWS's RDS bundle: `/app/certs/rds-global-bundle.pem`. |
 | `PORT` | `4318` | |
 | `THEIRSIDE_PUBLIC_URL` | – | Dashboard URL for "Open in dashboard" links in alerts (no link when unset) and the session cookie's `Secure` flag; status page and embed URLs fall back to the request origin. |
 | `THEIRSIDE_BOOTSTRAP_API_KEY` | – | First start: creates the org, project, status page and this key (`tsd_live_` + ≥ 16 chars). The first user comes from the dashboard's setup page. Optional: with neither this nor `THEIRSIDE_ADMIN_TOKEN`, the first start generates a key and logs a setup link ([zero-config](security.md#first-run)). |

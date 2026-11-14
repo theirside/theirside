@@ -68,6 +68,7 @@ None are needed for a first start with the [compose file](self-hosting.md#docker
 | Variable | Default | What it does |
 |---|---|---|
 | `DATABASE_URL` | required | Postgres 13+ connection string, `postgres://user:pass@host:5432/db`. Migrations run on start (safe with several instances). |
+| `THEIRSIDE_DATABASE_CA_FILE` | – | PEM file with the CA certificates the database’s TLS certificate must chain to; with it, TLS is on and the host name is checked too (use `sslmode=verify-full` in `DATABASE_URL`). The image includes AWS RDS’s global bundle: `/app/certs/rds-global-bundle.pem`. For another provider, mount its CA file and point this at it. |
 | `PORT` | `4318` | Port the collector listens on. |
 | `HOST` | `0.0.0.0` | Address the collector listens on. |
 | `THEIRSIDE_PUBLIC_URL` | – | Where people open the dashboard. Used for links in alerts (none when unset) and the session cookie’s `Secure` flag. |

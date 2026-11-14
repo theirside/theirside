@@ -4,7 +4,16 @@ Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. U
 
 ## Collector 0.6.2
 
-**Docs: AI setup for the collector too.** No behaviour change, no SDK release; the self-host compose file stays on the `0.6` line.
+No SDK release; the self-host compose file stays on the `0.6` line.
+
+**Verified TLS to the database**
+
+- `THEIRSIDE_DATABASE_CA_FILE`: a PEM file of CA certificates the database's TLS certificate must chain to. With `?sslmode=verify-full` in `DATABASE_URL`, the collector checks the certificate and the host name. A CA file combined with `sslmode=disable` or `no-verify` is refused at start.
+- The image includes AWS's global RDS CA bundle at `/app/certs/rds-global-bundle.pem`, so RDS needs only `?sslmode=verify-full` and that variable. For another provider, mount its CA file.
+- The docs (self-hosting, the infrastructure prompt, the NestJS guide) now use `verify-full`; `sslmode=no-verify` is mentioned only for local testing.
+- A CI check runs the image against a Postgres with a throwaway CA: connects with the CA, refused without it and for a wrong host name.
+
+**Docs: AI setup for the collector too**
 
 - The AI setup page has two prompts: **Prompt 1** adds the SDK to your app (unchanged), **Prompt 2** adds the collector and its Postgres to your infrastructure the way the repository already deploys services (Compose, Terraform for ECS, Kubernetes or Helm, CDK, Pulumi), kept private, with secrets stored the way the repository stores them and the repository's own validation run. A "Before you start" line says where the API key and collector URL come from.
 - The docs check also fails on a broken link or `#anchor` between pages and on a collector image tag that isn't the compose file's minor line.
