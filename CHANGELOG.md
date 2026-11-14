@@ -2,6 +2,13 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
+## Collector 0.6.2
+
+**Docs: AI setup for the collector too.** No behaviour change, no SDK release; the self-host compose file stays on the `0.6` line.
+
+- The AI setup page has two prompts: **Prompt 1** adds the SDK to your app (unchanged), **Prompt 2** adds the collector and its Postgres to your infrastructure the way the repository already deploys services (Compose, Terraform for ECS, Kubernetes or Helm, CDK, Pulumi), kept private, with secrets stored the way the repository stores them and the repository's own validation run. A "Before you start" line says where the API key and collector URL come from.
+- The docs check also fails on a broken link or `#anchor` between pages and on a collector image tag that isn't the compose file's minor line.
+
 ## Collector 0.6.1
 
 **Docs for theirside.dev.** No behaviour change in the collector, and no SDK release: it works like 0.6.0, and the self-host compose file stays on the `0.6` line, so a `pull` picks it up.
