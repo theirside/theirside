@@ -1,18 +1,20 @@
-# Theirside collector 0.4, self-hosted: the collector plus its Postgres.
+# Theirside collector, self-hosted: the collector plus its Postgres. The image tag below picks
+# the release line; the SDK (npm @theirside/sdk) is versioned separately: SDK 0.4 and later
+# work with collector 0.5 and later, and older SDKs keep working with newer collectors.
 # This is the user-facing compose file. theirside.dev serves it as /compose.yml (from the
 # latest release) for the Quick start: https://theirside.dev/#start
 # docker/docker-compose.yml is the dev/demo file for working on this repo; don't point users at it.
 #
 #   mkdir theirside && cd theirside
 #   curl -fsSLO https://theirside.dev/compose.yml
-#   docker compose -f compose.yml up -d --wait
+#   docker compose -f compose.yml up -d --pull always --wait
 #   docker compose -f compose.yml logs collector | grep -m1 "/setup"
 #
 # Nothing to configure: the first start generates your project API key and logs a one-time
 # link to create the first account. After setup the dashboard shows the key and the
 # init() line for your app. Everything below is optional.
-# The image follows the 0.6 line: docker compose -f compose.yml pull, then up -d again, gets
-# the newest 0.6.x. Pin an exact version (e.g. :0.6.0) if you prefer.
+# The image follows the 0.6 line: the same up command with --pull always gets the newest
+# 0.6.x. Pin an exact version (e.g. :0.6.3) if you prefer.
 # Help with ECS, Kubernetes or anything else: hello@theirside.dev
 name: theirside-selfhost
 
@@ -37,11 +39,11 @@ services:
     image: ghcr.io/theirside/collector:0.6
     environment:
       DATABASE_URL: postgres://theirside:${POSTGRES_PASSWORD:-theirside}@postgres:5432/theirside
-      THEIRSIDE_DEPLOYMENT_MODE: self_hosted
       # Where people open the dashboard; used for the setup link and links in alerts.
       THEIRSIDE_PUBLIC_URL: ${THEIRSIDE_PUBLIC_URL:-http://localhost:4318}
-      # Optional: set your own project API key (tsd_live_ plus at least 16 characters) and a
-      # break-glass admin token instead of the generated key and setup link.
+      # Optional: your own project API key (tsd_live_ plus at least 16 characters) and/or a
+      # break-glass admin token. With either set, the first start logs a /#/setup address
+      # and a setup code (valid 24 h) instead of the one-time link; the key is yours to use.
       THEIRSIDE_BOOTSTRAP_API_KEY: ${THEIRSIDE_BOOTSTRAP_API_KEY:-}
       THEIRSIDE_ADMIN_TOKEN: ${THEIRSIDE_ADMIN_TOKEN:-}
       # Optional, needed for two-factor sign-in: openssl rand -base64 32. Back it up.
@@ -50,8 +52,11 @@ services:
       # smtp://user:pass@smtp.example.com:587 and alerts@example.com
       THEIRSIDE_SMTP_URL: ${THEIRSIDE_SMTP_URL:-}
       THEIRSIDE_SMTP_FROM: ${THEIRSIDE_SMTP_FROM:-}
+    # Only this machine can reach the dashboard and ingest. On a server, put a TLS reverse
+    # proxy or load balancer in front (and keep it off the public internet), or, to reach it
+    # from your network directly, change this to '4318:4318'.
     ports:
-      - '4318:4318'
+      - '127.0.0.1:4318:4318'
     # --wait returns once this passes (same check as the image's HEALTHCHECK).
     healthcheck:
       test:

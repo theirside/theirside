@@ -40,6 +40,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# users run `up -d --pull always --wait`; the image here is a local build, so no pull
 echo "== up -d --wait ($IMAGE)"
 dc up -d --wait
 
