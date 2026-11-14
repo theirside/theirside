@@ -2,6 +2,24 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-041).
 
+## Collector 0.6.3
+
+Setup friction found in a fresh-eyes test. No SDK release; the self-host compose file stays on the `0.6` line.
+
+**Check before re-downloading `compose.yml`:** it now publishes port 4318 on `127.0.0.1` only. If apps on other machines reached the collector through it, change `ports` to `'4318:4318'` or put a TLS proxy in front.
+
+- **Receiving**: the health API and dashboard show `receiving` (not `idle`) for an endpoint or provider whose only recent calls are in the current, still partial minute, such as a first call. It is scored once that minute is complete. A new `HealthStatus` value; treat it like `idle` when reading the API.
+- **compose.yml**: the Quick start runs `up -d --pull always --wait` (also on the website, in the README and docs), so a re-run gets the newest `0.6.x`. Port bound to `127.0.0.1` with a comment on exposing it. The header no longer names an old version; it says the SDK is versioned separately. `THEIRSIDE_DEPLOYMENT_MODE` removed (it was the default).
+- **Docs**:
+  - `init()` uses the values it gets when it runs: the pattern for config loaded at runtime (SSM, Secrets Manager, Vault, a config service) on servers and at Lambda cold start, and the AI setup Prompt 1 now checks how the project loads config.
+  - The first-account flow with a preset `THEIRSIDE_BOOTSTRAP_API_KEY` (a `/#/setup` address and a setup code valid 24 h).
+  - NestJS needs no shutdown hook unless the app calls `enableShutdownHooks()`; with it, a hook is required (tested: without it, queued events are lost on `SIGTERM`).
+  - A "Versions" note (SDK 0.4 and later work with collector 0.5 and later).
+  - One recommended size everywhere (1 vCPU, 2 GB, one instance), with the short gap during deploys explained.
+  - `THEIRSIDE_TRUST_PROXY` explained from its default.
+  - SQL to create the database and user on Postgres 16 and RDS.
+  - Which HTTP clients are captured, and that cloud SDK calls are grouped as infrastructure with alerts off.
+
 ## Collector 0.6.2
 
 No SDK release; the self-host compose file stays on the `0.6` line.

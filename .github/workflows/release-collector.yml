@@ -1,5 +1,5 @@
 # Collector image release: ghcr.io/theirside/collector, linux/amd64 + linux/arm64.
-#   git tag v0.6.2 && git push origin v0.6.2
+#   git tag v0.6.3 && git push origin v0.6.3
 # or Actions → "Release collector image" → Run workflow (builds the selected ref).
 # Tags: <version>; for a stable version also <major>.<minor> (if it is the newest patch of that
 # minor) and latest (if it is the newest stable version overall, by git tags). A prerelease
