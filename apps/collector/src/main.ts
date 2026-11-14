@@ -5,6 +5,7 @@ import { schedulerJobs } from './jobs.js';
 import { Scheduler } from './modules/scheduler/scheduler.js';
 import { buildApp } from './server.js';
 import { migrate } from './storage/migrate.js';
+import { databaseTlsStatus } from './storage/pg-connection.js';
 import { createPgStorage } from './storage/postgres.js';
 import { SIM_DEFAULT_START, attachSim } from './sim/app.js';
 import { SimClock } from './sim/clock.js';
@@ -57,6 +58,9 @@ async function main() {
   await storage.events.ensurePartitions(ctx.clock.now(), config.partitionsAhead + 1);
 
   const app = await buildApp(ctx, { logger: { level: config.logLevel } });
+  // database TLS: one line when a remote database isn't verified (never blocks startup)
+  const databaseTls = databaseTlsStatus(config.databaseUrl, config.databaseCaFile);
+  if (databaseTls.warning) app.log.warn(databaseTls.warning);
   if (config.trustProxy === true)
     app.log.warn(
       'THEIRSIDE_TRUST_PROXY=true believes X-Forwarded-For from any address: a client that reaches the ' +

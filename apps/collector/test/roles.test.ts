@@ -31,6 +31,7 @@ const ADMIN_ONLY = [
   'DELETE /v1/admin/users/:id',
   'DELETE /v1/admin/users/invites/:id',
   'GET /v1/admin/settings/security',
+  'GET /v1/admin/system',
   'GET /v1/admin/users',
   'PATCH /v1/admin/alert-channels/:id',
   'PATCH /v1/admin/status-pages/:id',

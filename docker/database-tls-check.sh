@@ -6,7 +6,8 @@
 #   2. verify-full without the CA file    -> refused (no trusted chain)
 #   3. the CA file, wrong host name       -> refused (name not in the certificate)
 #   4. the image's RDS bundle as the CA   -> refused (this server isn't RDS); the bundle is there
-#   5. sslmode=no-verify (testing only)   -> ready
+#   5. sslmode=no-verify (testing only)   -> ready, with the startup warning and the admin notice
+# Case 1 must show neither the warning nor the notice.
 #
 #   docker/database-tls-check.sh ghcr.io/theirside/collector:<tag>
 # Needs Docker and openssl; publishes no ports. CI: job "Database TLS".
@@ -61,6 +62,7 @@ collector() {
   [ -n "${2:-}" ] && ca=(-e "THEIRSIDE_DATABASE_CA_FILE=$2")
   docker run -d --name "$RUN-c" --network "$NET" -v "$WORK/ca.crt:/certs/ca.crt:ro" \
     -e "DATABASE_URL=$1" -e THEIRSIDE_BOOTSTRAP_API_KEY=tsd_live_tlscheck0000000000000000 \
+    -e THEIRSIDE_ADMIN_TOKEN=tls-check-admin-token-000 \
     ${ca[@]+"${ca[@]}"} "$IMAGE" >/dev/null
   for _ in $(seq 40); do
     if docker exec "$RUN-c" node -e "fetch('http://127.0.0.1:4318/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
@@ -80,10 +82,18 @@ collector() {
 
 URL="postgres://ts:ts@db.tls.test:5432/ts"
 
+# the startup WARN line, and what GET /v1/admin/system tells admins
+warned() { docker logs "$RUN-c" 2>&1 | grep -c 'is not verified' || true; }
+notice() {
+  docker exec "$RUN-c" node -e "fetch('http://127.0.0.1:4318/v1/admin/system',{headers:{authorization:'Bearer tls-check-admin-token-000'}}).then(r=>r.json()).then(j=>console.log(j.databaseTls.warning===null?'none':'warning'))"
+}
+
 echo "== 1. verify-full with the CA file"
 r="$(collector "$URL?sslmode=verify-full" /certs/ca.crt)"
 [ "$r" = ready ] || fail "expected ready, got: $r"
-echo "   $r"
+[ "$(warned)" = 0 ] || fail "a verified connection logged the TLS warning"
+[ "$(notice)" = none ] || fail "a verified connection shows the admin notice"
+echo "   $r; no warning, no notice"
 
 echo "== 2. verify-full without the CA file"
 r="$(collector "$URL?sslmode=verify-full")"
@@ -107,6 +117,8 @@ echo "   $n certificates in /app/certs/rds-global-bundle.pem; $r"
 echo "== 5. sslmode=no-verify (encrypted, certificate not checked: for testing only)"
 r="$(collector "$URL?sslmode=no-verify")"
 [ "$r" = ready ] || fail "expected ready, got: $r"
-echo "   $r"
+[ "$(warned)" = 1 ] || fail "expected one startup TLS warning, got $(warned)"
+[ "$(notice)" = warning ] || fail "expected the admin notice"
+echo "   $r; $(docker logs "$RUN-c" 2>&1 | grep -o 'The database connection to [^:]*: its TLS' | head -1)…; admin notice shown"
 
 echo "database TLS check OK"

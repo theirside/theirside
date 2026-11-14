@@ -344,13 +344,45 @@ const gapText = (s: number | null) =>
         ? `every ~${Math.round(s / 60)} min`
         : `every ~${Math.round(s / 3600)} h`;
 
+/** GET /v1/admin/system (admins): how this collector is set up. */
+interface SystemStatus {
+  databaseTls: {
+    host: string;
+    sslmode: string | null;
+    local: boolean;
+    verified: boolean;
+    /** A remote database whose certificate isn't verified: what to change. */
+    warning: string | null;
+    docs: string;
+  };
+}
+
+/** Admins: the collector's database connection isn't verified (logged at startup too). */
+function DatabaseTlsNotice() {
+  const [data] = usePoll(() => api<SystemStatus>('/v1/admin/system'), [], 300_000);
+  const tls = data?.databaseTls;
+  if (!tls?.warning) return null;
+  // the docs link is shown as a link, not as the URL at the end of the log line
+  const text = tls.warning.replace(` ${tls.docs}`, '');
+  return (
+    <Callout tone="warning" data-testid="database-tls-warning">
+      <b>Database connection not verified.</b> {text}{' '}
+      <a href={tls.docs} target="_blank" rel="noreferrer">
+        Database TLS
+      </a>
+    </Callout>
+  );
+}
+
 function SdkTab() {
+  const isAdmin = useIsAdmin();
   const [data, error] = usePoll(
     () => api<{ instances: SdkInstance[] }>('/v1/admin/sdk-instances'),
     [],
   );
   return (
     <>
+      {isAdmin && <DatabaseTlsNotice />}
       <ErrorBox error={error} />
       <p className="muted">
         One row per service and environment. Functions and other short-lived processes are never
