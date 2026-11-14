@@ -26,7 +26,10 @@ async function waitForDatabase(ping: () => Promise<void>, log: (m: string) => vo
 
 async function main() {
   const config = loadConfig();
-  const { storage, pool } = createPgStorage({ connectionString: config.databaseUrl });
+  const { storage, pool } = createPgStorage({
+    connectionString: config.databaseUrl,
+    caFile: config.databaseCaFile,
+  });
   const app0Log = (m: string) => console.log(JSON.stringify({ level: 'info', msg: m }));
   await waitForDatabase(() => storage.ping(), app0Log);
   const applied = await migrate(pool);

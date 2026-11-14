@@ -20,7 +20,10 @@ if (process.env.DEMO_STACK && !process.env.THEIRSIDE_API_KEY) {
   );
   process.exit(2);
 }
-const { storage, pool } = createPgStorage({ connectionString: url });
+const { storage, pool } = createPgStorage({
+  connectionString: url,
+  caFile: process.env.THEIRSIDE_DATABASE_CA_FILE || undefined,
+});
 try {
   const t0 = Date.now();
   const r = await seedDemo(storage, { log: (m) => console.log(`demo-seed: ${m}`) });

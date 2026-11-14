@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { SECRET_KEY_MIN_LENGTH } from './modules/auth/secret-box.js';
+import { readCaFile } from './storage/pg-connection.js';
 
 /**
  * Collector configuration, from environment variables only (architecture §3.3).
@@ -23,6 +24,8 @@ export interface SmtpConfig {
 
 export interface CollectorConfig {
   databaseUrl: string;
+  /** PEM file of CAs the database's TLS certificate must chain to (`verify-full`). */
+  databaseCaFile: string | undefined;
   host: string;
   port: number;
   deploymentMode: DeploymentMode;
@@ -204,6 +207,13 @@ function bool(env: NodeJS.ProcessEnv, name: string, dflt: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
+/** THEIRSIDE_DATABASE_CA_FILE, checked at start so a wrong path fails before any connection. */
+function databaseCaFile(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  readCaFile(raw.trim());
+  return raw.trim();
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
   const databaseUrl = env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -220,6 +230,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     throw new Error('THEIRSIDE_SMTP_URL must start with smtp:// or smtps://');
   return {
     databaseUrl,
+    databaseCaFile: databaseCaFile(env.THEIRSIDE_DATABASE_CA_FILE),
     host: env.HOST || '0.0.0.0',
     port,
     deploymentMode: mode,

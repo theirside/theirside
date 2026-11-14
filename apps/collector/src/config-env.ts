@@ -22,6 +22,13 @@ export const COLLECTOR_ENV: readonly CollectorEnvVar[] = [
     group: 'Basics',
   },
   {
+    name: 'THEIRSIDE_DATABASE_CA_FILE',
+    default: '–',
+    description:
+      'PEM file with the CA certificates the database’s TLS certificate must chain to; with it, TLS is on and the host name is checked too (use `sslmode=verify-full` in `DATABASE_URL`). The image includes AWS RDS’s global bundle: `/app/certs/rds-global-bundle.pem`. For another provider, mount its CA file and point this at it.',
+    group: 'Basics',
+  },
+  {
     name: 'PORT',
     default: '`4318`',
     description: 'Port the collector listens on.',
