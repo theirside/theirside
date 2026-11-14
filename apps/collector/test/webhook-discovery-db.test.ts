@@ -210,7 +210,9 @@ describe('discovered webhook routes', () => {
     ]);
     // the provider row exists (settings, alerts switch, thresholds)
     const providers = await t.db.storage.config.listProviders(tenant());
-    expect(providers.find((p) => p.name === 'OrbitPay Payments')).toMatchObject({ hostPatterns: [] });
+    expect(providers.find((p) => p.name === 'OrbitPay Payments')).toMatchObject({
+      hostPatterns: [],
+    });
     // what the SDK then sends is an ordinary delivery: stored and scored like any other
     await send(NOW, [
       {
