@@ -28,7 +28,10 @@ export interface EndpointHealth {
   environment: string;
   method: string;
   endpoint: string;
-  /** `idle`: called within the range, but not in the scoring window (live values are 0 / null). */
+  /**
+   * `receiving`: calls in the current, partial minute only (not scored yet); `idle`: called
+   * within the range, but not in the scoring window. Both have live values 0 / null.
+   */
   status: HealthStatus;
   score: number | null;
   callsPerMin: number;
@@ -114,7 +117,14 @@ function windowExpected(rows: readonly RollupRow[], k: RollupKey, from: Date): n
   return n;
 }
 
-const ORDER: Record<HealthStatus, number> = { red: 0, amber: 1, green: 2, idle: 3, unknown: 4 };
+const ORDER: Record<HealthStatus, number> = {
+  red: 0,
+  amber: 1,
+  green: 2,
+  receiving: 3,
+  idle: 4,
+  unknown: 5,
+};
 const latest = (a: string | null, b: string | null) => (a && b ? (a > b ? a : b) : (a ?? b));
 
 /**
@@ -128,6 +138,9 @@ const latest = (a: string | null, b: string | null) => (a && b ? (a > b ? a : b)
  * with no calls in the window is `idle` when it was ever called (last call from
  * the provider row, no rollups read), `unknown` when it never was.
  */
+/** Scored in the window (green, amber, red): not idle and not just receiving. */
+const isLive = (e: EndpointHealth) => e.status !== 'idle' && e.status !== 'receiving';
+
 export async function computeHealth(
   storage: Storage,
   tenant: Tenant,
@@ -137,6 +150,8 @@ export async function computeHealth(
   const range = opts.range ?? DEFAULT_HEALTH_RANGE;
   const t = resolveThresholds(await storage.config.getThresholds(tenant));
   const T = new Date(floorMinute(now.getTime()) - MIN);
+  // the current minute is still filling up: calls there aren't in the window yet
+  const currentMinute = floorMinute(now.getTime());
   const from = new Date(T.getTime() - (t.windowMinutes - 1) * MIN);
   // endpoints in an incident: enough minutes to find the latest bad one while recovering
   const recoverFrom = new Date(from.getTime() - (t.resolveAfterMinutes - 1) * MIN);
@@ -256,13 +271,14 @@ export async function computeHealth(
         rangeTotals,
       };
     } else {
-      // known but quiet: never scored, so never green or red
+      // known but quiet: never scored, so never green or red. Calls in the current
+      // (partial) minute only: receiving, not idle, until that minute enters the window.
       const b = baselines.get(id);
       row = {
         environment: r.environment,
         method: r.method,
         endpoint: r.endpoint,
-        status: 'idle',
+        status: Date.parse(r.lastMinute) >= currentMinute ? 'receiving' : 'idle',
         score: null,
         callsPerMin: 0,
         errorRate: 0,
@@ -299,12 +315,12 @@ export async function computeHealth(
     const cfg: ProviderRecord | undefined = configured.find((p) => p.name === name);
     const endpoints = (byProvider.get(name) ?? []).sort(
       (a, b) =>
-        Number(a.status === 'idle') - Number(b.status === 'idle') ||
+        Number(!isLive(a)) - Number(!isLive(b)) ||
         b.callsPerMin - a.callsPerMin ||
         b.lastCallAt.localeCompare(a.lastCallAt) ||
         a.endpoint.localeCompare(b.endpoint),
     );
-    const live = endpoints.filter((e) => e.status !== 'idle');
+    const live = endpoints.filter(isLive);
     const rolled = rollupProvider(
       live.map((e) => ({ calls: e.callsPerMin, score: e.score, status: e.status })),
     );
@@ -322,9 +338,14 @@ export async function computeHealth(
       opts.environment ? null : (cfg?.lastCallAt?.toISOString() ?? null),
     );
     let status: HealthStatus = rolled.status;
-    if (status === 'unknown' && lastCallAt) status = 'idle';
+    if (status === 'unknown' && endpoints.some((e) => e.status === 'receiving'))
+      status = 'receiving';
+    else if (status === 'unknown' && lastCallAt) status = 'idle';
     // an open incident whose endpoints have no traffic right now still marks the provider
-    if (openIncident && (status === 'green' || status === 'unknown' || status === 'idle'))
+    if (
+      openIncident &&
+      (status === 'green' || status === 'unknown' || status === 'idle' || status === 'receiving')
+    )
       status = 'amber';
     providers.push({
       name,

@@ -39,6 +39,7 @@ const PUBLIC: Record<HealthStatus, PublicStatus> = {
   green: 'operational',
   amber: 'degraded',
   red: 'outage',
+  receiving: 'no_data',
   idle: 'no_data',
   unknown: 'no_data',
 };

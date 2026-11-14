@@ -185,7 +185,7 @@ function Components() {
       </Section>
       <Section title="StatusDot">
         <div className="row">
-          {(['green', 'amber', 'red', 'idle', 'unknown'] as const).map((s) => (
+          {(['green', 'amber', 'red', 'receiving', 'idle', 'unknown'] as const).map((s) => (
             <StatusDot key={s} status={s} label />
           ))}
         </div>

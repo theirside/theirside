@@ -276,7 +276,8 @@ export function Provider({ name, environment }: { name: string; environment: str
   const [data, error] = usePoll(() => api<Overview>(`/v1/admin/overview?${qs}`), [qs.toString()]);
   // a response for the previous range can land after a switch: show only the current one
   const p = data?.range === range ? data.providers.find((x) => x.name === name) : undefined;
-  const idle = p?.endpoints.filter((e) => e.status === 'idle').length ?? 0;
+  const idle =
+    p?.endpoints.filter((e) => e.status === 'idle' || e.status === 'receiving').length ?? 0;
   const key = (e: EndpointHealth) => `${e.environment} ${e.method} ${e.endpoint}`;
   return (
     <>
@@ -474,7 +475,9 @@ function FragmentRow({
   onToggle: () => void;
   children: React.ReactNode;
 }) {
-  const idle = e.status === 'idle';
+  // idle and receiving rows have no window numbers yet: totals over the range instead
+  const idle = e.status === 'idle' || e.status === 'receiving';
+  const receiving = e.status === 'receiving';
   // an open incident whose current window is healthy: say so instead of a plain red badge
   const recovering = !idle && e.inIncident && !!e.recovering;
   const status = recovering ? 'amber' : e.status;
@@ -489,12 +492,25 @@ function FragmentRow({
         className={`clickable ${status}`}
         onClick={onToggle}
         title={
-          idle ? `No calls in the scoring window; numbers are totals over ${range}` : undefined
+          receiving
+            ? `Calls this minute, not scored yet; numbers are totals over ${range}`
+            : idle
+              ? `No calls in the scoring window; numbers are totals over ${range}`
+              : undefined
         }
       >
         <td>
           <StatusDot status={status} /> <code>{e.method}</code> <code>{e.endpoint}</code>
-          {idle && <Badge>idle</Badge>}
+          {idle && (
+            <Badge
+              tone={receiving ? 'info' : undefined}
+              title={
+                receiving ? 'Calls this minute; scored once the minute is complete' : undefined
+              }
+            >
+              {receiving ? 'receiving' : 'idle'}
+            </Badge>
+          )}
           {e.learning && !idle && <Badge>learning</Badge>}
           {recovering ? (
             <Badge

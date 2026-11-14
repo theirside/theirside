@@ -21,6 +21,7 @@ const LABEL: Record<HealthStatus, string> = {
   green: 'Healthy',
   amber: 'Degraded',
   red: 'Failing',
+  receiving: 'Receiving',
   idle: 'Idle',
   unknown: 'No data',
 };

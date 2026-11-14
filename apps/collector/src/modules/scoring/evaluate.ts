@@ -562,11 +562,13 @@ export function chainWindows(callsIn: (minutes: number) => number, t: Thresholds
 }
 
 /**
- * green / amber / red: scored over the window. idle: known (called within the
- * range asked for) but no calls in the window, so neither healthy nor failing.
- * unknown: never called, or not within the data asked for.
+ * green / amber / red: scored over the window. receiving: calls arrived in the current,
+ * still partial minute, none yet in the window (a first call, or traffic just starting
+ * again): not scored yet. idle: known (called within the range asked for) but no calls in
+ * the window, so neither healthy nor failing. unknown: never called, or not within the
+ * data asked for.
  */
-export type HealthStatus = 'green' | 'amber' | 'red' | 'idle' | 'unknown';
+export type HealthStatus = 'green' | 'amber' | 'red' | 'receiving' | 'idle' | 'unknown';
 
 export interface Score {
   score: number | null;
