@@ -1,10 +1,12 @@
 # Contributing
 
-Thanks for helping. Issues and pull requests are welcome.
+Thanks for your interest. **Issues only, for now:** bug reports, questions and feature requests are welcome as [GitHub issues](../../issues). We don't accept pull requests from outside contributors at the moment; please open an issue instead, and we'll pick it up. Security problems: report them privately (Security → Report a vulnerability), not in a public issue.
+
+If we open the project to outside pull requests later, they will need a signed Contributor License Agreement ([`CLA.md`](CLA.md)), which lets KRAVA IT SERVICES LTD keep licensing the code (see [`LICENSING.md`](LICENSING.md)) while you keep the rights to your own work.
+
+The rest of this page is for the maintainers.
 
 ## Before you start
-
-- Outside contributions need a signed **Contributor License Agreement** ([`CLA.md`](CLA.md)) before they can be merged. It lets KRAVA IT SERVICES LTD keep licensing and selling the code (see [`LICENSING.md`](LICENSING.md)); you keep the rights to your own work. Signing happens on the pull request through the **CLA Assistant** GitHub app: it comments with a link, you sign once with your GitHub account, and the check turns green. (The app is set up on the GitHub repo itself; there is no CLA workflow in this repository.)
 - Read [`CLAUDE.md`](CLAUDE.md) (hard rules: the SDK never breaks the host app, privacy limits, tenancy, storage interfaces) and [`docs/architecture.md`](docs/architecture.md).
 - Paid features go in `ee/` behind an entitlement check; nothing that is free moves to paid (editions rule in `docs/architecture.md` §2).
 - Never commit secrets, private keys, customer names, hostnames or data. Examples use fake providers only.

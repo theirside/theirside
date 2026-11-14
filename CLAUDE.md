@@ -77,5 +77,5 @@ Anything a single team needs to catch provider problems is free; what a manager,
 - TypeScript strict, ESM source, SDK ships CJS + ESM. Vitest for tests. Few, boring dependencies.
 - Tests come with the code: templating and scoring are table-driven; SDK has failure-mode tests (timeouts, resets, collector down, internals throwing).
 - Small focused commits with clear messages.
-- Licences (`LICENSING.md`): `packages/sdk` and `packages/shared` are MIT, everything else FCL-1.0-ALv2 (root `LICENSE`). Licence texts are the official ones, fetched, never written from memory. Outside contributions need the CLA (`CONTRIBUTING.md`).
+- Licences (`LICENSING.md`): `packages/sdk` and `packages/shared` are MIT, everything else FCL-1.0-ALv2 (root `LICENSE`). Licence texts are the official ones, fetched, never written from memory. Issues only: no pull requests from outside contributors for now; if that changes, they need the CLA (`CONTRIBUTING.md`).
 - Don't overbuild: no Kubernetes, ClickHouse, billing or SSO until the roadmap says so.

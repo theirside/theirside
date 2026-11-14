@@ -109,4 +109,4 @@ Everything a single team needs to catch provider problems is free, and stays fre
 
 ## Licence
 
-The SDK and `packages/shared` are **MIT**: adding the SDK to your app has no restrictions. Everything else is under the **Fair Core License (FCL-1.0-ALv2)**: free to use, self-host and modify for your own company, not to offer as a competing product or service; each release becomes Apache 2.0 after two years. Plain-language summary: [LICENSING.md](LICENSING.md). Contributions need a CLA: [CONTRIBUTING.md](CONTRIBUTING.md).
+The SDK and `packages/shared` are **MIT**: adding the SDK to your app has no restrictions. Everything else is under the **Fair Core License (FCL-1.0-ALv2)**: free to use, self-host and modify for your own company, not to offer as a competing product or service; each release becomes Apache 2.0 after two years. Plain-language summary: [LICENSING.md](LICENSING.md). Issues are welcome; pull requests from outside contributors aren't accepted for now ([CONTRIBUTING.md](CONTRIBUTING.md)).

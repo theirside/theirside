@@ -40,4 +40,4 @@ To buy a license or ask about terms: `<CONTACT_EMAIL>`.
 
 ## Contributing
 
-Outside contributions need a signed Contributor License Agreement; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues only for now: pull requests from outside contributors aren't accepted. If that changes, they will need a signed Contributor License Agreement; see [CONTRIBUTING.md](CONTRIBUTING.md).
