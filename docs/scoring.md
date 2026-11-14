@@ -133,7 +133,7 @@ Computed over the same 5-minute window, for the dashboard, health API and status
 | 4xx | 10 | 4xx rate is 20 pp above its baseline |
 | 429 | 5 | 429 rate is 10 pp above its baseline |
 
-Error and latency penalties are multiplied by `min(1, calls / 20)`, so one failure on a quiet endpoint doesn't turn it red. No traffic in the window gives no score: an endpoint or provider that was called before (endpoints: within the range asked for, 24 h by default in the health API; providers: ever) is `idle`, one never called is `unknown`. Idle is neither healthy nor failing; the dashboard shows its last call and totals over the range instead of live values.
+Error and latency penalties are multiplied by `min(1, calls / 20)`, so one failure on a quiet endpoint doesn't turn it red. No traffic in the window gives no score: an endpoint or provider that was called before (endpoints: within the range asked for, 24 h by default in the health API; providers: ever) is `idle`, one never called is `unknown`. Calls only in the current minute, which isn't complete and so not in the window yet, make it `receiving` instead of `idle` (a first call, or traffic starting again); it is scored once that minute completes. Idle is neither healthy nor failing; the dashboard shows its last call and totals over the range instead of live values.
 
 Status: **green ≥ 90**, **amber 60–89**, **red < 60**. An endpoint at the incident threshold scores 40 (red); halfway there, 70 (amber). An endpoint with an open incident is shown red.
 

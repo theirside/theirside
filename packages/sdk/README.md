@@ -119,13 +119,12 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableShutdownHooks();
   await app.listen(3000);
 }
 bootstrap();
 ```
 
-Flush on shutdown from any provider that implements `OnApplicationShutdown`:
+No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself. One exception: if your app calls `app.enableShutdownHooks()` (for its own cleanup), Nest ends the process as soon as its hooks finish, before the SDK has sent; then add `await shutdown()` from `@theirside/sdk` in an `onApplicationShutdown()` hook.
 
 ```ts
 import { shutdown } from '@theirside/sdk';

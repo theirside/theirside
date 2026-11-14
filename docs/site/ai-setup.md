@@ -20,20 +20,25 @@ Add the Theirside SDK (@theirside/sdk) to this project. Change only what these s
    (Express, Fastify, NestJS, Koa, plain http) and/or AWS Lambda handlers. Note whether
    the code is ES modules or CommonJS, and which package manager the repo uses.
 2. Install @theirside/sdk with that package manager, as a runtime dependency.
-3. Call init() once per process, before the app loads anything else:
-     init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: process.env.THEIRSIDE_COLLECTOR_URL,
-            service: '<a short name for this deployable>' })
-   - ES modules: put it in its own file (e.g. instrumentation.ts) and import that file as
-     the very first import of the entry point. CommonJS: at the very top of the entry file.
-   - NestJS: the first import in main.ts, before NestFactory.
-   - Lambda: at module top level, outside the handler.
+3. Check how the project loads its configuration, then call init() once per process.
+   init() uses the values it gets when it runs, so pick the pattern that fits:
+   - Settings in process.env at startup (platform env vars, dotenv loaded first):
+       init({ apiKey: process.env.THEIRSIDE_API_KEY, endpoint: process.env.THEIRSIDE_COLLECTOR_URL,
+              service: '<a short name for this deployable>' })
+     before the app loads anything else. ES modules: in its own file (e.g. instrumentation.ts)
+     imported first by the entry point; CommonJS: at the very top of the entry file; NestJS:
+     the first import in main.ts; Lambda: at module top level, outside the handler.
+   - Settings loaded at runtime (SSM, Secrets Manager, Vault, a config service): call init()
+     with the loaded values right after the config is loaded and before HTTP clients are
+     created. Lambda: at cold start, right after loading config (top-level await in ES
+     modules; on the first invocation in CommonJS).
    - Never hard-code the API key or URL, and never commit their values.
 4. Lambda handlers that receive webhooks over HTTP (API Gateway, ALB, function URL):
    wrap the exported handler with wrap() from @theirside/sdk, and add inbound: true to
    init(). Other Lambda handlers: wrap them with wrap() too, so events are sent before
    the function freezes.
-5. Add THEIRSIDE_API_KEY and THEIRSIDE_COLLECTOR_URL wherever this project already
-   declares its environment variables (.env.example, config schema, serverless.yml,
+5. Add the API key and collector URL where this project already declares its settings
+   (.env.example, a config schema, the secrets the config loader reads, serverless.yml,
    template.yaml, Terraform/CDK, Helm values, docker-compose…), with placeholder values,
    following the existing pattern. Do not invent a new config mechanism.
 6. Do not refactor, reformat, rename or upgrade anything else. Do not add tests unless
@@ -62,7 +67,7 @@ Add the Theirside collector to this repository's infrastructure. Change only wha
    pattern and its conventions only. If there is none, stop and suggest the Docker Compose
    quick start instead: https://theirside.dev/docs/getting-started
 2. Add one service running the image ghcr.io/theirside/collector:0.6 (it follows 0.6.x):
-   - container port 4318; it runs as a non-root user (uid 1000); 1 vCPU and 1-2 GB to start;
+   - container port 4318; it runs as a non-root user (uid 1000); one instance, 1 vCPU, 2 GB;
    - health checks: GET /readyz for the load balancer or readiness (503 while its database
      is unreachable), GET /healthz for liveness or the container health check;
    - env vars: DATABASE_URL (required), THEIRSIDE_PUBLIC_URL (the dashboard's internal URL),
@@ -84,10 +89,12 @@ Add the Theirside collector to this repository's infrastructure. Change only wha
    helm lint, kubectl apply --dry-run=client, docker compose config) and fix what it reports.
 
 Finish by printing: the files you changed and why (one line each), the secrets to create and
-how, and how to get the first-account setup link after deploying: on its first start the
-collector logs one line containing "/setup?token=" (docker compose logs collector, kubectl
-logs deploy/<name>, or the service's log group; grep for /setup). Open it, create the
-account, then copy the API key and URL from "Connect your app" for Prompt 1.
+how, and how to create the first account after deploying: on its first start the collector
+logs one line containing "/setup" (docker compose logs collector, kubectl logs deploy/<name>,
+or the service's log group; grep for /setup). By default it is a one-time link
+(/setup?token=…): open it, create the account, copy the API key and URL from "Connect your
+app" for Prompt 1. If THEIRSIDE_BOOTSTRAP_API_KEY is set (your own key from the secrets
+store), it is an address ending in /#/setup plus a setup code valid 24 hours instead.
 ```
 
 After it's applied: check that only your apps and your network can reach the collector, back up its database like any other, and keep `THEIRSIDE_SECRET_KEY` safe. Details: [Self-hosting](self-hosting.md), [Configuration](configuration.md).

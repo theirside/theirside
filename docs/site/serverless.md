@@ -31,6 +31,41 @@ export const handler = wrap(async (event: unknown) => {
 - Set `THEIRSIDE_API_KEY` and `THEIRSIDE_COLLECTOR_URL` in the function's environment (or read them from your secrets store and pass them in). The collector must be reachable from the function: same VPC, or over HTTPS.
 - It works the same behind **API Gateway** (REST and HTTP APIs), an **Application Load Balancer** and a **function URL**, and for non-HTTP triggers (SQS, EventBridge, schedules).
 
+### Config loaded at cold start
+
+`init()` uses the values it gets when it runs. If the function loads its settings at cold start (SSM Parameter Store, Secrets Manager, a config service) instead of having them in its environment, call `init()` right after loading them, still at the top level, before the handler runs:
+
+```ts
+// handler-config.ts
+import { init, wrap } from '@theirside/sdk';
+
+const config = await loadConfig(); // once per cold start
+
+init({
+  apiKey: config.theirsideApiKey,
+  endpoint: config.theirsideCollectorUrl,
+  inbound: true,
+});
+
+export const handler = wrap(async (event: unknown) => chargeCard(event));
+```
+
+That needs an ES module handler (top-level `await`). A CommonJS handler can initialise on its first invocation instead; outgoing calls are recorded from then on, but that one invocation's own webhook delivery isn't, because `wrap()` looks for it before your handler runs:
+
+```js
+// handler.js
+const { init, wrap } = require('@theirside/sdk');
+
+let ready;
+exports.handler = wrap(async (event) => {
+  ready ??= loadConfig().then((config) =>
+    init({ apiKey: config.theirsideApiKey, endpoint: config.theirsideCollectorUrl, inbound: true }),
+  );
+  await ready;
+  return chargeCard(event);
+});
+```
+
 ### When events are sent
 
 Each invocation sends its events right after your handler returns, before Lambda freezes the process. A reachable collector adds about 1 ms; the cap is 300 ms and can be changed:
