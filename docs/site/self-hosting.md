@@ -143,7 +143,9 @@ To encrypt the connection to Postgres and check that it really is your database,
 - **Another provider, or your own CA** (Cloud SQL, Azure, a Postgres with your company's CA): mount its CA certificate file into the container and point `THEIRSIDE_DATABASE_CA_FILE` at it.
 - **A certificate from a public CA**: `?sslmode=verify-full` alone is enough.
 
-`?sslmode=no-verify` also encrypts the connection but skips the certificate check, so anything on the network path could pose as your database: use it for local testing only. `sslmode=require` checks the certificate against public CAs only, so it fails on RDS without the CA file.
+`?sslmode=no-verify` also encrypts the connection but skips the certificate check, so anything on the network path could pose as your database: use it for local testing only. In PostgreSQL's own terms `require`, `prefer` and `allow` don't verify the certificate either; ask for `verify-full`.
+
+The collector checks this at startup and never blocks on it. When the database is on another machine (anything but `localhost`, `127.0.0.1`, `::1`, a Unix socket or a single-label name like the Compose service `postgres`; private IPs count as another machine) and the certificate isn't verified, it logs one warning with the exact fix, and admins see the same notice under **Settings → SDK health**.
 
 ## Upgrades
 

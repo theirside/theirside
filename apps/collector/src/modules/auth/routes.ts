@@ -41,6 +41,7 @@ const ADMIN_AREAS: [RegExp, string][] = [
   [/^\/v1\/admin\/settings\/security/, 'change security settings'],
   [/^\/v1\/admin\/settings\/thresholds/, 'change alert thresholds'],
   [/^\/v1\/admin\/settings\/discovery/, 'change the new-provider digest'],
+  [/^\/v1\/admin\/system/, 'see how this collector is set up'],
 ];
 
 const LOOPBACK = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/;

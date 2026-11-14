@@ -26,6 +26,7 @@ import {
 import { ExpectedStatusError, markExpected } from '../incidents/expected.js';
 import { registerWebhookRoutes } from './webhooks.js';
 import { RANGES, computeSeries, type RangeKey } from './series.js';
+import { DATABASE_TLS_DOCS, databaseTlsStatus } from '../../storage/pg-connection.js';
 
 const OPENAPI_PATH = fileURLToPath(new URL('../../../openapi.yaml', import.meta.url));
 
@@ -440,6 +441,21 @@ export async function registerApiRoutes(app: FastifyInstance, ctx: AppContext): 
       ctx.storage.config.listSdkProcesses(tenant, new Date(now.getTime() - 24 * 3600_000)),
     ]);
     return { instances: services.map((s) => sdkHealth(s, processes, now)) };
+  });
+
+  /** Admins: how this collector is set up (shown on Settings → SDK health). */
+  app.get('/v1/admin/system', { ...auth, config: { role: 'admin' as const } }, async () => {
+    const tls = databaseTlsStatus(ctx.config.databaseUrl, ctx.config.databaseCaFile);
+    return {
+      databaseTls: {
+        host: tls.host,
+        sslmode: tls.sslmode,
+        local: tls.local,
+        verified: tls.verified,
+        warning: tls.warning,
+        docs: DATABASE_TLS_DOCS,
+      },
+    };
   });
 
   app.get('/v1/admin/settings/thresholds', auth, async (req, reply) => {
