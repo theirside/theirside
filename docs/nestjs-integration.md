@@ -97,19 +97,7 @@ The SDK never throws into your code and never waits on the network in the reques
 
 ## 3. Flush on shutdown
 
-Nothing to add by default: the SDK sends what is queued on `SIGTERM` (ECS task stops, deploys) by itself. If the service calls `app.enableShutdownHooks()` for its own cleanup, Nest ends the process as soon as its hooks finish, before the SDK has sent (events are lost); then add one provider (any module):
-
-```ts
-import { Injectable, OnApplicationShutdown } from '@nestjs/common';
-import { shutdown } from '@theirside/sdk';
-
-@Injectable()
-export class MonitorShutdown implements OnApplicationShutdown {
-  async onApplicationShutdown() {
-    await shutdown(); // flushes queued events, capped at 2 s
-  }
-}
-```
+Nothing to add: the SDK sends what is queued on `SIGTERM` (ECS task stops, deploys) by itself, at most 2 s, also when the service calls `app.enableShutdownHooks()`. With SDK 0.4.1 or older and `enableShutdownHooks()`, add a provider whose `onApplicationShutdown()` awaits `shutdown()` from `@theirside/sdk`: Nest ends the process before those versions have sent.
 
 
 ## 4. Environment variables

@@ -124,15 +124,7 @@ async function bootstrap() {
 bootstrap();
 ```
 
-No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself. One exception: if your app calls `app.enableShutdownHooks()` (for its own cleanup), Nest ends the process as soon as its hooks finish, before the SDK has sent; then add `await shutdown()` from `@theirside/sdk` in an `onApplicationShutdown()` hook.
-
-```ts
-import { shutdown } from '@theirside/sdk';
-
-async onApplicationShutdown() {
-  await shutdown(); // flushes queued events, capped at 2 s
-}
-```
+No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself (at most 2 s), also when the app calls `app.enableShutdownHooks()`. With SDK 0.4.1 or older and `enableShutdownHooks()`, add `await shutdown()` in an `onApplicationShutdown()` hook: Nest ends the process before those versions have sent.
 
 ## What is sent, and what never is
 
@@ -324,6 +316,11 @@ Things to know:
 - **Pooled learning:** with collector 0.3.0+, a function's cold start fetches what all processes of its service learned (positions that turned out to be IDs) and applies it before its first calls are recorded, if the fetch lands first; it never blocks startup.
 - **Webhooks:** on AWS Lambda, `wrap()` records HTTP invocations from webhook senders; set `inbound: true` (see [Inbound webhooks](#inbound-webhooks)).
 - **Overhead:** about 1 ms per invocation with a reachable collector (`pnpm --filter @theirside/sdk bench:flush`; docs/benchmarks.md).
+
+## Upgrading to 0.4.2
+
+- **Fix: events lost on `SIGTERM` when another handler ended the process** (NestJS with `enableShutdownHooks()` and no hook of your own: it re-raises the signal, or calls `process.exit(0)` with `useProcessExit`). The SDK now keeps its `SIGTERM` listener until it has sent, holds a re-raised signal or a `process.exit()` call meanwhile (at most `shutdownTimeoutMs`, 2 s), then ends the process the same way. An `onApplicationShutdown()` hook calling `shutdown()` is no longer needed, and still works.
+- A second `SIGTERM` during that flush no longer kills the process at once; it ends when the flush does (still within 2 s).
 
 ## Upgrading to 0.4.1
 

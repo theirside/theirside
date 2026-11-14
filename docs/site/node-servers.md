@@ -136,20 +136,7 @@ import { Module } from '@nestjs/common';
 export class AppModule {}
 ```
 
-No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself. One exception: if your app calls `app.enableShutdownHooks()` for its own cleanup, Nest ends the process as soon as its hooks finish, before the SDK has sent. Then add this to any module or provider:
-
-```ts
-// shutdown.ts
-import { Injectable, type OnApplicationShutdown } from '@nestjs/common';
-import { shutdown } from '@theirside/sdk';
-
-@Injectable()
-export class TheirsideShutdown implements OnApplicationShutdown {
-  async onApplicationShutdown() {
-    await shutdown(); // sends what is queued, at most 2 s
-  }
-}
-```
+No shutdown code is needed: the SDK sends what is queued on `SIGTERM` by itself (at most 2 s), also when the app calls `app.enableShutdownHooks()`. With SDK 0.4.1 or older and `enableShutdownHooks()`, add `await shutdown()` in an `onApplicationShutdown()` hook: Nest ends the process before those versions have sent.
 
 A Nest project that compiles to CommonJS (the default `nest new` setup) can call `init()` at the very top of `main.ts` instead of using a separate file.
 
@@ -161,7 +148,7 @@ A Nest project that compiles to CommonJS (the default `nest new` setup) can call
 
 ## Shutting down
 
-On `SIGTERM` and when the event loop empties, the SDK sends what is queued (at most 2 s) and lets your app exit as before. If your app handles shutdown itself and exits on its own (NestJS with `enableShutdownHooks()`, a `process.exit()` in your handler), call `await shutdown()` before it does. Nothing else is needed: the SDK never keeps a process alive and never blocks a request.
+On `SIGTERM` and when the event loop empties, the SDK sends what is queued (at most 2 s) and lets your app exit as before. If another `SIGTERM` handler ends the process itself (re-raising the signal or calling `process.exit()`, as NestJS does with `enableShutdownHooks()`), the SDK holds that until it has sent, then exits the same way. Nothing else is needed: the SDK never keeps a process alive and never blocks a request.
 
 ## Check it works
 
