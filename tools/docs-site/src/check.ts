@@ -6,7 +6,10 @@
  *   published one (CI builds the SDK first), so ESM samples get `dist/index.d.ts` and
  *   CommonJS ones (`require(…)`) `dist/index.d.cts`, as for anyone who installs it;
  * - JSON blocks parse, YAML blocks parse (several documents allowed);
- * - the generated tables in configuration.md match the source (src/generate.ts).
+ * - the generated tables in configuration.md match the source (src/generate.ts);
+ * - links between pages and their `#anchors` resolve (anchors as theirside.dev makes them);
+ * - every collector minor tag (`ghcr.io/theirside/collector:0.6`) is the one the self-host
+ *   compose file pulls, so a new minor can't leave the docs on the old one.
  * A block preceded by `<!-- docs-check: skip (why) -->` is not checked. A first line like
  * `// instrumentation.ts` names the block's file, so a later block on the same page can
  * import it (`import './instrumentation.js'`).
@@ -18,7 +21,8 @@ import path from 'node:path';
 import ts from 'typescript';
 import YAML from 'yaml';
 import { configPage } from './generate.ts';
-import { ROOT, readPages, type Block } from './pages.ts';
+import { readFileSync } from 'node:fs';
+import { ROOT, anchors, readPages, type Block } from './pages.ts';
 
 const errors: string[] = [];
 const fail = (where: string, msg: string) => errors.push(`${where}: ${msg}`);
@@ -121,6 +125,46 @@ for (const d of ts.getPreEmitDiagnostics(program)) {
     fail(`docs/site/${src.page}:${src.block.line + line}`, msg);
   } else fail(d.file ? path.relative(ROOT, d.file.fileName) : 'typescript', msg);
 }
+
+// links between pages, and their anchors
+const byFile = new Map(pages.map((p) => [p.file, p]));
+const anchorsOf = new Map(pages.map((p) => [p.file, anchors(p)]));
+for (const p of pages) {
+  const lines = p.text.split('\n');
+  let fenced = false;
+  lines.forEach((line, i) => {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    if (fenced) return;
+    for (const m of line.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const href = m[1]!;
+      if (/^[a-z]+:/i.test(href)) continue; // https:, mailto:
+      const [file, anchor] = href.split('#') as [string, string | undefined];
+      const target = file === '' ? p.file : file;
+      const where = `docs/site/${p.file}:${i + 1}`;
+      if (!byFile.has(target)) {
+        fail(where, `link to ${href}: no page ${target} in docs/site`);
+        continue;
+      }
+      if (anchor && !anchorsOf.get(target)!.has(anchor))
+        fail(where, `link to ${href}: ${target} has no heading with the anchor #${anchor}`);
+    }
+  });
+}
+
+// collector image tags follow the self-host compose file's minor line
+const compose = readFileSync(path.join(ROOT, 'docker/compose.selfhost.yml'), 'utf8');
+const minor = /image:\s*ghcr\.io\/theirside\/collector:(\d+\.\d+)\s/.exec(compose)?.[1];
+if (!minor)
+  fail('docker/compose.selfhost.yml', 'no ghcr.io/theirside/collector:<major>.<minor> image');
+for (const p of pages)
+  p.text.split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(/ghcr\.io\/theirside\/collector:(\d+\.\d+)(?![\d.])/g))
+      if (minor && m[1] !== minor)
+        fail(
+          `docs/site/${p.file}:${i + 1}`,
+          `collector:${m[1]}, but the compose file pulls :${minor}`,
+        );
+  });
 
 // generated tables
 const { current, expected } = configPage();
