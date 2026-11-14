@@ -131,6 +131,24 @@ jobs:
           cache-to: type=gha,mode=max
       - run: docker/selfhost-quickstart.sh ghcr.io/theirside/collector:quickstart
 
+  # The collector verifies its database's certificate against a custom CA
+  # (THEIRSIDE_DATABASE_CA_FILE + sslmode=verify-full), and the image carries the RDS bundle.
+  database-tls:
+    name: Database TLS (self-signed CA)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.collector
+          load: true
+          tags: ghcr.io/theirside/collector:tls
+          cache-from: type=gha
+      - run: docker/database-tls-check.sh ghcr.io/theirside/collector:tls
+
   smoke:
     name: Playwright smoke (docker compose demo stack)
     runs-on: ubuntu-latest

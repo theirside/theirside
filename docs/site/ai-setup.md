@@ -70,7 +70,10 @@ Add the Theirside collector to this repository's infrastructure. Change only wha
      optional: https://theirside.dev/docs/configuration and /docs/self-hosting
 3. Postgres 13+: if the repository already has a managed Postgres (RDS, Cloud SQL, Azure),
    add a new database and user on it, not a new server. Otherwise add Postgres the way the
-   repository runs other stateful services. On RDS, add ?sslmode=no-verify to DATABASE_URL.
+   repository runs other stateful services. On RDS: ?sslmode=verify-full on DATABASE_URL
+   and THEIRSIDE_DATABASE_CA_FILE=/app/certs/rds-global-bundle.pem (built into the image);
+   another managed Postgres: mount its CA file and point that variable at it. Never use
+   sslmode=no-verify outside local testing.
 4. Keep it private: an internal load balancer, or no public ingress at all. Your apps reach
    it at its internal address. Do not add the optional public status-page instance (a second
    instance with THEIRSIDE_PUBLIC_PATHS_ONLY=true); only mention it in your summary.

@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { PgAuthStore } from './postgres-auth.js';
+import { pgConnectionConfig } from './pg-connection.js';
 import {
   COARSE_HIST_COLUMNS,
   COUNTER_COLUMNS,
@@ -1857,13 +1858,15 @@ function bind(db: Queryable, pool: pg.Pool): Storage {
 
 export interface PgOptions {
   connectionString: string;
+  /** THEIRSIDE_DATABASE_CA_FILE: verify the server certificate against these CAs. */
+  caFile?: string | undefined;
   max?: number;
   connectionTimeoutMillis?: number;
 }
 
 export function createPgStorage(opts: PgOptions): { storage: Storage; pool: pg.Pool } {
   const pool = new pg.Pool({
-    connectionString: opts.connectionString,
+    ...pgConnectionConfig(opts.connectionString, opts.caFile),
     max: opts.max ?? 10,
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? 3000,
     idleTimeoutMillis: 30_000,

@@ -16,6 +16,8 @@ test-results/
 .env.*
 !.env.example
 *.pem
+# public CA certificates baked into the collector image (docker/certs/README.md)
+!docker/certs/rds-global-bundle.pem
 *.key
 
 # logs
