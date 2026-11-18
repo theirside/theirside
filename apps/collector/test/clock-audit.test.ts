@@ -16,6 +16,12 @@ const ALLOWED: Record<string, { line: string; why: string }[]> = {
   'demo-seed.ts': [
     { line: 'Date.now()', why: 'how long the demo seed took (real time, a log line)' },
   ],
+  'demo-ready.ts': [
+    {
+      line: 'Date.now()',
+      why: "the demo stack's ready line: its start-up timeout and the demo app's first calls since this start (real time)",
+    },
+  ],
   'demo/seed.ts': [
     {
       line: 'opts.now ?? new Date()',
