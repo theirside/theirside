@@ -1,0 +1,170 @@
+# Theirside demo: a running install with fake providers, a week of history and live traffic,
+# to try from a link with nothing but Docker. theirside.dev serves it as /demo.yml (from the
+# latest release); the walkthrough is https://theirside.dev/docs/demo (docs/site/demo.md).
+#
+#   curl -fsSLo theirside-demo.yml https://theirside.dev/demo.yml
+#   docker compose -f theirside-demo.yml run --rm ready
+#
+# The second command starts everything and ends with one line: the dashboard address and a
+# one-time link to create your sign-in. Remove it all (containers, data, network):
+#
+#   docker compose -f theirside-demo.yml down -v
+#
+# What runs: Postgres, the collector (dashboard on 127.0.0.1:4318), a demo app that calls
+# fake providers (*.test, all answered by the chaos provider) and receives their webhooks,
+# and the chaos provider (break endpoints, change webhooks, see alerts: 127.0.0.1:4010).
+# Released images only, never a build. This machine only: the API key below is public, so
+# never publish these ports. To run your own install, use https://theirside.dev/compose.yml.
+# docker/docker-compose.yml (--profile demo) is the same demo built from a checkout, for
+# working on the repo.
+name: theirside-demo
+
+x-demo-key: &demo-key tsd_live_publicdemokey000000000000
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: theirside
+      POSTGRES_PASSWORD: theirside-demo
+      POSTGRES_DB: theirside
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U theirside -d theirside']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  collector:
+    image: ghcr.io/theirside/collector:0.6
+    environment:
+      DATABASE_URL: postgres://theirside:theirside-demo@postgres:5432/theirside
+      THEIRSIDE_PUBLIC_URL: http://localhost:4318
+      # a preset key, so the demo app can send without anyone copying one; the ready line
+      # prints the setup link (the collector's own log shows a setup code as well)
+      THEIRSIDE_BOOTSTRAP_API_KEY: *demo-key
+      THEIRSIDE_BOOTSTRAP_ORG_NAME: Demo
+      THEIRSIDE_BOOTSTRAP_PROJECT_NAME: Demo shop
+      # names for the fake providers (only *.test hosts), e.g. api.notifyco.test → NotifyCo
+      THEIRSIDE_CATALOG_OVERRIDE: /app/demo-catalog.json
+    ports:
+      - '127.0.0.1:4318:4318'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4318/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      start_period: 30s
+      retries: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The fake providers (Acme Cards, KYCo, BankCo, NotifyCo, SaaSCo, GeoAPI on *.test), the
+  # NotifyCo webhook sender and the alert sink. Admin API: http://localhost:4010/__chaos,
+  # webhooks: /__webhooks, alerts received: /__alerts.
+  chaos:
+    image: ghcr.io/theirside/chaos-provider:0.6
+    environment:
+      CHAOS_PORT: 4010
+      SINK_SECRET: theirside-demo-sink-secret
+      WEBHOOK_TARGET: http://demo:3000/webhooks/notifyco
+      WEBHOOK_SECRET: theirside-demo-webhook-secret
+      WEBHOOK_RATE_PER_MIN: 30
+    ports:
+      - '127.0.0.1:4010:4010'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4010/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      default:
+        # every fake provider is this service under another name; the demo app also calls an
+        # internal service (ledger) and an error tracker, which the SDK never records
+        aliases:
+          - api.acmecards.test
+          - files.acmecards.test
+          - sandbox.acmecards.test
+          - api.kyco.test
+          - api.bankco.test
+          - api.notifyco.test
+          - api.geoapi.test
+          - ledger
+          - o4501.ingest.sentry.io
+    restart: unless-stopped
+
+  # One-shot: a week of history (providers, traffic, past incidents, baselines; 22 days of
+  # webhooks) on the first start, so detection works at once, and the alert channel into the
+  # chaos provider's sink. Later starts skip it.
+  seed:
+    image: ghcr.io/theirside/collector:0.6
+    command: ['node', 'dist/demo-seed.js']
+    # the image's health check is the collector's; this one-shot doesn't serve
+    healthcheck: { disable: true }
+    environment:
+      DATABASE_URL: postgres://theirside:theirside-demo@postgres:5432/theirside
+      DEMO_STACK: '1'
+      THEIRSIDE_API_KEY: *demo-key
+      DEMO_ALERT_SINK_URL: http://chaos:4010/__alerts
+      DEMO_ALERT_SINK_SECRET: theirside-demo-sink-secret
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: 'no'
+
+  # A small payments backend (NestJS, the Theirside SDK with zero config) with built-in users
+  # calling it 20 times a second; it receives NotifyCo's webhooks. Starts after the seed.
+  demo:
+    image: ghcr.io/theirside/demo-app:0.6
+    environment:
+      PORT: 3000
+      THEIRSIDE_COLLECTOR_URL: http://collector:4318
+      THEIRSIDE_API_KEY: *demo-key
+      THEIRSIDE_ENVIRONMENT: demo
+      SAASCO_TARGET: chaos
+      WEBHOOK_SECRET: theirside-demo-webhook-secret
+      DEMO_TRAFFIC_RPS: 20
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      start_period: 20s
+      retries: 10
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      chaos:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Prints the ready line once the demo app's first calls have arrived, then exits:
+  # docker compose -f theirside-demo.yml run --rm ready (again any time for the line).
+  ready:
+    image: ghcr.io/theirside/collector:0.6
+    command: ['node', 'dist/demo-ready.js']
+    healthcheck: { disable: true }
+    environment:
+      DATABASE_URL: postgres://theirside:theirside-demo@postgres:5432/theirside
+      DEMO_DASHBOARD_URL: http://localhost:4318
+    depends_on:
+      demo:
+        condition: service_healthy
+    restart: 'no'
+
+volumes:
+  pgdata:
