@@ -1,5 +1,7 @@
 # Demo: from zero to an incident alert in under 5 minutes
 
+This page is the demo built from a checkout, for working on the repo. People trying Theirside use the zero-setup demo instead: `docker/compose.demo.yml`, released images only, walkthrough in [docs/site/demo.md](site/demo.md) (theirside.dev/docs/demo). It runs the same demo app and chaos provider with the same seeded week; the demo app makes its own traffic (`DEMO_TRAFFIC_RPS`) instead of the load generator, and sign-in is the setup link its ready line prints.
+
 Everything runs locally in Docker: Postgres, the collector (with dashboard and status page), a fake provider whose endpoints you can break on demand (`tools/chaos-provider`), the NestJS demo app that calls fake providers through `@nestjs/axios`, `http` and `fetch` with AWS X-Ray on (`examples/nestjs-demo`), and a load generator (`tools/loadgen`) that keeps the demo app busy.
 
 ## Demo vs simulation

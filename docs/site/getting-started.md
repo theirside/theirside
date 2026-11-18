@@ -8,6 +8,8 @@ order: 1
 
 Theirside watches the third-party APIs your backend calls (and the webhooks they send you), learns what normal looks like for each endpoint, and alerts you when one starts failing, with a summary you can paste into a support ticket. It runs in your infrastructure: one Docker image and Postgres.
 
+Just looking? [Try the demo](demo.md): a running install with fake providers and a week of history, in two commands.
+
 ## 1. Run the collector
 
 You need Docker. No clone, no configuration:
