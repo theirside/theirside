@@ -2,7 +2,7 @@
 # profiles. Self-hosting users get docker/compose.selfhost.yml instead (what theirside.dev
 # serves as /compose.yml); keep user-facing settings and comments there.
 # Collector + Postgres from a released image (ghcr.io/theirside/collector):
-#   THEIRSIDE_VERSION=0.6.3 docker compose -f docker/docker-compose.yml up -d
+#   THEIRSIDE_VERSION=0.6.4 docker compose -f docker/docker-compose.yml up -d
 # Without docker/dev.env the first start generates the project API key and logs a one-time
 # link to create the first account (docker compose -f docker/docker-compose.yml logs collector).
 # A release version is pulled, never built: if the pull fails, or with --build, it stops

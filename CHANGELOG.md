@@ -2,6 +2,14 @@
 
 Collector (`ghcr.io/theirside/collector`) and SDK (`@theirside/sdk`) releases. Upgrade steps: [collector](docs/nestjs-integration.md#8-running-the-collector-in-the-clients-infrastructure), [SDK](packages/sdk/README.md#upgrading-to-042).
 
+## Collector 0.6.4
+
+A zero-setup demo for trying Theirside from a link. No SDK release; the self-host compose file stays on the `0.6` line.
+
+- **Try the demo** ([docs/site/demo.md](docs/site/demo.md), theirside.dev/docs/demo): `curl -fsSLo theirside-demo.yml https://theirside.dev/demo.yml` and `docker compose -f theirside-demo.yml run --rm ready`. Released images only, ports on `127.0.0.1`, a week of seeded history so detection works at once, and one line at the end with the dashboard and a setup link. The page walks through breaking an endpoint, stopping a webhook sender and marking a 400 as expected.
+- **New images**, published with the collector's version tags: `ghcr.io/theirside/demo-app` (the NestJS demo app, with built-in traffic) and `ghcr.io/theirside/chaos-provider` (fake providers, fault injection, webhook sender, alert sink). The release runs the demo end to end before pushing.
+- **Setup links work with a preset API key**: the setup page takes the token from a `/setup?token=…` link in setup-code mode too.
+
 ## SDK 0.4.2
 
 Works with collector 0.5.0 and later.
