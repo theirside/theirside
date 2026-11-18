@@ -1,10 +1,13 @@
-# Collector image release: ghcr.io/theirside/collector, linux/amd64 + linux/arm64.
-#   git tag v0.6.3 && git push origin v0.6.3
+# Image release, linux/amd64 + linux/arm64: ghcr.io/theirside/collector, and the demo's
+# ghcr.io/theirside/demo-app and ghcr.io/theirside/chaos-provider (docker/compose.demo.yml).
+#   git tag v0.6.4 && git push origin v0.6.4
 # or Actions → "Release collector image" → Run workflow (builds the selected ref).
-# Tags: <version>; for a stable version also <major>.<minor> (if it is the newest patch of that
-# minor) and latest (if it is the newest stable version overall, by git tags). A prerelease
-# (0.2.0-rc.1) gets only <version>. docker/compose.selfhost.yml (what theirside.dev serves)
-# pulls <major>.<minor>, so the self-host Quick start must pass before anything is pushed.
+# Tags, the same for all three images: <version>; for a stable version also <major>.<minor>
+# (if it is the newest patch of that minor) and latest (if it is the newest stable version
+# overall, by git tags). A prerelease (0.2.0-rc.1) gets only <version>.
+# docker/compose.selfhost.yml and docker/compose.demo.yml (what theirside.dev serves as
+# /compose.yml and /demo.yml) pull <major>.<minor>, so the self-host Quick start and the demo
+# end to end must pass before anything is pushed.
 # Retag only (no build): Run workflow with "retag" ticked points <major>.<minor> and latest at
 # the already-published <version>, under the same newest-version rules (e.g. a backfill).
 name: Release collector image
@@ -30,9 +33,6 @@ permissions:
 concurrency:
   group: release-collector-${{ github.event.inputs.version || github.ref_name }}
   cancel-in-progress: false
-
-env:
-  IMAGE: ghcr.io/theirside/collector
 
 jobs:
   version:
@@ -122,13 +122,72 @@ jobs:
           file: docker/Dockerfile.collector
           load: true
           tags: ghcr.io/theirside/collector:quickstart
-          cache-from: type=gha
+          cache-from: type=gha,scope=collector
       - run: docker/selfhost-quickstart.sh ghcr.io/theirside/collector:quickstart
 
-  publish:
-    name: Build and push (amd64 + arm64)
-    needs: [version, test, selfhost-quickstart]
+  demo-quickstart:
+    name: Demo end to end (compose.demo.yml)
+    needs: version
+    if: ${{ !inputs.retag }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # the three images this release pushes, built for the runner's arch and loaded locally
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.collector
+          load: true
+          tags: ghcr.io/theirside/collector:demo
+          cache-from: type=gha,scope=collector
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.node-app
+          build-args: PACKAGE=@theirside/nestjs-demo
+          load: true
+          tags: ghcr.io/theirside/demo-app:demo
+          cache-from: type=gha,scope=demo-app
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.node-app
+          build-args: PACKAGE=@theirside/chaos-provider
+          load: true
+          tags: ghcr.io/theirside/chaos-provider:demo
+          cache-from: type=gha,scope=chaos-provider
+      # start, break one endpoint, an incident opens and its alert arrives, tear down
+      - run: >-
+          docker/demo-quickstart.sh ghcr.io/theirside/collector:demo
+          ghcr.io/theirside/demo-app:demo ghcr.io/theirside/chaos-provider:demo
+
+  publish:
+    name: Build and push ${{ matrix.image.name }} (amd64 + arm64)
+    needs: [version, test, selfhost-quickstart, demo-quickstart]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - {
+              name: collector,
+              title: Theirside collector,
+              file: docker/Dockerfile.collector,
+              package: '',
+            }
+          - {
+              name: demo-app,
+              title: Theirside demo app,
+              file: docker/Dockerfile.node-app,
+              package: '@theirside/nestjs-demo',
+            }
+          - {
+              name: chaos-provider,
+              title: Theirside demo chaos provider,
+              file: docker/Dockerfile.node-app,
+              package: '@theirside/chaos-provider',
+            }
     permissions:
       contents: read
       packages: write
@@ -137,6 +196,7 @@ jobs:
       attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      IMAGE: ghcr.io/theirside/${{ matrix.image.name }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -161,7 +221,7 @@ jobs:
             type=raw,value=latest,enable=${{ needs.version.outputs.move_latest == 'true' }}
           # FCL is not on the SPDX list (LICENSING.md); GitHub can't detect it from LICENSE
           labels: |
-            org.opencontainers.image.title=Theirside collector
+            org.opencontainers.image.title=${{ matrix.image.title }}
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -175,7 +235,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile.collector
+          file: ${{ matrix.image.file }}
+          build-args: ${{ matrix.image.package && format('PACKAGE={0}', matrix.image.package) || '' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -184,9 +245,9 @@ jobs:
           # BuildKit SLSA provenance and SPDX SBOM, attached to the image in the registry
           provenance: mode=max
           sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      # GitHub artifact attestation (verify: gh attestation verify oci://ghcr.io/theirside/collector:<version> -R theirside/theirside).
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+      # GitHub artifact attestation (verify: gh attestation verify oci://ghcr.io/theirside/<image>:<version> -R theirside/theirside).
       # Free for public repos; a private repo needs GitHub Enterprise Cloud, so it is skipped there.
       - if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v2
@@ -227,14 +288,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
-          tags=()
-          [ "$MOVE_MINOR" = true ] && tags+=(-t "$IMAGE:$MINOR")
-          [ "$MOVE_LATEST" = true ] && tags+=(-t "$IMAGE:latest")
-          if [ ${#tags[@]} -eq 0 ]; then
+          if [ "$MOVE_MINOR" != true ] && [ "$MOVE_LATEST" != true ]; then
             echo "::error::$VERSION is a prerelease or not the newest version of its line; nothing to retag"
             exit 1
           fi
-          # copies the multi-arch index as is: same digest, signatures and attestations stay valid
-          docker buildx imagetools create "${tags[@]}" "$IMAGE:$VERSION"
-          docker buildx imagetools inspect "$IMAGE:$VERSION" | head -3
-          echo "### ${IMAGE}:${VERSION} → ${tags[*]}" >> "$GITHUB_STEP_SUMMARY"
+          for name in collector demo-app chaos-provider; do
+            IMAGE="ghcr.io/theirside/$name"
+            # the demo images exist from 0.6.4 on: an older version has only the collector
+            if ! docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+              echo "::notice::$IMAGE:$VERSION is not published; skipped"
+              continue
+            fi
+            tags=()
+            [ "$MOVE_MINOR" = true ] && tags+=(-t "$IMAGE:$MINOR")
+            [ "$MOVE_LATEST" = true ] && tags+=(-t "$IMAGE:latest")
+            # copies the multi-arch index as is: same digest, signatures and attestations stay valid
+            docker buildx imagetools create "${tags[@]}" "$IMAGE:$VERSION"
+            docker buildx imagetools inspect "$IMAGE:$VERSION" | head -3
+            echo "### ${IMAGE}:${VERSION} → ${tags[*]}" >> "$GITHUB_STEP_SUMMARY"
+          done

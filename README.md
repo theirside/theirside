@@ -10,6 +10,17 @@ Your backend calls card issuers, KYC vendors, banks, payment and logistics APIs.
 - **Slack, email or signed webhooks**, a dashboard, a health API, and an embeddable status page you can show your own customers.
 - **Self-host it for free** (one Docker image + your Postgres; your data never leaves your infrastructure). Cloud and enterprise editions come from the same code; see [Free vs paid](#free-vs-paid).
 
+## Try the demo
+
+A running install with fake providers, a week of history and live traffic, nothing to install but Docker ([walkthrough](docs/site/demo.md), also at [theirside.dev/docs/demo](https://theirside.dev/docs/demo)):
+
+```sh
+curl -fsSLo theirside-demo.yml https://theirside.dev/demo.yml
+docker compose -f theirside-demo.yml run --rm ready
+```
+
+The last line is the dashboard address with a link to create your sign-in. Remove it with `docker compose -f theirside-demo.yml down -v`.
+
 ## Zero to first alert
 
 **1. Run the collector** (Postgres + the released image `ghcr.io/theirside/collector:0.6` on port 4318, amd64 and arm64). Needs Docker, no clone:
@@ -43,7 +54,7 @@ That's all: every third-party API the app calls is discovered, grouped into prov
 
 ### Demo vs simulation
 
-Want to see it first? From a clone of this repo (`pnpm install`, Docker running), there are two ways to watch it work, with fake providers only: [docs/demo.md](docs/demo.md).
+Working on the repo? From a clone (`pnpm install`, Docker running), there are two ways to watch it work, with fake providers only: [docs/demo.md](docs/demo.md). (Just looking? [Try the demo](#try-the-demo) above: no clone.)
 
 | | Demo | Simulation |
 |---|---|---|

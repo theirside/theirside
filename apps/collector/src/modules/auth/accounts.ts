@@ -27,6 +27,20 @@ const SETUP_CODE_TTL_MS = 24 * 3600_000;
 const SETUP_CODE_META = 'setup_code:';
 /** Zero-config setup links don't expire: they die when the first account exists. */
 const NO_EXPIRY = 'until-setup';
+/**
+ * A one-time setup-link token (/setup?token=…), stored hashed like setup codes and valid
+ * until the first account exists; null once someone can sign in. The zero-config first
+ * start logs one; the demo stack's ready line (demo-ready.ts) prints one. The setup page
+ * accepts it whether or not an API key or admin token was preset.
+ */
+export async function issueSetupLinkToken(storage: Storage): Promise<string | null> {
+  if ((await storage.auth.countSignInUsers()) > 0) return null;
+  // base62 in a URL; checked case-insensitively like the codes (~165 bits after folding)
+  const token = randomBase62(32);
+  await storage.config.setMeta(`${SETUP_CODE_META}${sha256Hex(token.toUpperCase())}`, NO_EXPIRY);
+  return token;
+}
+
 /** The THEIRSIDE_ADMIN_TOKEN break-glass principal: a system user, never listed or signed in otherwise. */
 export const ADMIN_TOKEN_USER_ID = 'usr_admin_token';
 
@@ -136,14 +150,7 @@ export class Accounts {
    * account exists; each start adds one, all are deleted when setup completes.
    */
   async issueSetupToken(): Promise<string | null> {
-    if (!(await this.setupRequired())) return null;
-    // base62 in a URL; checked case-insensitively like the codes (~165 bits after folding)
-    const token = randomBase62(32);
-    await this.storage.config.setMeta(
-      `${SETUP_CODE_META}${sha256Hex(token.toUpperCase())}`,
-      NO_EXPIRY,
-    );
-    return token;
+    return issueSetupLinkToken(this.storage);
   }
 
   /**

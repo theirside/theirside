@@ -127,8 +127,8 @@ jobs:
           file: docker/Dockerfile.collector
           load: true
           tags: ghcr.io/theirside/collector:quickstart
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=collector
+          cache-to: type=gha,mode=max,scope=collector
       - run: docker/selfhost-quickstart.sh ghcr.io/theirside/collector:quickstart
 
   # The collector verifies its database's certificate against a custom CA
@@ -146,7 +146,7 @@ jobs:
           file: docker/Dockerfile.collector
           load: true
           tags: ghcr.io/theirside/collector:tls
-          cache-from: type=gha
+          cache-from: type=gha,scope=collector
       - run: docker/database-tls-check.sh ghcr.io/theirside/collector:tls
 
   smoke:

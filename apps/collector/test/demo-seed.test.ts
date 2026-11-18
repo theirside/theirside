@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEMO_ENVIRONMENT, DemoSeedRefused, seedDemo, type SeedResult } from '../src/demo/seed.js';
+import {
+  DEMO_ALERT_SINK_NAME,
+  DEMO_ENVIRONMENT,
+  DemoSeedRefused,
+  ensureDemoAlertSink,
+  seedDemo,
+  type SeedResult,
+} from '../src/demo/seed.js';
 import { FakeClock } from '../src/util/clock.js';
 import {
   createTestDb,
@@ -153,6 +160,19 @@ describe('demo seed', () => {
 
   it('a second run is a no-op', async () => {
     expect((await seedDemo(t.db.storage, { now: NOW })).seeded).toBe(false);
+  });
+
+  it('adds the alert channel into the chaos sink once (docker/compose.demo.yml)', async () => {
+    const sink = { url: 'http://chaos:4010/__alerts', secret: 'theirside-demo-sink-secret' };
+    expect(await ensureDemoAlertSink(t.db.storage, sink)).toBe(true);
+    expect(await ensureDemoAlertSink(t.db.storage, sink)).toBe(false);
+    const channels = await t.db.storage.config.listAlertChannels({
+      orgId: t.orgId,
+      projectId: t.projectId,
+    });
+    expect(channels.filter((c) => c.name === DEMO_ALERT_SINK_NAME)).toEqual([
+      expect.objectContaining({ kind: 'webhook', enabled: true, config: sink }),
+    ]);
   });
 });
 

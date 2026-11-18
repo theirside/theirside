@@ -289,12 +289,15 @@ export function Setup({
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
-  const fromLink = mode === 'link' && !!token;
-  const credentials =
-    mode === 'code'
+  // a setup link works in code mode too (a preset API key or admin token): the demo
+  // stack prints one, and its token is checked like a setup code
+  const fromLink = mode !== 'open' && !!token;
+  const credentials = fromLink
+    ? { setupCode: token }
+    : mode === 'code'
       ? { setupCode: secret.trim(), adminToken: secret.trim() }
       : mode === 'link'
-        ? { setupCode: token ?? setupToken(secret) }
+        ? { setupCode: setupToken(secret) }
         : {};
   return (
     <Shell
@@ -309,7 +312,7 @@ export function Setup({
         }).then(onDone, (e) => setError(message(e)));
       }}
     >
-      {mode === 'code' && (
+      {mode === 'code' && !fromLink && (
         <>
           <p className="muted">
             Nobody can sign in yet. Enter the setup code from the collector&apos;s log (

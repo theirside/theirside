@@ -704,3 +704,31 @@ async function seedIncidents(
   }
   return PAST_INCIDENTS.length;
 }
+
+/** The demo's alert channel name; the dev stack's load generator creates the same one. */
+export const DEMO_ALERT_SINK_NAME = 'Demo alert sink';
+
+/**
+ * The demo's alert channel: a webhook into the chaos provider's alert sink (/__alerts), so
+ * alerts are visible without Slack. Idempotent; only on the single-tenant demo install.
+ * Returns true when it created the channel.
+ */
+export async function ensureDemoAlertSink(
+  storage: Storage,
+  sink: { url: string; secret: string },
+): Promise<boolean> {
+  const orgs = await storage.config.listOrgs();
+  if (orgs.length !== 1) return false;
+  const projects = await storage.config.listProjects(orgs[0]!.id);
+  if (projects.length !== 1) return false;
+  const tenant = { orgId: orgs[0]!.id, projectId: projects[0]!.id };
+  const channels = await storage.config.listAlertChannels(tenant);
+  if (channels.some((c) => c.name === DEMO_ALERT_SINK_NAME)) return false;
+  await storage.config.createAlertChannel(tenant, {
+    kind: 'webhook',
+    name: DEMO_ALERT_SINK_NAME,
+    config: { url: sink.url, secret: sink.secret },
+    enabled: true,
+  });
+  return true;
+}
