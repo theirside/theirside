@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Browser, FakeMailer, PASSWORD, invite, setUp, tokenFrom } from './auth-helpers.js';
+import { issueSetupLinkToken } from '../src/modules/auth/accounts.js';
 import { THEIRSIDE_ADMIN_TOKEN, startTestApp, type TestApp } from './helpers.js';
 
 describe('first-run setup', () => {
@@ -71,6 +72,36 @@ describe('first-run setup', () => {
     expect(rows[0].password_hash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
     const all = JSON.stringify((await t.db.pool.query('SELECT * FROM users')).rows);
     expect(all).not.toContain(PASSWORD);
+  });
+});
+
+describe('a setup link with a preset API key (the demo stack prints one)', () => {
+  let t: TestApp;
+  beforeAll(async () => {
+    t = await startTestApp();
+  });
+  afterAll(async () => t.close());
+
+  it('is accepted in setup-code mode, once, and none is issued after setup', async () => {
+    const b = new Browser(t);
+    // preset key and admin token: the setup page asks for a code, unless opened from a link
+    expect((await b.req('GET', '/v1/auth/status')).json()).toMatchObject({ setup: 'code' });
+    const token = await issueSetupLinkToken(t.ctx.storage);
+    expect(token).toMatch(/^[A-Za-z0-9]{32}$/);
+    const ok = await b.req('POST', '/v1/auth/setup', {
+      setupCode: token,
+      email: 'demo@example.test',
+      name: 'Demo',
+      password: PASSWORD,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(await issueSetupLinkToken(t.ctx.storage)).toBeNull();
+    const again = await new Browser(t).req('POST', '/v1/auth/setup', {
+      setupCode: token,
+      email: 'late@example.test',
+      password: PASSWORD,
+    });
+    expect(again.statusCode).toBe(409);
   });
 });
 
